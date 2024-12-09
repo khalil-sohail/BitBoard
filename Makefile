@@ -1,8 +1,6 @@
-NAME =  btc
+NAME =  chess-engine
 
 SRCS = src/*.cpp
-
-OBJ = $(SRCS:.cpp=.o)
 
 CC = g++
 
@@ -12,14 +10,14 @@ RM = rm -rf
 
 all : $(NAME)
 
-$(NAME): $(OBJ)
-	$(CC) $(CFLAGS) $(OBJ) -o $(NAME)
+$(NAME): $(SRCS) clean
+	$(CC) $(CFLAGS) $(SRCS) -o $(NAME)
 
 %.o: %.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean :
-		@$(RM) $(OBJ)
+		@$(RM)
 
 fclean : clean
 		@$(RM) $(NAME)
