@@ -1,27 +1,6 @@
 #include "board.hpp"
 
-Board::Board() {
-
-}
-
-// void Board::pawnMove(int row, int col, ChessPiece piece) {
-//     int position = row * 8 + col;
-
-//     if (board[position] == piece) {
-//         auto validMoves = generatePawnMoves(position, piece > 0);
-
-//         if (!validMoves.empty()) {
-//             std::cout << "Valid moves for pawn at (" << row << ", " << col << "):\n";
-//             for (int move : validMoves) {
-//                 std::cout << "(" << move / 8 << ", " << move % 8 << ")\n";
-//             }
-//         } else {
-//             std::cout << "No valid moves for this pawn.\n";
-//         }
-//     } else {
-//         std::cout << "No pawn found at this position.\n";
-//     }
-// }
+// Board::Board() {}
 
 std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
     std::map<int, std::vector<int>> allMoves;
@@ -32,14 +11,20 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         bool pieceisWhite = board[i] > 0;
         if (pieceisWhite != isWhite) continue;
 
-        if (board[i] == WhitePawn || board[i] == BlackPawn) {
-            auto pawnMoves = generatePawnMoves(i, isWhite);
-            if (!pawnMoves.empty()) {
-                allMoves[i] = pawnMoves;
-            }
-        }
-        else if (board[i] == WhiteRook || board[i] == BlackRook) {
-            auto rookMoves = generateRookMoves(i, isWhite);
+        // if (board[i] == WhitePawn || board[i] == BlackPawn) {
+        //     auto pawnMoves = generatePawnMoves(i, isWhite);
+        //     if (!pawnMoves.empty()) {
+        //         allMoves[i] = pawnMoves;
+        //     }
+        // }
+        // else if (board[i] == WhiteRook || board[i] == BlackRook) {
+        //     auto rookMoves = generateRookMoves(i, isWhite);
+        //     if (!rookMoves.empty()) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
+            auto rookMoves = generateBishopMoves(i, isWhite);
             if (!rookMoves.empty()) {
                 allMoves[i] = rookMoves;
             }
@@ -84,8 +69,6 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
 std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
     std::vector<int> validMoves;
     int idx;
-
-
                         // ROWS
                 // left
     for (idx = position - 1; idx > 0 && ((idx + 1) % 8) != 0; --idx) {
@@ -116,7 +99,7 @@ std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
 
                         // columns
                 // up
-    for (idx = position - 8; idx > 0; idx-=8) {
+    for (idx = position - 8; idx > 0; idx -= 8) {
         if (board[idx] == Empty) {
             validMoves.push_back(idx);
         }
@@ -129,7 +112,7 @@ std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
         }
     }
                 // down
-    for (idx = position + 8; idx < 64; idx+=8) {
+    for (idx = position + 8; idx < 64; idx += 8) {
         if (board[idx] == Empty) {
             validMoves.push_back(idx);
         }
@@ -142,6 +125,70 @@ std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
         }
     }
 
+    return validMoves;
+}
+
+    
+std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
+    std::vector<int> validMoves;
+    int idx;
+
+
+                        // UP
+                // left
+    for (idx = position - 9; idx > 0; idx -= 9) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+                // right
+    for (idx = position - 7;  idx > 0 && idx % 8 != 0; idx -= 7) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+
+                        // DOWN
+                // left
+    for (idx = position + 7; idx < 64 && (idx + 1) % 8 != 0; idx += 7) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+                // right
+    for (idx = position + 9;  idx < 64 && idx % 8 != 0; idx += 9) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
     
 
     return validMoves;
