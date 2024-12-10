@@ -23,8 +23,14 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         //         allMoves[i] = rookMoves;
         //     }
         // }
-        else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
-            auto rookMoves = generateBishopMoves(i, isWhite);
+        // else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
+        //     auto rookMoves = generateBishopMoves(i, isWhite);
+        //     if (!rookMoves.empty()) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
+            auto rookMoves = generateQueenMoves(i, isWhite);
             if (!rookMoves.empty()) {
                 allMoves[i] = rookMoves;
             }
@@ -195,7 +201,14 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
 }
 
 
+std::vector<int> Board::generateQueenMoves(int position, bool isWhite) {
+    std::vector<int> v1 = generateBishopMoves(position, isWhite);
+    std::vector<int> v2 = generateRookMoves(position, isWhite);
 
+    v1.insert(v1.end(), v2.begin(), v2.end());
+
+    return v1;
+}
 
 
 
