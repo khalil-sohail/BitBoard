@@ -4,7 +4,7 @@ SRCS = src/*.cpp
 
 CC = g++
 
-CFLAGS = -Wall -Wextra  -I./include -std=c++23
+CFLAGS = -Wall -Wextra -fsanitize=address -g3 -I./include -std=c++23
 
 RM = rm -rf
 

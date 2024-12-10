@@ -8,9 +8,9 @@ int main()
 
     board.printBoard();
     allowed = board.generateAllMoves(true);
-    // std::cout << "size = " << allowed.size() << std::endl;
+    std::cout << "white\n" << std::endl;
     board.printPossibleMoves(allowed);
-    std::cout << "\n||||||\n\n" << std::endl;
+    std::cout << "black\n" << std::endl;
     board.printPossibleMoves(board.generateAllMoves(false));
 
 
