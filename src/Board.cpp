@@ -4,26 +4,24 @@ Board::Board() {
 
 }
 
-void Board::pawnMove(int row, int col, ChessPiece piece) {
-    int position = row * 8 + col;
+// void Board::pawnMove(int row, int col, ChessPiece piece) {
+//     int position = row * 8 + col;
 
-    if (board[position] == piece) {
-        auto validMoves = generatePawnMoves(position, piece > 0);
+//     if (board[position] == piece) {
+//         auto validMoves = generatePawnMoves(position, piece > 0);
 
-        if (!validMoves.empty()) {
-            std::cout << "Valid moves for pawn at (" << row << ", " << col << "):\n";
-            for (int move : validMoves) {
-                std::cout << "(" << move / 8 << ", " << move % 8 << ")\n";
-            }
-        } else {
-            std::cout << "No valid moves for this pawn.\n";
-        }
-    } else {
-        std::cout << "No pawn found at this position.\n";
-    }
-}
-
-
+//         if (!validMoves.empty()) {
+//             std::cout << "Valid moves for pawn at (" << row << ", " << col << "):\n";
+//             for (int move : validMoves) {
+//                 std::cout << "(" << move / 8 << ", " << move % 8 << ")\n";
+//             }
+//         } else {
+//             std::cout << "No valid moves for this pawn.\n";
+//         }
+//     } else {
+//         std::cout << "No pawn found at this position.\n";
+//     }
+// }
 
 std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
     std::map<int, std::vector<int>> allMoves;
@@ -40,29 +38,15 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
                 allMoves[i] = pawnMoves;
             }
         }
+        else if (board[i] == WhiteRook || board[i] == BlackRook) {
+            auto rookMoves = generateRookMoves(i, isWhite);
+            if (!rookMoves.empty()) {
+                allMoves[i] = rookMoves;
+            }
+        }
     }
 
     return allMoves;
-}
-
-void Board::printPossibleMoves(const std::map<int, std::vector<int>>& allMoves) {
-    for (const auto& entry : allMoves) {
-        int position = entry.first;
-        const std::vector<int>& moves = entry.second;
-
-        int row = position / 8;
-        int col = position % 8;
-
-        std::cout << "Piece at (" << row << ", " << col << ") can move to:\n";
-
-        for (int move : moves) {
-            int moveRow = move / 8;
-            int moveCol = move % 8;
-            std::cout << "  (" << moveRow << ", " << moveCol << ")\n";
-        }
-
-        std::cout << "\n";
-    }
 }
 
 std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
@@ -85,7 +69,6 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
 
     if (captureLeft >= 0 && captureLeft < 64 && captureLeft / 8 == startRow + direction) {
         if (isWhite ? board[captureLeft] < 0 : board[captureLeft] > 0) {
-            // std::cout << "HERE\n";
             validMoves.push_back(captureLeft);
         }
     }
@@ -94,6 +77,72 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
             validMoves.push_back(captureRight);
         }
     }
+
+    return validMoves;
+}
+
+std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
+    std::vector<int> validMoves;
+    int idx;
+
+
+                        // ROWS
+                // left
+    for (idx = position - 1; idx > 0 && ((idx + 1) % 8) != 0; --idx) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+                // right
+    for (idx = position + 1; idx % 8 != 0; ++idx) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+
+                        // columns
+                // up
+    for (idx = position - 8; idx > 0; idx-=8) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+                // down
+    for (idx = position + 8; idx < 64; idx+=8) {
+        if (board[idx] == Empty) {
+            validMoves.push_back(idx);
+        }
+        else if (isWhite ? board[idx] < 0 : board[idx] > 0) {
+            validMoves.push_back(idx);
+            break;
+        }
+        else {
+            break;
+        }
+    }
+
+    
 
     return validMoves;
 }
@@ -191,6 +240,26 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
 
 
 
+
+void Board::printPossibleMoves(const std::map<int, std::vector<int>>& allMoves) {
+    for (const auto& entry : allMoves) {
+        int position = entry.first;
+        const std::vector<int>& moves = entry.second;
+
+        int row = position / 8;
+        int col = position % 8;
+
+        std::cout << "Piece at (" << row << ", " << col << ") can move to:\n";
+
+        for (int move : moves) {
+            int moveRow = move / 8;
+            int moveCol = move % 8;
+            std::cout << "  (" << moveRow << ", " << moveCol << ")\n";
+        }
+
+        std::cout << "\n";
+    }
+}
 
 void Board::printBoard() {
     for (int i = 0; i < 64; ++i){
