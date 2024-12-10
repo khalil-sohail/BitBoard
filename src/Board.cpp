@@ -29,8 +29,14 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         //         allMoves[i] = rookMoves;
         //     }
         // }
-        else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
-            auto rookMoves = generateQueenMoves(i, isWhite);
+        // else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
+        //     auto rookMoves = generateQueenMoves(i, isWhite);
+        //     if (!rookMoves.empty()) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        else if (board[i] == WhiteKing || board[i] == BlackKing) {
+            auto rookMoves = generateKingMoves(i, isWhite);
             if (!rookMoves.empty()) {
                 allMoves[i] = rookMoves;
             }
@@ -202,14 +208,39 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
 
 
 std::vector<int> Board::generateQueenMoves(int position, bool isWhite) {
-    std::vector<int> v1 = generateBishopMoves(position, isWhite);
-    std::vector<int> v2 = generateRookMoves(position, isWhite);
+    std::vector<int> validMoves = generateBishopMoves(position, isWhite);
+    std::vector<int> RookValidMoves = generateRookMoves(position, isWhite);
 
-    v1.insert(v1.end(), v2.begin(), v2.end());
+    validMoves.insert(validMoves.end(), RookValidMoves.begin(), RookValidMoves.end());
 
-    return v1;
+    return validMoves;
 }
 
+std::vector<int> Board::generateKingMoves(int position, bool isWhite) {
+    std::vector<int> validMoves;
+
+    int newRow;
+    int newCol;
+    int newPos;
+    int rowOffsets[8] = {-1, -1, -1, 0, 1, 1, 1, 0};
+    int colOffsets[8] = {-1, 0, 1, 1, 1, 0, -1, -1};
+    int row = position / 8;
+    int col = position % 8;
+
+
+    for (int i = 0; i < 8; ++i) {
+        newRow = row + rowOffsets[i];
+        newCol = col + colOffsets[i];
+        if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+            newPos = newRow * 8 + newCol;
+            if (board[newPos] == Empty || (isWhite ? board[newPos] < 0 : board[newPos] > 0)) {
+                validMoves.push_back(newPos);
+            }
+        }
+    }
+
+    return validMoves;
+}
 
 
 

@@ -24,7 +24,7 @@ class Board {
         //     WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       BlackQueen,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
         //     BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
         //     BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook
@@ -34,7 +34,7 @@ class Board {
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       BlackQueen,      Empty,     Empty,       Empty,       Empty,
+            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
             BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook
@@ -48,6 +48,7 @@ class Board {
         std::vector<int> generateRookMoves(int position, bool isWhite);
         std::vector<int> generateBishopMoves(int position, bool isWhite);
         std::vector<int> generateQueenMoves(int position, bool isWhite);
+        std::vector<int> generateKingMoves(int position, bool isWhite);
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
 };
 
