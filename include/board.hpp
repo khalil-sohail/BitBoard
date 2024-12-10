@@ -45,8 +45,9 @@ class Board {
         void printBoard();
         void printPossibleMoves(const std::map<int, std::vector<int>>& allMoves);
         std::vector<int> generatePawnMoves(int position, bool isWhite);
-        std::vector<int> generateRookMoves(int position, bool isWhite);
         std::vector<int> generateBishopMoves(int position, bool isWhite);
+        std::vector<int> generateKnightMoves(int position, bool isWhite);
+        std::vector<int> generateRookMoves(int position, bool isWhite);
         std::vector<int> generateQueenMoves(int position, bool isWhite);
         std::vector<int> generateKingMoves(int position, bool isWhite);
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
