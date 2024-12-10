@@ -33,21 +33,21 @@ class Board {
             WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook,
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       WhiteRook,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       BlackRook,      Empty,     Empty,       Empty,       Empty,
+            Empty,       Empty,       WhiteBishop,       Empty,      Empty,     Empty,       Empty,       Empty,
+            Empty,       Empty,       Empty,       Empty,      BlackBishop,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
             BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook
         };
     public:
-        Board();
+        // Board();
 
         void printBoard();
-        // void pawnMove(int row, int col, ChessPiece piece);
+        void printPossibleMoves(const std::map<int, std::vector<int>>& allMoves);
         std::vector<int> generatePawnMoves(int position, bool isWhite);
         std::vector<int> generateRookMoves(int position, bool isWhite);
+        std::vector<int> generateBishopMoves(int position, bool isWhite);
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
-        void printPossibleMoves(const std::map<int, std::vector<int>>& allMoves);
 };
 
 
