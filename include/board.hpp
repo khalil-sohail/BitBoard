@@ -24,7 +24,7 @@ class Board {
         //     WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       BlackQueen,      Empty,     Empty,       Empty,       Empty,
         //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
         //     BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
         //     BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook
@@ -33,8 +33,8 @@ class Board {
             WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook,
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       WhiteBishop,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      BlackBishop,     Empty,       Empty,       Empty,
+            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+            Empty,       Empty,       Empty,       BlackQueen,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
             BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook
@@ -47,6 +47,7 @@ class Board {
         std::vector<int> generatePawnMoves(int position, bool isWhite);
         std::vector<int> generateRookMoves(int position, bool isWhite);
         std::vector<int> generateBishopMoves(int position, bool isWhite);
+        std::vector<int> generateQueenMoves(int position, bool isWhite);
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
 };
 
