@@ -7,36 +7,40 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
 
     for (int i = 0; i < 64; ++i) {
         if (board[i] == Empty) continue;
-
         bool pieceisWhite = board[i] > 0;
         if (pieceisWhite != isWhite) continue;
-
-        // if (board[i] == WhitePawn || board[i] == BlackPawn) {
-        //     auto pawnMoves = generatePawnMoves(i, isWhite);
-        //     if (!pawnMoves.empty()) {
-        //         allMoves[i] = pawnMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteRook || board[i] == BlackRook) {
-        //     auto rookMoves = generateRookMoves(i, isWhite);
-        //     if (!rookMoves.empty()) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
-        //     auto rookMoves = generateBishopMoves(i, isWhite);
-        //     if (!rookMoves.empty()) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
-        //     auto rookMoves = generateQueenMoves(i, isWhite);
-        //     if (!rookMoves.empty()) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
+        else if (board[i] == WhitePawn || board[i] == BlackPawn) {
+            auto pawnMoves = generatePawnMoves(i, isWhite);
+            if (!pawnMoves.empty()) {
+                allMoves[i] = pawnMoves;
+            }
+        }
+        else if (board[i] == WhiteRook || board[i] == BlackRook) {
+            auto rookMoves = generateRookMoves(i, isWhite);
+            if (!rookMoves.empty()) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
+            auto rookMoves = generateBishopMoves(i, isWhite);
+            if (!rookMoves.empty()) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
+            auto rookMoves = generateQueenMoves(i, isWhite);
+            if (!rookMoves.empty()) {
+                allMoves[i] = rookMoves;
+            }
+        }
         else if (board[i] == WhiteKing || board[i] == BlackKing) {
             auto rookMoves = generateKingMoves(i, isWhite);
+            if (!rookMoves.empty()) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteKnight || board[i] == BlackKnight) {
+            auto rookMoves = generateKnightMoves(i, isWhite);
             if (!rookMoves.empty()) {
                 allMoves[i] = rookMoves;
             }
@@ -60,10 +64,8 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
             validMoves.push_back(doubleForward);
         }
     }
-
     int captureLeft = position + 7 * direction;
     int captureRight = position + 9 * direction;
-
     if (captureLeft >= 0 && captureLeft < 64 && captureLeft / 8 == startRow + direction) {
         if (isWhite ? board[captureLeft] < 0 : board[captureLeft] > 0) {
             validMoves.push_back(captureLeft);
@@ -145,7 +147,6 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
     std::vector<int> validMoves;
     int idx;
 
-
                         // UP
                 // left
     for (idx = position - 9; idx > 0; idx -= 9) {
@@ -173,7 +174,6 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
             break;
         }
     }
-
                         // DOWN
                 // left
     for (idx = position + 7; idx < 64 && (idx + 1) % 8 != 0; idx += 7) {
@@ -201,7 +201,6 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
             break;
         }
     }
-    
 
     return validMoves;
 }
@@ -218,7 +217,6 @@ std::vector<int> Board::generateQueenMoves(int position, bool isWhite) {
 
 std::vector<int> Board::generateKingMoves(int position, bool isWhite) {
     std::vector<int> validMoves;
-
     int newRow;
     int newCol;
     int newPos;
@@ -242,7 +240,29 @@ std::vector<int> Board::generateKingMoves(int position, bool isWhite) {
     return validMoves;
 }
 
+std::vector<int> Board::generateKnightMoves(int position, bool isWhite) {
+    std::vector<int> validMoves;
+    int newRow;
+    int newCol;
+    int newPos;
+    int rowOffsets[4] = {-2, +2, -2, +2};
+    int colOffsets[4] = {-1, -1, +1, +1};
+    int row = position / 8;
+    int col = position % 8;
 
+    for (int i = 0; i < 4; ++i) {
+        newRow = row + rowOffsets[i];
+        newCol = col + colOffsets[i];
+        if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+            newPos = newRow * 8 + newCol;
+            if (board[newPos] == Empty || (isWhite ? board[newPos] < 0 : board[newPos] > 0)) {
+                validMoves.push_back(newPos);
+            }
+        }
+    }
+
+    return validMoves;
+}
 
 
 
