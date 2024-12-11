@@ -310,6 +310,8 @@ int Board::moveTo(int ip, int fp) {
             validMoves = rookMoves;
         }
     }
+    std::cout << board[ip] << std::endl;
+
     auto it = std::find(validMoves.begin(), validMoves.end(), fp);
     if (it != validMoves.end()) {
         board[*it] = board[ip];
@@ -322,19 +324,26 @@ int Board::moveTo(int ip, int fp) {
 }
 
 void Board::move(int from, int to) {
-    board[to] = board[from];
-    board[from] = Empty;
+    tmpBoard[to] = tmpBoard[from];
+    tmpBoard[from] = Empty;
 }
 
 void Board::undoMove(int from, int to) {
-    board[from] = board[to];
-    board[to] = Empty;
+    tmpBoard[from] = tmpBoard[to];
+    tmpBoard[to] = Empty;
 }
 
 int Board::moveTo(bool isWhite) {
-    int eva = minimaxi(2, isWhite);
-    std::cout << "HERE-> " << eva << std::endl;
+    for (int i = 0; i < 64; ++i) {
+        tmpBoard[i] = board[i];
+    }
+    int eva = minimaxi(3, isWhite);
 
+    // for (int i = 0; i < 64; ++i) {
+    //     board[i] = tmpBoard[i];
+    // }
+
+    std::cout << "HERE-> " << eva << ", " << bestFrom << ", " << bestTo << std::endl;
     board[bestTo] = board[bestFrom];
     board[bestFrom] = Empty;
 
@@ -342,13 +351,13 @@ int Board::moveTo(bool isWhite) {
 }
 
 double Board::minimaxi(int depth, bool isWhite) {
-    if (depth == 0) return eval();
+    if (depth == 0) return eval(tmpBoard);
 
+    std::map<int, std::vector<int>> allowed = generateAllMoves(isWhite);
     if (isWhite == true) {
         double maxEval = std::numeric_limits<double>::lowest();
-        std::map<int, std::vector<int>> allowed1 = generateAllMoves(!isWhite);
 
-        for (const auto& it : allowed1) {
+        for (const auto& it : allowed) {
             int from = it.first;
             const std::vector<int>& itV = it.second;
             for (int m : itV) {
@@ -367,9 +376,8 @@ double Board::minimaxi(int depth, bool isWhite) {
     }
     else {
         double minEval = std::numeric_limits<double>::max();
-        std::map<int, std::vector<int>> allowed2 = generateAllMoves(!isWhite);
 
-        for (const auto& it : allowed2) {
+        for (const auto& it : allowed) {
             int from = it.first;
             const std::vector<int>& itV = it.second;
             for (int m : itV) {
@@ -386,7 +394,20 @@ double Board::minimaxi(int depth, bool isWhite) {
         }
         return (minEval);
     }
-    return (0);
+    // return (0);
+}
+
+double Board::eval(std::array<int, 64> sBoard) {
+    double res = 0.0;
+    for (int i = 0; i < 64; ++i) {
+        if (sBoard[i] == -4)
+            res += -3;
+        else if (sBoard[i] == 4)
+            res += 3;
+        else
+            res += sBoard[i];
+    }
+    return (res);
 }
 
 double Board::eval() {

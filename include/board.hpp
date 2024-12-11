@@ -42,7 +42,8 @@ class Board {
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
         };
-        // std::map<int, std::vector<int>> allowed;
+        std::array<int, 64> tmpBoard;
+        std::map<int, std::vector<int>> allowed;
         double evalBar;
         int bestFrom;
         int bestTo;
@@ -60,7 +61,9 @@ class Board {
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
 
         double eval();
+        double eval(std::array<int, 64> sBoard);
         double minimaxi(int depth, bool isWhite);
+        // double minimaxi(int depth, bool isWhite, std::map<int, std::vector<int>> allowed);
 
         void undoMove(int from, int to);
         void move(int from, int to);
