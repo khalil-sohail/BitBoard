@@ -7,16 +7,17 @@
 #include <map>
 #include <algorithm>
 #include <sstream>
+#include <limits>
 #include <string>
 
 enum ChessPiece {
     Empty = 0,
     WhitePawn = 1, BlackPawn = -1,
-    WhiteRook = 2, BlackRook = -2,
     WhiteKnight = 3, BlackKnight = -3,
     WhiteBishop = 4, BlackBishop = -4,
-    WhiteQueen = 5, BlackQueen = -5,
-    WhiteKing = 6, BlackKing = -6
+    WhiteRook = 5, BlackRook = -5,
+    WhiteQueen = 9, BlackQueen = -9,
+    WhiteKing = 10, BlackKing = -10
 };
 
 class Board {
@@ -41,6 +42,10 @@ class Board {
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
         };
+        // std::map<int, std::vector<int>> allowed;
+        double evalBar;
+        int bestFrom;
+        int bestTo;
     public:
         // Board();
 
@@ -54,7 +59,13 @@ class Board {
         std::vector<int> generateKingMoves(int position, bool isWhite);
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
 
+        double eval();
+        double minimaxi(int depth, bool isWhite);
+
+        void undoMove(int from, int to);
+        void move(int from, int to);
         int moveTo(int ip, int fp);
+        int moveTo(bool isWhite);
 };
 
 
