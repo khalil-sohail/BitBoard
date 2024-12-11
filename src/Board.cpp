@@ -11,37 +11,37 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         if (pieceisWhite != isWhite) continue;
         else if (board[i] == WhitePawn || board[i] == BlackPawn) {
             auto pawnMoves = generatePawnMoves(i, isWhite);
-            if (!pawnMoves.empty()) {
+            if (pawnMoves.empty() == 0) {
                 allMoves[i] = pawnMoves;
             }
         }
         else if (board[i] == WhiteRook || board[i] == BlackRook) {
             auto rookMoves = generateRookMoves(i, isWhite);
-            if (!rookMoves.empty()) {
+            if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
         }
         else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
             auto rookMoves = generateBishopMoves(i, isWhite);
-            if (!rookMoves.empty()) {
+            if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
         }
         else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
             auto rookMoves = generateQueenMoves(i, isWhite);
-            if (!rookMoves.empty()) {
+            if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
         }
         else if (board[i] == WhiteKing || board[i] == BlackKing) {
             auto rookMoves = generateKingMoves(i, isWhite);
-            if (!rookMoves.empty()) {
+            if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
         }
         else if (board[i] == WhiteKnight || board[i] == BlackKnight) {
             auto rookMoves = generateKnightMoves(i, isWhite);
-            if (!rookMoves.empty()) {
+            if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
         }
@@ -276,37 +276,37 @@ int Board::moveTo(int ip, int fp) {
     }
     else if (board[ip] == WhitePawn || board[ip] == BlackPawn) {
         auto pawnMoves = generatePawnMoves(ip, isWhite);
-        if (!pawnMoves.empty()) {
+        if (pawnMoves.empty() == 0) {
             validMoves = pawnMoves;
         }
     }
     else if (board[ip] == WhiteRook || board[ip] == BlackRook) {
         auto rookMoves = generateRookMoves(ip, isWhite);
-        if (!rookMoves.empty()) {
+        if (rookMoves.empty() == 0) {
             validMoves = rookMoves;
         }
     }
     else if (board[ip] == WhiteBishop || board[ip] == BlackBishop) {
         auto rookMoves = generateBishopMoves(ip, isWhite);
-        if (!rookMoves.empty()) {
+        if (rookMoves.empty() == 0) {
             validMoves = rookMoves;
         }
     }
     else if (board[ip] == WhiteQueen || board[ip] == BlackQueen) {
         auto rookMoves = generateQueenMoves(ip, isWhite);
-        if (!rookMoves.empty()) {
+        if (rookMoves.empty() == 0) {
             validMoves = rookMoves;
         }
     }
     else if (board[ip] == WhiteKing || board[ip] == BlackKing) {
         auto rookMoves = generateKingMoves(ip, isWhite);
-        if (!rookMoves.empty()) {
+        if (rookMoves.empty() == 0) {
             validMoves = rookMoves;
         }
     }
     else if (board[ip] == WhiteKnight || board[ip] == BlackKnight) {
         auto rookMoves = generateKnightMoves(ip, isWhite);
-        if (!rookMoves.empty()) {
+        if (rookMoves.empty() == 0) {
             validMoves = rookMoves;
         }
     }
@@ -321,9 +321,86 @@ int Board::moveTo(int ip, int fp) {
     return (0);
 }
 
+void Board::move(int from, int to) {
+    board[to] = board[from];
+    board[from] = Empty;
+}
 
+void Board::undoMove(int from, int to) {
+    board[from] = board[to];
+    board[to] = Empty;
+}
 
+int Board::moveTo(bool isWhite) {
+    int eva = minimaxi(2, isWhite);
+    std::cout << "HERE-> " << eva << std::endl;
 
+    board[bestTo] = board[bestFrom];
+    board[bestFrom] = Empty;
+
+    return 0;
+}
+
+double Board::minimaxi(int depth, bool isWhite) {
+    if (depth == 0) return eval();
+
+    if (isWhite == true) {
+        double maxEval = std::numeric_limits<double>::lowest();
+        std::map<int, std::vector<int>> allowed1 = generateAllMoves(!isWhite);
+
+        for (const auto& it : allowed1) {
+            int from = it.first;
+            const std::vector<int>& itV = it.second;
+            for (int m : itV) {
+                double to = m;
+                move(from, to);
+                double currEval = minimaxi(depth -1, false);
+                undoMove(from, to);
+                if (currEval > maxEval) {
+                    maxEval = currEval;
+                    bestFrom = from;
+                    bestTo = to;
+                }
+            }
+        }
+        return (maxEval);
+    }
+    else {
+        double minEval = std::numeric_limits<double>::max();
+        std::map<int, std::vector<int>> allowed2 = generateAllMoves(!isWhite);
+
+        for (const auto& it : allowed2) {
+            int from = it.first;
+            const std::vector<int>& itV = it.second;
+            for (int m : itV) {
+                double to = m;
+                move(from, to);
+                double currEval = minimaxi(depth -1, true);
+                undoMove(from, to);
+                if (currEval < minEval) {
+                    minEval = currEval;
+                    bestFrom = from;
+                    bestTo = to;
+                }
+            }
+        }
+        return (minEval);
+    }
+    return (0);
+}
+
+double Board::eval() {
+    double res = 0.0;
+    for (int i = 0; i < 64; ++i) {
+        if (board[i] == -4)
+            res += -3;
+        else if (board[i] == 4)
+            res += 3;
+        else
+            res += board[i];
+    }
+    return (res);
+}
 
 
 
