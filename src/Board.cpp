@@ -52,7 +52,7 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
 
 std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
     std::vector<int> validMoves;
-    int direction = isWhite ? 1 : -1;
+    int direction = isWhite ? -1 : 1;
     int startRow = position / 8;
 
     int forward = position + 8 * direction;
@@ -60,7 +60,7 @@ std::vector<int> Board::generatePawnMoves(int position, bool isWhite) {
         validMoves.push_back(forward);
 
         int doubleForward = position + 16 * direction;
-        if (((isWhite && startRow == 1) || (!isWhite && startRow == 6)) && board[doubleForward] == Empty) {
+        if (((isWhite && startRow == 6) || (!isWhite && startRow == 1)) && board[doubleForward] == Empty) {
             validMoves.push_back(doubleForward);
         }
     }
@@ -265,7 +265,61 @@ std::vector<int> Board::generateKnightMoves(int position, bool isWhite) {
 }
 
 
+int Board::moveTo(int ip, int fp) {
+    std::vector<int> validMoves;
 
+
+    bool isWhite = board[ip] > 0;
+    if (ip >= 64 || ip < 0 || board[ip] == Empty) {
+        std::cout << "square is empty";
+        return (1);
+    }
+    else if (board[ip] == WhitePawn || board[ip] == BlackPawn) {
+        auto pawnMoves = generatePawnMoves(ip, isWhite);
+        if (!pawnMoves.empty()) {
+            validMoves = pawnMoves;
+        }
+    }
+    else if (board[ip] == WhiteRook || board[ip] == BlackRook) {
+        auto rookMoves = generateRookMoves(ip, isWhite);
+        if (!rookMoves.empty()) {
+            validMoves = rookMoves;
+        }
+    }
+    else if (board[ip] == WhiteBishop || board[ip] == BlackBishop) {
+        auto rookMoves = generateBishopMoves(ip, isWhite);
+        if (!rookMoves.empty()) {
+            validMoves = rookMoves;
+        }
+    }
+    else if (board[ip] == WhiteQueen || board[ip] == BlackQueen) {
+        auto rookMoves = generateQueenMoves(ip, isWhite);
+        if (!rookMoves.empty()) {
+            validMoves = rookMoves;
+        }
+    }
+    else if (board[ip] == WhiteKing || board[ip] == BlackKing) {
+        auto rookMoves = generateKingMoves(ip, isWhite);
+        if (!rookMoves.empty()) {
+            validMoves = rookMoves;
+        }
+    }
+    else if (board[ip] == WhiteKnight || board[ip] == BlackKnight) {
+        auto rookMoves = generateKnightMoves(ip, isWhite);
+        if (!rookMoves.empty()) {
+            validMoves = rookMoves;
+        }
+    }
+    auto it = std::find(validMoves.begin(), validMoves.end(), fp);
+    if (it != validMoves.end()) {
+        board[*it] = board[ip];
+        board[ip] = Empty;
+    }
+    else
+        std::cout << "piece Not found\n";
+
+    return (0);
+}
 
 
 
@@ -373,50 +427,53 @@ void Board::printPossibleMoves(const std::map<int, std::vector<int>>& allMoves) 
 }
 
 void Board::printBoard() {
+    std::cout << " 0  1  2  3  4  5  6  7\n\n";
     for (int i = 0; i < 64; ++i){
         if (i != 0 && i % 8 == 0) {
+            std::cout << "   " << i;
             std::cout << "\n";
         }
-        if (board[i] == Empty) {
+         if (board[i] == Empty) {
             std::cout << " . ";
         }
-        if (board[i] == WhitePawn) {
+         if (board[i] == WhitePawn) {
             std::cout << " ♙ ";
         }
-        if (board[i] == WhiteRook) {
+         if (board[i] == WhiteRook) {
             std::cout << " ♜ ";
         }
-        if (board[i] == WhiteKnight) {
+         if (board[i] == WhiteKnight) {
             std::cout << " ♞ ";
         }
-        if (board[i] == WhiteBishop) {
+         if (board[i] == WhiteBishop) {
             std::cout << " ♝ ";
         }
-        if (board[i] == WhiteQueen) {
+         if (board[i] == WhiteQueen) {
             std::cout << " ♛ ";
         }
-        if (board[i] == WhiteKing) {
+         if (board[i] == WhiteKing) {
             std::cout << " ♚ ";
         }
-        if (board[i] == BlackPawn) {
+         if (board[i] == BlackPawn) {
             std::cout << " ♟️ ";
         }
-        if (board[i] == BlackRook) {
+         if (board[i] == BlackRook) {
             std::cout << " ♖ ";
         }
-        if (board[i] == BlackKnight) {
+         if (board[i] == BlackKnight) {
             std::cout << " ♘ ";
         }
-        if (board[i] == BlackBishop) {
+         if (board[i] == BlackBishop) {
             std::cout << " ♗ ";
         }
-        if (board[i] == BlackQueen) {
+         if (board[i] == BlackQueen) {
             std::cout << " ♕ ";
         }
-        if (board[i] == BlackKing) {
+         if (board[i] == BlackKing) {
             std::cout << " ♔ ";
         }
     }
+    std::cout << "   " << 64;
     std::cout << "\n";
 }
 
