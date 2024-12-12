@@ -9,36 +9,36 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         if (board[i] == Empty) continue;
         bool pieceisWhite = board[i] > 0;
         if (pieceisWhite != isWhite) continue;
-        else if (board[i] == WhitePawn || board[i] == BlackPawn) {
-            auto pawnMoves = generatePawnMoves(i, isWhite);
-            if (pawnMoves.empty() == 0) {
-                allMoves[i] = pawnMoves;
-            }
-        }
-        else if (board[i] == WhiteRook || board[i] == BlackRook) {
-            auto rookMoves = generateRookMoves(i, isWhite);
-            if (rookMoves.empty() == 0) {
-                allMoves[i] = rookMoves;
-            }
-        }
-        else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
-            auto rookMoves = generateBishopMoves(i, isWhite);
-            if (rookMoves.empty() == 0) {
-                allMoves[i] = rookMoves;
-            }
-        }
-        else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
-            auto rookMoves = generateQueenMoves(i, isWhite);
-            if (rookMoves.empty() == 0) {
-                allMoves[i] = rookMoves;
-            }
-        }
-        else if (board[i] == WhiteKing || board[i] == BlackKing) {
-            auto rookMoves = generateKingMoves(i, isWhite);
-            if (rookMoves.empty() == 0) {
-                allMoves[i] = rookMoves;
-            }
-        }
+        // else if (board[i] == WhitePawn || board[i] == BlackPawn) {
+        //     auto pawnMoves = generatePawnMoves(i, isWhite);
+        //     if (pawnMoves.empty() == 0) {
+        //         allMoves[i] = pawnMoves;
+        //     }
+        // }
+        // else if (board[i] == WhiteRook || board[i] == BlackRook) {
+        //     auto rookMoves = generateRookMoves(i, isWhite);
+        //     if (rookMoves.empty() == 0) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        // else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
+        //     auto rookMoves = generateBishopMoves(i, isWhite);
+        //     if (rookMoves.empty() == 0) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        // else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
+        //     auto rookMoves = generateQueenMoves(i, isWhite);
+        //     if (rookMoves.empty() == 0) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
+        // else if (board[i] == WhiteKing || board[i] == BlackKing) {
+        //     auto rookMoves = generateKingMoves(i, isWhite);
+        //     if (rookMoves.empty() == 0) {
+        //         allMoves[i] = rookMoves;
+        //     }
+        // }
         else if (board[i] == WhiteKnight || board[i] == BlackKnight) {
             auto rookMoves = generateKnightMoves(i, isWhite);
             if (rookMoves.empty() == 0) {
@@ -324,24 +324,19 @@ int Board::moveTo(int ip, int fp) {
 }
 
 void Board::move(int from, int to) {
-    tmpBoard[to] = tmpBoard[from];
-    tmpBoard[from] = Empty;
+    board[to] = board[from];
+    board[from] = Empty;
 }
 
 void Board::undoMove(int from, int to) {
-    tmpBoard[from] = tmpBoard[to];
-    tmpBoard[to] = Empty;
+    board[from] = board[to];
+    board[to] = Empty;
 }
 
-int Board::moveTo(bool isWhite) {
-    for (int i = 0; i < 64; ++i) {
-        tmpBoard[i] = board[i];
-    }
-    int eva = minimaxi(3, isWhite);
+int iD = 3;
 
-    // for (int i = 0; i < 64; ++i) {
-    //     board[i] = tmpBoard[i];
-    // }
+int Board::moveTo(bool isWhite) {
+    int eva = minimaxi(iD, isWhite, *this);
 
     std::cout << "HERE-> " << eva << ", " << bestFrom << ", " << bestTo << std::endl;
     board[bestTo] = board[bestFrom];
@@ -350,51 +345,66 @@ int Board::moveTo(bool isWhite) {
     return 0;
 }
 
-double Board::minimaxi(int depth, bool isWhite) {
-    if (depth == 0) return eval(tmpBoard);
+double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
+    if (depth == 0) return currentBoard.eval(); // Use currentBoard for evaluation
 
-    std::map<int, std::vector<int>> allowed = generateAllMoves(isWhite);
-    if (isWhite == true) {
+    std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
+    if (isWhite) {
         double maxEval = std::numeric_limits<double>::lowest();
+        int bestFromLocal = -1, bestToLocal = -1;
 
         for (const auto& it : allowed) {
             int from = it.first;
             const std::vector<int>& itV = it.second;
             for (int m : itV) {
                 double to = m;
-                move(from, to);
-                double currEval = minimaxi(depth -1, false);
-                undoMove(from, to);
+                Board nextBoard = currentBoard;
+                nextBoard.move(from, to);
+                double currEval = minimaxi(depth - 1, false, nextBoard);
+                
                 if (currEval > maxEval) {
                     maxEval = currEval;
-                    bestFrom = from;
-                    bestTo = to;
+                    bestFromLocal = from;
+                    bestToLocal = to;
                 }
             }
         }
-        return (maxEval);
+        
+        // Only update global best move at the root level
+        if (depth == iD) {
+            bestFrom = bestFromLocal;
+            bestTo = bestToLocal;
+        }
+        return maxEval;
     }
     else {
         double minEval = std::numeric_limits<double>::max();
+        int bestFromLocal = -1, bestToLocal = -1;
 
         for (const auto& it : allowed) {
             int from = it.first;
             const std::vector<int>& itV = it.second;
             for (int m : itV) {
                 double to = m;
-                move(from, to);
-                double currEval = minimaxi(depth -1, true);
-                undoMove(from, to);
+                Board nextBoard = currentBoard;
+                nextBoard.move(from, to);
+                double currEval = minimaxi(depth - 1, true, nextBoard);
+                
                 if (currEval < minEval) {
                     minEval = currEval;
-                    bestFrom = from;
-                    bestTo = to;
+                    bestFromLocal = from;
+                    bestToLocal = to;
                 }
             }
         }
-        return (minEval);
+        
+        // Only update global best move at the root level
+        if (depth == iD) {
+            bestFrom = bestFromLocal;
+            bestTo = bestToLocal;
+        }
+        return minEval;
     }
-    // return (0);
 }
 
 double Board::eval(std::array<int, 64> sBoard) {
@@ -407,6 +417,7 @@ double Board::eval(std::array<int, 64> sBoard) {
         else
             res += sBoard[i];
     }
+    std::cout << "HERE-> " << res << "\n";
     return (res);
 }
 
