@@ -39,7 +39,8 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         //         allMoves[i] = rookMoves;
         //     }
         // }
-        else if (board[i] == WhiteKnight || board[i] == BlackKnight) {
+        else if (board[i] == WhiteKnight)// || board[i] == BlackKnight)
+        {
             auto rookMoves = generateKnightMoves(i, isWhite);
             if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
