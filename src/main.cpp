@@ -9,8 +9,8 @@ int main()
     int i;
 
     board.printBoard();
-    std::cout << "white\n" << std::endl;
-    board.printPossibleMoves(board.generateAllMoves(true));
+    // std::cout << "white\n" << std::endl;
+    // board.printPossibleMoves(board.generateAllMoves(true));
     std::cout << "black\n" << std::endl;
     board.printPossibleMoves(board.generateAllMoves(false));
 
