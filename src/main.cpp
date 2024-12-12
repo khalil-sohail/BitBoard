@@ -1,19 +1,8 @@
 #include "board.hpp"
 
 int main() {
-    try {
-        Window window(1600, 1600, "Hello MLX with C++");
-
-        window.mlxXHook();
-        // window.mlxEscKeyHook();
-        window.loop();
-    } catch (const std::exception &e) {
-        std::cerr << e.what() << std::endl;
-        return 1;
-    }
-    return 0;
+    
 }
-
 
 
 
