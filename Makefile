@@ -5,13 +5,15 @@ SRCS = src/*.cpp
 CC = g++
 
 CFLAGS = -Wall -Wextra -I./include -std=c++23 -fsanitize=address -g3
+LFLAGS = -L./minilibx-linux -lmlx -lX11 -lXext -lm -lz
+
 
 RM = rm -rf
 
 all : $(NAME)
 
 $(NAME): $(SRCS) clean
-	$(CC) $(CFLAGS) $(SRCS) -o $(NAME)
+	$(CC) $(CFLAGS) $(SRCS) -o $(NAME) $(LFLAGS)
 
 %.o: %.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
