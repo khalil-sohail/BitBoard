@@ -9,38 +9,37 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         if (board[i] == Empty) continue;
         bool pieceisWhite = board[i] > 0;
         if (pieceisWhite != isWhite) continue;
-        // else if (board[i] == WhitePawn || board[i] == BlackPawn) {
-        //     auto pawnMoves = generatePawnMoves(i, isWhite);
-        //     if (pawnMoves.empty() == 0) {
-        //         allMoves[i] = pawnMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteRook || board[i] == BlackRook) {
-        //     auto rookMoves = generateRookMoves(i, isWhite);
-        //     if (rookMoves.empty() == 0) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
-        //     auto rookMoves = generateBishopMoves(i, isWhite);
-        //     if (rookMoves.empty() == 0) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
-        //     auto rookMoves = generateQueenMoves(i, isWhite);
-        //     if (rookMoves.empty() == 0) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        // else if (board[i] == WhiteKing || board[i] == BlackKing) {
-        //     auto rookMoves = generateKingMoves(i, isWhite);
-        //     if (rookMoves.empty() == 0) {
-        //         allMoves[i] = rookMoves;
-        //     }
-        // }
-        else if (board[i] == WhiteKnight)// || board[i] == BlackKnight)
-        {
+        else if (board[i] == WhitePawn || board[i] == BlackPawn) {
+            auto pawnMoves = generatePawnMoves(i, isWhite);
+            if (pawnMoves.empty() == 0) {
+                allMoves[i] = pawnMoves;
+            }
+        }
+        else if (board[i] == WhiteRook || board[i] == BlackRook) {
+            auto rookMoves = generateRookMoves(i, isWhite);
+            if (rookMoves.empty() == 0) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteBishop || board[i] == BlackBishop) {
+            auto rookMoves = generateBishopMoves(i, isWhite);
+            if (rookMoves.empty() == 0) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
+            auto rookMoves = generateQueenMoves(i, isWhite);
+            if (rookMoves.empty() == 0) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteKing || board[i] == BlackKing) {
+            auto rookMoves = generateKingMoves(i, isWhite);
+            if (rookMoves.empty() == 0) {
+                allMoves[i] = rookMoves;
+            }
+        }
+        else if (board[i] == WhiteKnight || board[i] == BlackKnight) {
             auto rookMoves = generateKnightMoves(i, isWhite);
             if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
@@ -246,12 +245,12 @@ std::vector<int> Board::generateKnightMoves(int position, bool isWhite) {
     int newRow;
     int newCol;
     int newPos;
-    int rowOffsets[4] = {-2, +2, -2, +2};
-    int colOffsets[4] = {-1, -1, +1, +1};
+    int rowOffsets[8] = {-2, +2, -2, +2, -1, -1, +1, +1};
+    int colOffsets[8] = {-1, -1, +1, +1, -2, +2, -2, +2};
     int row = position / 8;
     int col = position % 8;
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 8; ++i) {
         newRow = row + rowOffsets[i];
         newCol = col + colOffsets[i];
         if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
@@ -311,16 +310,16 @@ int Board::moveTo(int ip, int fp) {
             validMoves = rookMoves;
         }
     }
-    std::cout << board[ip] << std::endl;
 
     auto it = std::find(validMoves.begin(), validMoves.end(), fp);
     if (it != validMoves.end()) {
         board[*it] = board[ip];
         board[ip] = Empty;
     }
-    else
+    else {
         std::cout << "piece Not found\n";
-
+        return (1);
+    }
     return (0);
 }
 
@@ -339,7 +338,8 @@ int iD = 3;
 int Board::moveTo(bool isWhite) {
     int eva = minimaxi(iD, isWhite, *this);
 
-    std::cout << "HERE-> " << eva << ", " << bestFrom << ", " << bestTo << std::endl;
+    std::cout << "evalution-> " << eva << "\n";
+
     board[bestTo] = board[bestFrom];
     board[bestFrom] = Empty;
 
@@ -418,7 +418,6 @@ double Board::eval(std::array<int, 64> sBoard) {
         else
             res += sBoard[i];
     }
-    std::cout << "HERE-> " << res << "\n";
     return (res);
 }
 
@@ -435,6 +434,61 @@ double Board::eval() {
     return (res);
 }
 
+double Board::evaluatePosition() {
+    double evaluation = 0.0;
+
+    for (int i = 0; i < 64; i++) {
+        int piece = board[i];
+        
+        switch (piece) {
+            // White Pieces (Positive Values)
+            case WhitePawn:
+                evaluation += (1) + WHITE_PAWN_SQUARES[i] / 10.0;
+                break;
+            case WhiteKnight:
+                evaluation += (3) + WHITE_KNIGHT_SQUARES[i] / 10.0;
+                break;
+            case WhiteBishop:
+                evaluation += (3) + WHITE_BISHOP_SQUARES[i] / 10.0;
+                break;
+            case WhiteRook:
+                evaluation += (5) + WHITE_ROOK_SQUARES[i] / 10.0;
+                break;
+            case WhiteQueen:
+                evaluation += (9) + WHITE_QUEEN_SQUARES[i] / 10.0;
+                break;
+            case WhiteKing:
+                evaluation += (10) + WHITE_KING_MG_SQUARES[i] / 10.0;
+                break;
+
+            // Black Pieces (Negative Values)
+            case BlackPawn:
+                evaluation += (1) + BLACK_PAWN_SQUARES[i] / 10.0;
+                break;
+            case BlackKnight:
+                evaluation += (3) + BLACK_KNIGHT_SQUARES[i] / 10.0;
+                break;
+            case BlackBishop:
+                evaluation += (3) + BLACK_BISHOP_SQUARES[i] / 10.0;
+                break;
+            case BlackRook:
+                evaluation += (5) + BLACK_ROOK_SQUARES[i] / 10.0;
+                break;
+            case BlackQueen:
+                evaluation += (9) + BLACK_QUEEN_SQUARES[i] / 10.0;
+                break;
+            case BlackKing:
+                evaluation += (10) + BLACK_KING_MG_SQUARES[i] / 10.0;
+                break;
+        }
+    }
+
+    // Interpretation:
+    // Positive value: White is winning
+    // Negative value: Black is winning
+    // Closer to zero: More balanced position
+    return evaluation;
+}
 
 
 
