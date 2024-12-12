@@ -32,17 +32,26 @@ class Board {
         //     WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
         //     WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
         // };
+        // std::array<int, 64> board = {
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty
+        // };
         std::array<int, 64> board = {
-            BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook,
-            BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+            BlackRook,   Empty, BlackBishop, Empty, BlackKing, BlackBishop, Empty, BlackRook,
+            Empty,   BlackPawn,   BlackPawn,   BlackPawn,  Empty, BlackPawn,   BlackPawn,   BlackPawn,
+            Empty,       Empty,       BlackKnight,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
-            WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
+            WhiteRook,   Empty, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, Empty, WhiteRook
         };
-        std::array<int, 64> tmpBoard;
         std::map<int, std::vector<int>> allowed;
         double evalBar;
         int bestFrom;
@@ -62,7 +71,7 @@ class Board {
 
         double eval();
         double eval(std::array<int, 64> sBoard);
-        double minimaxi(int depth, bool isWhite);
+        double minimaxi(int depth, bool isWhite, Board& currentBoard);
         // double minimaxi(int depth, bool isWhite, std::map<int, std::vector<int>> allowed);
 
         void undoMove(int from, int to);
