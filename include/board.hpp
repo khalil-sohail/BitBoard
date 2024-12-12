@@ -10,6 +10,7 @@
 #include <limits>
 #include <string>
 #include "pieces.hpp"
+# include "../minilibx-linux/mlx.h"
 
 enum ChessPiece {
     Empty = 0,
