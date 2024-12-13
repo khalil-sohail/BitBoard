@@ -82,7 +82,7 @@ int Board::moveTo(bool isWhite) {
 }
 
 double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
-    if (depth == 0) return currentBoard.evaluatePosition(); // Use currentBoard for evaluation
+    if (depth == 0) return currentBoard.evaluatePosition();
 
     std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
     if (isWhite) {
