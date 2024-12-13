@@ -5,8 +5,7 @@ SRCS = src/*.cpp
 CC = g++
 
 CFLAGS = -Wall -Wextra -I./include -std=c++23 -fsanitize=address -g3
-LFLAGS = -L./minilibx-linux -lmlx -lX11 -lXext -lm -lz
-
+LFLAGS = -lsfml-graphics -lsfml-window -lsfml-system
 
 RM = rm -rf
 
