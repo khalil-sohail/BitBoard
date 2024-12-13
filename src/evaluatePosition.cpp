@@ -35,42 +35,42 @@ double Board::evaluatePosition() {
         switch (piece) {
             // White Pieces (Positive Values)
             case WhitePawn:
-                evaluation += (1) + WHITE_PAWN_SQUARES[i] / 10.0;
+                evaluation += (100) + WHITE_PAWN_SQUARES[i] / 10.0;
                 break;
             case WhiteKnight:
-                evaluation += (3) + WHITE_KNIGHT_SQUARES[i] / 10.0;
+                evaluation += (300) + WHITE_KNIGHT_SQUARES[i] / 10.0;
                 break;
             case WhiteBishop:
-                evaluation += (3) + WHITE_BISHOP_SQUARES[i] / 10.0;
+                evaluation += (300) + WHITE_BISHOP_SQUARES[i] / 10.0;
                 break;
             case WhiteRook:
-                evaluation += (5) + WHITE_ROOK_SQUARES[i] / 10.0;
+                evaluation += (500) + WHITE_ROOK_SQUARES[i] / 10.0;
                 break;
             case WhiteQueen:
-                evaluation += (9) + WHITE_QUEEN_SQUARES[i] / 10.0;
+                evaluation += (900) + WHITE_QUEEN_SQUARES[i] / 10.0;
                 break;
             case WhiteKing:
-                evaluation += (10) + WHITE_KING_MG_SQUARES[i] / 10.0;
+                evaluation += (1000) + WHITE_KING_MG_SQUARES[i] / 10.0;
                 break;
 
             // Black Pieces (Negative Values)
             case BlackPawn:
-                evaluation += (1) + BLACK_PAWN_SQUARES[i] / 10.0;
+                evaluation += (100) + BLACK_PAWN_SQUARES[i] / 10.0;
                 break;
             case BlackKnight:
-                evaluation += (3) + BLACK_KNIGHT_SQUARES[i] / 10.0;
+                evaluation += (300) + BLACK_KNIGHT_SQUARES[i] / 10.0;
                 break;
             case BlackBishop:
-                evaluation += (3) + BLACK_BISHOP_SQUARES[i] / 10.0;
+                evaluation += (300) + BLACK_BISHOP_SQUARES[i] / 10.0;
                 break;
             case BlackRook:
-                evaluation += (5) + BLACK_ROOK_SQUARES[i] / 10.0;
+                evaluation += (500) + BLACK_ROOK_SQUARES[i] / 10.0;
                 break;
             case BlackQueen:
-                evaluation += (9) + BLACK_QUEEN_SQUARES[i] / 10.0;
+                evaluation += (900) + BLACK_QUEEN_SQUARES[i] / 10.0;
                 break;
             case BlackKing:
-                evaluation += (10) + BLACK_KING_MG_SQUARES[i] / 10.0;
+                evaluation += (1000) + BLACK_KING_MG_SQUARES[i] / 10.0;
                 break;
         }
     }
