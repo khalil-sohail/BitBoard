@@ -48,6 +48,10 @@ int Board::moveTo(int ip, int fp) {
 
     auto it = std::find(validMoves.begin(), validMoves.end(), fp);
     if (it != validMoves.end()) {
+        if (*it == 63 || *it == 60)
+            canCastleKingSide = false;
+        if (*it == 56 || *it == 60)
+            canCastleQueenSide = false;
         board[*it] = board[ip];
         board[ip] = Empty;
     }
@@ -66,6 +70,34 @@ void Board::move(int from, int to) {
 void Board::undoMove(int from, int to) {
     board[from] = board[to];
     board[to] = Empty;
+}
+
+int Board::CastlingKingSide() {
+    if (board[61] != Empty || board[62] != Empty)
+        return (1);
+    canCastleQueenSide = false;
+    canCastleKingSide = false;
+        // king move
+    board[62] = board[60];
+    board[60] = Empty;
+        // rook move
+    board[61] = board[63];
+    board[63] = Empty;
+    return (0);
+}
+
+int Board::CastlingQueenSide() {
+    if (board[57] != Empty || board[58] != Empty || board[59] != Empty)
+        return (1);
+    canCastleQueenSide = false;
+    canCastleKingSide = false;
+        // king move
+    board[58] = board[60];
+    board[60] = Empty;
+        // rook move
+    board[59] = board[56];
+    board[56] = Empty;
+    return (0);
 }
 
 int iD = 3;
