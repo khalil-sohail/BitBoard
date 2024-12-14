@@ -49,9 +49,9 @@ int Board::moveTo(int ip, int fp) {
     auto it = std::find(validMoves.begin(), validMoves.end(), fp);
     if (it != validMoves.end()) {
         if (*it == 63 || *it == 60)
-            canCastleKingSide = false;
+            canWhiteCastleKingSide = false;
         if (*it == 56 || *it == 60)
-            canCastleQueenSide = false;
+            canWhiteCastleQueenSide = false;
         board[*it] = board[ip];
         board[ip] = Empty;
     }
@@ -72,11 +72,12 @@ void Board::undoMove(int from, int to) {
     board[to] = Empty;
 }
 
-int Board::CastlingKingSide() {
+int Board::whiteCastlingKingSide(bool isWhite) {
     if (board[61] != Empty || board[62] != Empty)
         return (1);
-    canCastleQueenSide = false;
-    canCastleKingSide = false;
+    (void)isWhite;
+    canWhiteCastleQueenSide = false;
+    canWhiteCastleKingSide = false;
         // king move
     board[62] = board[60];
     board[60] = Empty;
@@ -86,11 +87,12 @@ int Board::CastlingKingSide() {
     return (0);
 }
 
-int Board::CastlingQueenSide() {
+int Board::whiteCastlingQueenSide(bool isWhite) {
     if (board[57] != Empty || board[58] != Empty || board[59] != Empty)
         return (1);
-    canCastleQueenSide = false;
-    canCastleKingSide = false;
+    (void)isWhite;
+    canWhiteCastleQueenSide = false;
+    canWhiteCastleKingSide = false;
         // king move
     board[58] = board[60];
     board[60] = Empty;
@@ -100,17 +102,98 @@ int Board::CastlingQueenSide() {
     return (0);
 }
 
+
+int Board::blackCastlingKingSide(bool isWhite) {
+    if (board[5] != Empty || board[6] != Empty)
+        return (1);
+    (void)isWhite;
+    if (isWhite) {
+        canWhiteCastleQueenSide = false;
+        canWhiteCastleKingSide = false;
+    }
+    else {
+        canBlackCastleQueenSide = false;
+        canWhiteCastleKingSide = false;
+    }
+        // king move
+    board[6] = board[4];
+    board[4] = Empty;
+        // rook move
+    board[5] = board[7];
+    board[7] = Empty;
+    return (0);
+}
+
+int Board::blackCastlingQueenSide(bool isWhite) {
+    if (board[1] != Empty || board[2] != Empty || board[3] != Empty)
+        return (1);
+    (void)isWhite;
+    if (isWhite) {
+        canWhiteCastleQueenSide = false;
+        canWhiteCastleKingSide = false;
+    }
+    else {
+        canBlackCastleQueenSide = false;
+        canBlackCastleKingSide = false;
+    }
+        // king move
+    board[2] = board[4];
+    board[4] = Empty;
+        // rook move
+    board[3] = board[0];
+    board[0] = Empty;
+    return (0);
+}
+
 int iD = 3;
 
 int Board::moveTo(bool isWhite) {
+    double eva1 = -1000;
+    double eva2 = -1000;
+    bool   e1 = true;
+    bool   e2 = true;
     double eva = minimaxi(iD, isWhite, *this);
+    
+    if (board[0] == BlackRook || board[7] == BlackRook) {
+        std::cout << "HERE-> " << board[0]<< ", " << board[7] << "\n";
+        Board nextBoard1 = *this;
+        if (nextBoard1.blackCastlingKingSide(isWhite) == 1 || board[7] != BlackRook) {
+            e1 = false;
+        }
+        else
+            eva1 = nextBoard1.eval();
+        
+        Board nextBoard2 = *this;
+        if (nextBoard2.blackCastlingQueenSide(isWhite) == 1 || board[0] != BlackRook) {
+            e2 = false;
+        }
+        else
+            eva2 = nextBoard2.eval();
 
-    std::cout << "evalution-> " << eva << "\n";
+        std::cout << eva << ", " << eva1 << ", " << eva2 << ", " << std::endl;
 
-    board[bestTo] = board[bestFrom];
-    board[bestFrom] = Empty;
+        if (e1 == true && eva1 < eva) {
+            blackCastlingKingSide(isWhite);
+            eva = eva1;
+        }
+        else if (e2 == true && eva2 < eva) {
+            blackCastlingQueenSide(isWhite);
+            eva = eva2;
+        }
+        else {
+            board[bestTo] = board[bestFrom];
+            board[bestFrom] = Empty;
+        }
+    }
+    else {
+        board[bestTo] = board[bestFrom];
+        board[bestFrom] = Empty;
+    }
+
+    
     botMoves++;
     lastBestTo = bestTo;
+    std::cout << "evalution-> " << eva << "\n";
 
     return 0;
 }
