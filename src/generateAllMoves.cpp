@@ -7,6 +7,12 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         if (board[i] == Empty) continue;
         bool pieceisWhite = board[i] > 0;
         if (pieceisWhite != isWhite) continue;
+        else if (board[i] == WhiteKing || board[i] == BlackKing) {
+            auto rookMoves = generateKingMoves(i, isWhite);
+            if (rookMoves.empty() == 0) {
+                allMoves[i] = rookMoves;
+            }
+        }
         else if (board[i] == WhitePawn || board[i] == BlackPawn) {
             auto pawnMoves = generatePawnMoves(i, isWhite);
             if (pawnMoves.empty() == 0) {
@@ -27,12 +33,6 @@ std::map<int, std::vector<int>> Board::generateAllMoves(bool isWhite) {
         }
         else if (board[i] == WhiteQueen || board[i] == BlackQueen) {
             auto rookMoves = generateQueenMoves(i, isWhite);
-            if (rookMoves.empty() == 0) {
-                allMoves[i] = rookMoves;
-            }
-        }
-        else if (board[i] == WhiteKing || board[i] == BlackKing) {
-            auto rookMoves = generateKingMoves(i, isWhite);
             if (rookMoves.empty() == 0) {
                 allMoves[i] = rookMoves;
             }
