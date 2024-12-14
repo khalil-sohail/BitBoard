@@ -71,7 +71,7 @@ void Board::undoMove(int from, int to) {
 int iD = 3;
 
 int Board::moveTo(bool isWhite) {
-    int eva = minimaxi(iD, isWhite, *this);
+    double eva = minimaxi(iD, isWhite, *this);
 
     std::cout << "evalution-> " << eva << "\n";
 

@@ -18,7 +18,7 @@ double Board::eval() {
     
     if (botMoves < 8)
         res = evaluateOpeningsPosition();
-    else if (botMoves < 8)
+    else if (botMoves < 34)
         res = evaluateMiddlePosition();
     else
         res = evaluateEndPosition();
@@ -87,36 +87,40 @@ double Board::evaluateMiddlePosition() {
             case WhitePawn:
                 evaluation += (1) + WHITE_PAWN_SQUARES[i];
                 break;
-            case WhiteKnight:
-                evaluation += (3) + WHITE_KNIGHT_SQUARES[i];
-                break;
-            case WhiteBishop:
-                evaluation += (3) + WHITE_BISHOP_SQUARES[i];
-                break;
-            case WhiteRook:
-                evaluation += (5) + WHITE_ROOK_SQUARES[i];
-                break;
-            case WhiteQueen:
-                evaluation += (9) + WHITE_QUEEN_SQUARES[i];
-                break;
-            case WhiteKing:
-                evaluation += (10) + WHITE_KING_MG_SQUARES[i];
-                break;
-
             case BlackPawn:
                 evaluation += (-1) + BLACK_PAWN_SQUARES[i];
+                break;
+
+            case WhiteKnight:
+                evaluation += (3) + WHITE_KNIGHT_SQUARES[i];
                 break;
             case BlackKnight:
                 evaluation += (-3) + BLACK_KNIGHT_SQUARES[i];
                 break;
+
+            case WhiteBishop:
+                evaluation += (3) + WHITE_BISHOP_SQUARES[i];
+                break;
             case BlackBishop:
                 evaluation += (-3) + BLACK_BISHOP_SQUARES[i];
+                break;
+
+            case WhiteRook:
+                evaluation += (5) + WHITE_ROOK_SQUARES[i];
                 break;
             case BlackRook:
                 evaluation += (-5) + BLACK_ROOK_SQUARES[i];
                 break;
+
+            case WhiteQueen:
+                evaluation += (9) + WHITE_QUEEN_SQUARES[i];
+                break;
             case BlackQueen:
                 evaluation += (-9) + BLACK_QUEEN_SQUARES[i];
+                break;
+
+            case WhiteKing:
+                evaluation += (10) + WHITE_KING_MG_SQUARES[i];
                 break;
             case BlackKing:
                 evaluation += (-10) + BLACK_KING_MG_SQUARES[i];
