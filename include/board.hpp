@@ -11,7 +11,6 @@
 #include <string>
 #include <SFML/Graphics.hpp>
 #include "pieces.hpp"
-#include "window.hpp"
 
 enum ChessPiece {
     Empty = 0,
@@ -37,12 +36,24 @@ class Board {
             WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
             WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
         };
+        // std::array<int, 64> board = {
+        //     Empty,       Empty,       Empty,       BlackQueen,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       BlackBishop,       WhiteRook,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     WhitePawn,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     BlackBishop,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty
+        // };
         std::map<int, std::vector<int>> allowed;
         double evalBar;
         int bestFrom;
         int bestTo;
+        int lastBestTo;
+        int botMoves;
     public:
-        // Board();
+        Board() { botMoves = 0; lastBestTo = -1;}
 
         void printBoard();
         void printPossibleMoves(const std::map<int, std::vector<int>>& allMoves);
@@ -56,7 +67,9 @@ class Board {
 
         double eval();
         double eval(std::array<int, 64> sBoard);
-        double evaluatePosition();
+        double evaluateOpeningsPosition();
+        double evaluateMiddlePosition();
+        double evaluateEndPosition();
         double minimaxi(int depth, bool isWhite, Board& currentBoard);
         // double minimaxi(int depth, bool isWhite, std::map<int, std::vector<int>> allowed);
 
@@ -66,6 +79,7 @@ class Board {
         int moveTo(bool isWhite);
 };
 
+#include "window.hpp"
 
 
 

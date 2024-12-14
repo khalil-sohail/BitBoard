@@ -77,12 +77,14 @@ int Board::moveTo(bool isWhite) {
 
     board[bestTo] = board[bestFrom];
     board[bestFrom] = Empty;
+    botMoves++;
+    lastBestTo = bestTo;
 
     return 0;
 }
 
 double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
-    if (depth == 0) return currentBoard.evaluatePosition();
+    if (depth == 0) return currentBoard.eval();
 
     std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
     if (isWhite) {
@@ -105,8 +107,7 @@ double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
                 }
             }
         }
-        
-        // Only update global best move at the root level
+
         if (depth == iD) {
             bestFrom = bestFromLocal;
             bestTo = bestToLocal;
@@ -133,8 +134,7 @@ double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
                 }
             }
         }
-        
-        // Only update global best move at the root level
+
         if (depth == iD) {
             bestFrom = bestFromLocal;
             bestTo = bestToLocal;
