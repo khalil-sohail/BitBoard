@@ -3,6 +3,7 @@
 
 int main() {
     ChessDraw renderer;
+    // renderer.printBoard();
     renderer.render();
     return 0;
 }

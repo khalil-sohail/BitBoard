@@ -30,7 +30,7 @@ double Board::evaluateOpeningsPosition() {
 
     for (int i = 0; i < 64; i++) {
         if (lastBestTo == i)
-            evaluation -= 1;
+            evaluation -= 2;
         switch (board[i]) {
             case WhitePawn:
                 evaluation += (1) + WHITE_OPENINGS_PAWN_SQUARES[i];
