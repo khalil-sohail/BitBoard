@@ -121,13 +121,13 @@ void ChessDraw::render() {
                     } 
                     else {
                         int fromSquare = selectedPieceIndex.value();
-                        if (board[fromSquare] == WhiteKing && board[clickedSquare] == WhiteRook) {
+                        if (canWhiteKingCastle && board[fromSquare] == WhiteKing && board[clickedSquare] == WhiteRook) {
                             if (clickedSquare == 63 && canWhiteCastleKingSide) {
-                                if (whiteCastlingKingSide(false) == 0)
+                                if (whiteCastlingKingSide(board) == 0)
                                     isWhiteTurn = false;
                             }
                             else if (clickedSquare == 56 && canWhiteCastleQueenSide) {
-                                if (whiteCastlingQueenSide(false) == 0)
+                                if (whiteCastlingQueenSide(board) == 0)
                                     isWhiteTurn = false;
                             }
                         }
