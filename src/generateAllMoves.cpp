@@ -111,7 +111,7 @@ std::vector<int> Board::generateRookMoves(int position, bool isWhite) {
 
                         // columns
                 // up
-    for (idx = position - 8; idx > 0; idx -= 8) {
+    for (idx = position - 8; idx >= 0; idx -= 8) {
         if (board[idx] == Empty) {
             validMoves.push_back(idx);
         }
@@ -147,7 +147,7 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
 
                         // UP
                 // left
-    for (idx = position - 9; idx > 0; idx -= 9) {
+    for (idx = position - 9; idx >= 0; idx -= 9) {
         if (board[idx] == Empty) {
             validMoves.push_back(idx);
         }
@@ -160,7 +160,7 @@ std::vector<int> Board::generateBishopMoves(int position, bool isWhite) {
         }
     }
                 // right
-    for (idx = position - 7;  idx > 0 && idx % 8 != 0; idx -= 7) {
+    for (idx = position - 7;  idx >= 0 && idx % 8 != 0; idx -= 7) {
         if (board[idx] == Empty) {
             validMoves.push_back(idx);
         }
