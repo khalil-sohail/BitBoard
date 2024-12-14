@@ -26,26 +26,26 @@ enum ChessPiece {
 
 class Board {
     protected:
-        // std::array<int, 64> board = {
-        //     BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook,
-        //     BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
-        //     WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
-        // };
         std::array<int, 64> board = {
-            BlackRook,   Empty,       Empty,       Empty,      BlackKing, Empty,       Empty,       BlackRook,
+            BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook,
+            BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
             Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       WhitePawn,       Empty,
-            WhiteRook,   Empty,       Empty,       Empty,      WhiteKing, Empty,       Empty,       BlackRook
+            WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
+            WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
         };
+        // std::array<int, 64> board = {
+        //     BlackRook,   Empty,       Empty,       Empty,      BlackKing, Empty,       Empty,       BlackRook,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
+        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       WhitePawn,       Empty,
+        //     WhiteRook,   Empty,       Empty,       Empty,      WhiteKing, Empty,       Empty,       WhiteRook
+        // };
         std::map<int, std::vector<int>> allowed;
         double evalBar;
         int bestFrom;
@@ -53,8 +53,10 @@ class Board {
         int lastBestTo;
         int botMoves;
         bool canWhiteCastleKingSide = true;
-        bool canBlackCastleKingSide = true;
         bool canWhiteCastleQueenSide = true;
+        bool canWhiteKingCastle = true;
+        bool canBlackKingCastle = true;
+        bool canBlackCastleKingSide = true;
         bool canBlackCastleQueenSide = true;
     public:
         Board() { botMoves = 0; lastBestTo = -1;}
@@ -70,17 +72,19 @@ class Board {
         std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
 
         double eval();
-        double eval(std::array<int, 64> sBoard);
-        double evaluateOpeningsPosition();
-        double evaluateMiddlePosition();
-        double evaluateEndPosition();
+        double Eval();
+        double eval(std::array<int, 64>& evaBoard);
+        double evaluateOpeningsPosition(std::array<int, 64>& evaBoard);
+        double evaluateMiddlePosition(std::array<int, 64>& evaBoard);
+        double evaluateEndPosition(std::array<int, 64>& evaBoard);
         double minimaxi(int depth, bool isWhite, Board& currentBoard);
         // double minimaxi(int depth, bool isWhite, std::map<int, std::vector<int>> allowed);
 
-        int whiteCastlingKingSide(bool isWhite);
-        int whiteCastlingQueenSide(bool isWhite);
-        int blackCastlingKingSide(bool isWhite);
-        int blackCastlingQueenSide(bool isWhite);
+        int whiteCastlingKingSide(std::array<int, 64>& tmpBoard);
+        int whiteCastlingQueenSide(std::array<int, 64>& tmpBoard);
+        int blackCastlingKingSide(std::array<int, 64>& tmpBoard);
+        int blackCastlingQueenSide(std::array<int, 64>& tmpBoard);
+
         void undoMove(int from, int to);
         void move(int from, int to);
         int moveTo(int ip, int fp);
