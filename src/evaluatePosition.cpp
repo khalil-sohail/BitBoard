@@ -21,25 +21,25 @@ GameStage Board::evaluateGameStage(std::array<int, 64>& evaBoard) {
 double Board::evaluatePiecePosition(ChessPiece piece, int square, GameStage stage) {
     bool isItWhite = (piece > 0) ? true : false;
     if (piece == 1 || piece == -1) {
-        return isItWhite ? WHITE_PAWN_SQUARES[square] : BLACK_PAWN_SQUARES[square];
+        return isItWhite ? WHITE_PAWN_SQUARES[square] / 25.0 : ((BLACK_PAWN_SQUARES[square] * -1) / 25.0);
     }
     if (piece == 3 || piece == -3) {
-        return isItWhite ? WHITE_KNIGHT_SQUARES[square] : BLACK_KNIGHT_SQUARES[square];
+        return isItWhite ? WHITE_KNIGHT_SQUARES[square] / 25.0 : ((BLACK_KNIGHT_SQUARES[square] * -1) / 25.0);
     }
     if (piece == 4 || piece == -4) {
-        return isItWhite ? WHITE_BISHOP_SQUARES[square] : BLACK_BISHOP_SQUARES[square];
+        return isItWhite ? WHITE_BISHOP_SQUARES[square] / 25.0 : ((BLACK_BISHOP_SQUARES[square] * -1) / 25.0);
     }
     if (piece == 5 || piece == -5) {
-        return isItWhite ? WHITE_ROOK_SQUARES[square] : BLACK_ROOK_SQUARES[square];
+        return isItWhite ? WHITE_ROOK_SQUARES[square] / 25.0 : ((BLACK_ROOK_SQUARES[square] * -1) / 25.0);
     }
     if (piece == 9 || piece == -9) {
-        return isItWhite ? WHITE_QUEEN_SQUARES[square] : BLACK_QUEEN_SQUARES[square];
+        return isItWhite ? WHITE_QUEEN_SQUARES[square] / 25.0 : ((BLACK_QUEEN_SQUARES[square] * -1) / 25.0);
     }
     if (piece == 10 || piece == -10) {
         if (stage == MIDDLEGAME)
-            return isItWhite ? WHITE_KING_MG_SQUARES[square] : BLACK_KING_MG_SQUARES[square];
-        else
-            return isItWhite ? WHITE_KING_MG_SQUARES[square] : BLACK_KING_MG_SQUARES[square];
+            return isItWhite ? WHITE_MG_KING_SQUARES[square] / 25.0 : ((BLACK_MG_KING_SQUARES[square] * -1) / 25.0);
+        else if (stage == ENDGAME)
+            return isItWhite ? WHITE_END_KING_SQUARES[square] / 25.0 : ((BLACK_END_KING_SQUARES[square] * -1) / 25.0);
     }
     return (0.0);
 }
