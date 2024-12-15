@@ -130,6 +130,7 @@ int iD = 3;
 int Board::moveTo(bool isWhite) {
     bool kingSide = (isWhite) ? canWhiteCastleKingSide : canBlackCastleKingSide ;
     bool queenSide = (isWhite) ?  canWhiteCastleQueenSide: canBlackCastleQueenSide ;
+    // double eva = minimaxi(iD, isWhite, -1000000, 1000000, *this);
     double eva = minimaxi(iD, isWhite, *this);
     
     if (canBlackKingCastle && (kingSide || queenSide)) {
@@ -170,8 +171,76 @@ int Board::moveTo(bool isWhite) {
     return 0;
 }
 
+double Board::minimaxi(int depth, bool isWhite, double alpha, double beta, Board& currentBoard) {
+    if (depth == 0) return currentBoard.eval(currentBoard.getBoard());
+
+    std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
+    if (isWhite) {
+        double maxEval = std::numeric_limits<double>::lowest();
+        int bestFromLocal = -1, bestToLocal = -1;
+
+        for (const auto& it : allowed) {
+            int from = it.first;
+            const std::vector<int>& itV = it.second;
+            for (int m : itV) {
+                double to = m;
+                Board nextBoard = currentBoard;
+                nextBoard.move(from, to);
+                double currEval = minimaxi(depth - 1, alpha, beta, false, nextBoard);
+                alpha = (alpha > currEval) ? alpha : currEval;
+                if (currEval > maxEval) {
+                    maxEval = currEval;
+                    bestFromLocal = from;
+                    bestToLocal = to;
+                }
+                if (beta <= alpha)
+                    break;
+            }
+            if (beta <= alpha)
+                break;
+        }
+
+        if (depth == iD) {
+            bestFrom = bestFromLocal;
+            bestTo = bestToLocal;
+        }
+        return maxEval;
+    }
+    else {
+        double minEval = std::numeric_limits<double>::max();
+        int bestFromLocal = -1, bestToLocal = -1;
+
+        for (const auto& it : allowed) {
+            int from = it.first;
+            const std::vector<int>& itV = it.second;
+            for (int m : itV) {
+                double to = m;
+                Board nextBoard = currentBoard;
+                nextBoard.move(from, to);
+                double currEval = minimaxi(depth - 1, alpha, beta, true, nextBoard);
+                beta = (beta < currEval) ? beta : currEval;
+                if (currEval < minEval) {
+                    minEval = currEval;
+                    bestFromLocal = from;
+                    bestToLocal = to;
+                }
+                if (beta <= alpha)
+                    break;
+            }
+            if (beta <= alpha)
+                break;
+        }
+
+        if (depth == iD) {
+            bestFrom = bestFromLocal;
+            bestTo = bestToLocal;
+        }
+        return minEval;
+    }
+}
+
 double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
-    if (depth == 0) return currentBoard.Eval();
+    if (depth == 0) return currentBoard.eval(currentBoard.getBoard());
 
     std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
     if (isWhite) {
@@ -186,7 +255,6 @@ double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
                 Board nextBoard = currentBoard;
                 nextBoard.move(from, to);
                 double currEval = minimaxi(depth - 1, false, nextBoard);
-                
                 if (currEval > maxEval) {
                     maxEval = currEval;
                     bestFromLocal = from;
@@ -213,7 +281,6 @@ double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
                 Board nextBoard = currentBoard;
                 nextBoard.move(from, to);
                 double currEval = minimaxi(depth - 1, true, nextBoard);
-                
                 if (currEval < minEval) {
                     minEval = currEval;
                     bestFromLocal = from;
@@ -229,6 +296,5 @@ double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
         return minEval;
     }
 }
-
 
 

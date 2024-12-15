@@ -1,222 +1,69 @@
 #include "board.hpp"
 
-double Board::eval() {
-    double res = 0.0;
-    for (int i = 0; i < 64; ++i) {
-        if (board[i] == -4)
-            res += -3;
-        else if (board[i] == 4)
-            res += 3;
-        else
-            res += board[i];
-    }
-    return (res);
-}
+bool Board::isWhitePiece(int piece) { return (piece > 0); }
+bool Board::isBlackPiece(int piece) { return (piece < 0); }
 
-double Board::eval(std::array<int, 64>& evaBoard) {
-    double res = 0.0;
-    
-    if (botMoves < 8)
-        res = evaluateOpeningsPosition(evaBoard);
-    else if (botMoves < 34)
-        res = evaluateMiddlePosition(evaBoard);
-    else
-        res = evaluateEndPosition(evaBoard);
-    return (res);
-}
-
-double Board::Eval() {
-    double res = 0.0;
-    
-    if (botMoves < 8)
-        res = evaluateOpeningsPosition(board);
-    else if (botMoves < 34)
-        res = evaluateMiddlePosition(board);
-    else
-        res = evaluateEndPosition(board);
-    return (res);
-}
-
-double Board::evaluateOpeningsPosition(std::array<int, 64>& evaBoard) {
-    double evaluation = 0.0;
-
+GameStage Board::evaluateGameStage(std::array<int, 64>& evaBoard) {
+    int whiteMaterial = 0, blackMaterial = 0;
     for (int i = 0; i < 64; i++) {
-        // if (lastBestTo == i)
-        //     evaluation -= 4;
-        switch (evaBoard[i]) {
-            case WhitePawn:
-                evaluation += (1) + WHITE_OPENINGS_PAWN_SQUARES[i];
-                break;
-            case BlackPawn:
-                evaluation += (-1) + BLACK_OPENINGS_PAWN_SQUARES[i];
-                break;
+        if (isWhitePiece(evaBoard[i])) 
+            whiteMaterial += evaBoard[i];
+        else if (isBlackPiece(evaBoard[i])) 
+            blackMaterial += evaBoard[i];
+    }
 
-            case WhiteKnight:
-                evaluation += (3) + WHITE_OPENINGS_KNIGHT_SQUARES[i];
-                break;
-            case BlackKnight:
-                evaluation += (-3) + BLACK_OPENINGS_KNIGHT_SQUARES[i];
-                break;
+    if (whiteMaterial < 15 || blackMaterial > -15) 
+        return ENDGAME;    
+    return whiteMaterial > 30 && blackMaterial > -30 ? MIDDLEGAME : OPENING;
+}
 
-            case WhiteBishop:
-                evaluation += (3) + WHITE_OPENINGS_BISHOP_SQUARES[i];
-                break;
-            case BlackBishop:
-                evaluation += (-3) + BLACK_OPENINGS_BISHOP_SQUARES[i];
-                break;
+// Evaluate piece position using piece-square tables
+double Board::evaluatePiecePosition(ChessPiece piece, int square, GameStage stage) {
+    bool isItWhite = (piece > 0) ? true : false;
+    if (piece == 1 || piece == -1) {
+        return isItWhite ? WHITE_PAWN_SQUARES[square] : BLACK_PAWN_SQUARES[square];
+    }
+    if (piece == 3 || piece == -3) {
+        return isItWhite ? WHITE_KNIGHT_SQUARES[square] : BLACK_KNIGHT_SQUARES[square];
+    }
+    if (piece == 4 || piece == -4) {
+        return isItWhite ? WHITE_BISHOP_SQUARES[square] : BLACK_BISHOP_SQUARES[square];
+    }
+    if (piece == 5 || piece == -5) {
+        return isItWhite ? WHITE_ROOK_SQUARES[square] : BLACK_ROOK_SQUARES[square];
+    }
+    if (piece == 9 || piece == -9) {
+        return isItWhite ? WHITE_QUEEN_SQUARES[square] : BLACK_QUEEN_SQUARES[square];
+    }
+    if (piece == 10 || piece == -10) {
+        if (stage == MIDDLEGAME)
+            return isItWhite ? WHITE_KING_MG_SQUARES[square] : BLACK_KING_MG_SQUARES[square];
+        else
+            return isItWhite ? WHITE_KING_MG_SQUARES[square] : BLACK_KING_MG_SQUARES[square];
+    }
+    return (0.0);
+}
 
-            case WhiteRook:
-                evaluation += (5) + WHITE_OPENINGS_ROOK_SQUARES[i];
-                break;
-            case BlackRook:
-                evaluation += (-5) + BLACK_OPENINGS_ROOK_SQUARES[i];
-                break;
+// Main evaluation function
+double Board::eval(std::array<int, 64>& evaBoard) {
+    double score = 0.0;
+    GameStage stage = evaluateGameStage(evaBoard);
 
-            case WhiteQueen:
-                evaluation += (9) + WHITE_OPENINGS_QUEEN_SQUARES[i];
-                break;
-            case BlackQueen:
-                evaluation += (-9) + BLACK_OPENINGS_QUEEN_SQUARES[i];
-                break;
-
-            case WhiteKing:
-                evaluation += (1000) + WHITE_OPENINGS_KING_SQUARES[i];
-                break;
-            case BlackKing:
-                evaluation += (-1000) + BLACK_OPENINGS_KING_SQUARES[i];
-                break;
+    for (int square = 0; square < 64; square++) {
+        int piece = evaBoard[square];
+        
+        piece = (piece == 4) ? 3 : piece;
+        piece = (piece == -4) ? -3 : piece;
+        if (piece != Empty) {
+            score += piece + evaluatePiecePosition((ChessPiece)piece, square, stage);
         }
     }
-    return evaluation;
+
+    // Additional evaluation factors could be added here:
+    // - King safety
+    // - Pawn structure
+    // - Piece mobility
+    // - Control of key squares
+
+    return score;
 }
-
-
-double Board::evaluateMiddlePosition(std::array<int, 64>& evaBoard) {
-    double res = 0.0;
-    for (int i = 0; i < 64; ++i) {
-        if (evaBoard[i] == -4)
-            res += -3;
-        else if (evaBoard[i] == 4)
-            res += 3;
-        else
-            res += evaBoard[i];
-    }
-    return (res);
-}
-
-double Board::evaluateEndPosition(std::array<int, 64>& evaBoard) {
-    double res = 0.0;
-    for (int i = 0; i < 64; ++i) {
-        if (evaBoard[i] == -4)
-            res += -3;
-        else if (evaBoard[i] == 4)
-            res += 3;
-        else
-            res += evaBoard[i];
-    }
-    return (res);
-}
-
-// double Board::evaluateMiddlePosition(std::array<int, 64>& evaBoard) {
-//     double evaluation = 0.0;
-
-//     for (int i = 0; i < 64; i++) {
-//         switch (evaBoard[i]) {
-//             case WhitePawn:
-//                 evaluation += (1) + (WHITE_PAWN_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackPawn:
-//                 evaluation += (-1) + (BLACK_PAWN_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteKnight:
-//                 evaluation += (3) + (WHITE_KNIGHT_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackKnight:
-//                 evaluation += (-3) + (BLACK_KNIGHT_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteBishop:
-//                 evaluation += (3) + (WHITE_BISHOP_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackBishop:
-//                 evaluation += (-3) + (BLACK_BISHOP_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteRook:
-//                 evaluation += (5) + (WHITE_ROOK_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackRook:
-//                 evaluation += (-5) + (BLACK_ROOK_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteQueen:
-//                 evaluation += (9) + (WHITE_QUEEN_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackQueen:
-//                 evaluation += (-9) + (BLACK_QUEEN_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteKing:
-//                 evaluation += (1000) + (WHITE_KING_MG_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackKing:
-//                 evaluation += (-1000) + (BLACK_KING_MG_SQUARES[i]) * 0.3;
-//                 break;
-//         }
-//     }
-//     return evaluation;
-// }
-
-
-// double Board::evaluateEndPosition(std::array<int, 64>& evaBoard) {
-//     double evaluation = 0.0;
-
-//     for (int i = 0; i < 64; i++) {
-//         switch (evaBoard[i]) {
-//             case WhitePawn:
-//                 evaluation += (1) + (WHITE_PAWN_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackPawn:
-//                 evaluation += (-1) + (BLACK_PAWN_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteKnight:
-//                 evaluation += (3) + (WHITE_KNIGHT_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackKnight:
-//                 evaluation += (-3) + (BLACK_KNIGHT_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteBishop:
-//                 evaluation += (3) + (WHITE_BISHOP_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackBishop:
-//                 evaluation += (-3) + (BLACK_BISHOP_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteRook:
-//                 evaluation += (5) + (WHITE_ROOK_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackRook:
-//                 evaluation += (-5) + (BLACK_ROOK_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteQueen:
-//                 evaluation += (9) + (WHITE_QUEEN_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackQueen:
-//                 evaluation += (-9) + (BLACK_QUEEN_SQUARES[i]) * 0.3;
-//                 break;
-
-//             case WhiteKing:
-//                 evaluation += (1000) + (WHITE_KING_MG_SQUARES[i]) * 0.3;
-//                 break;
-//             case BlackKing:
-//                 evaluation += (-1000) + (BLACK_KING_MG_SQUARES[i]) * 0.3;
-//                 break;
-//         }
-//     }
-//     return evaluation;
-// }
-
