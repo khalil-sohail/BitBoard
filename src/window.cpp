@@ -53,12 +53,12 @@ void ChessDraw::drawBoard() {
                 int textureIndex = -1;
                 
                 switch(absValue) {
-                    case 1: textureIndex = 0; break;  // Pawn
-                    case 3: textureIndex = 1; break;  // Knight
-                    case 4: textureIndex = 2; break;  // Bishop
-                    case 5: textureIndex = 3; break;  // Rook
-                    case 9: textureIndex = 4; break;  // Queen
-                    case 10: textureIndex = 5; break; // King
+                    case 1: textureIndex = 0; break;
+                    case 3: textureIndex = 1; break;
+                    case 4: textureIndex = 2; break;
+                    case 5: textureIndex = 3; break;
+                    case 9: textureIndex = 4; break;
+                    case 100000: textureIndex = 5; break;
                 }
                 
                 if (textureIndex != -1) {
@@ -85,21 +85,11 @@ void ChessDraw::drawBoard() {
         highlightSquare.setPosition(col * SQUARE_SIZE, row * SQUARE_SIZE);
         window.draw(highlightSquare);
     }
-
-    // Display current turn
-    // sf::Font font;
-    // if (font.loadFromFile("TPNG/Arial.ttf")) {
-    //     sf::Text turnText;
-    //     turnText.setFont(font);
-    //     turnText.setString(isWhiteTurn ? "White's Turn" : "Black's Turn");
-    //     turnText.setCharacterSize(24);
-    //     turnText.setFillColor(sf::Color::Black);
-    //     turnText.setPosition(10, 10);
-    //     window.draw(turnText);
-    // }
 }
 
 ChessDraw::ChessDraw() : window(sf::VideoMode(800, 800), "Chess Board") {
+    botMoves = 0;
+    lastBestTo = -1;
     loadTextures();
     window.setFramerateLimit(60);
 }
