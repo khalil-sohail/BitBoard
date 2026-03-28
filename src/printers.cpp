@@ -1,73 +1,67 @@
 #include "board.hpp"
 
-void Board::printPossibleMoves(const std::map<int, std::vector<int>>& allMoves) {
-    for (const auto& entry : allMoves) {
-        int position = entry.first;
-        const std::vector<int>& moves = entry.second;
+#include <iostream>
 
-        int row = position / 8;
-        int col = position % 8;
-
-        std::cout << "Piece at (" << row << ", " << col << ") can move to:\n";
-
-        for (int move : moves) {
-            int moveRow = move / 8;
-            int moveCol = move % 8;
-            std::cout << "  (" << moveRow << ", " << moveCol << ")\n";
-        }
-
-        std::cout << "\n";
+char Board::pieceToChar(Color color, PieceType piece) const {
+    char c = '.';
+    switch (piece) {
+        case PieceType::Pawn: c = 'p'; break;
+        case PieceType::Knight: c = 'n'; break;
+        case PieceType::Bishop: c = 'b'; break;
+        case PieceType::Rook: c = 'r'; break;
+        case PieceType::Queen: c = 'q'; break;
+        case PieceType::King: c = 'k'; break;
+        case PieceType::Count: break;
     }
+    if (color == Color::White && c >= 'a' && c <= 'z') {
+        c = static_cast<char>(c - ('a' - 'A'));
+    }
+    return c;
 }
 
-void Board::printBoard() {
-    std::cout << " 0  1  2  3  4  5  6  7\n\n";
-    for (int i = 0; i < 64; ++i){
-        if (i != 0 && i % 8 == 0) {
-            std::cout << "   " << i;
-            std::cout << "\n";
-        }
-         if (board[i] == Empty) {
-            std::cout << " . ";
-        }
-         if (board[i] == WhitePawn) {
-            std::cout << " ♙ ";
-        }
-         if (board[i] == WhiteRook) {
-            std::cout << " ♜ ";
-        }
-         if (board[i] == WhiteKnight) {
-            std::cout << " ♞ ";
-        }
-         if (board[i] == WhiteBishop) {
-            std::cout << " ♝ ";
-        }
-         if (board[i] == WhiteQueen) {
-            std::cout << " ♛ ";
-        }
-         if (board[i] == WhiteKing) {
-            std::cout << " ♚ ";
-        }
-         if (board[i] == BlackPawn) {
-            std::cout << " ♟️ ";
-        }
-         if (board[i] == BlackRook) {
-            std::cout << " ♖ ";
-        }
-         if (board[i] == BlackKnight) {
-            std::cout << " ♘ ";
-        }
-         if (board[i] == BlackBishop) {
-            std::cout << " ♗ ";
-        }
-         if (board[i] == BlackQueen) {
-            std::cout << " ♕ ";
-        }
-         if (board[i] == BlackKing) {
-            std::cout << " ♔ ";
-        }
+void Board::printBoard(Color perspective) const {
+    const bool whitePerspective = (perspective == Color::White);
+
+    std::cout << "\n    ";
+    for (int fileDisplay = 0; fileDisplay < 8; ++fileDisplay) {
+        const int file = whitePerspective ? fileDisplay : (7 - fileDisplay);
+        std::cout << static_cast<char>('a' + file) << ' ';
     }
-    std::cout << "   " << 64;
     std::cout << "\n";
+    std::cout << "  +-----------------+\n";
+    for (int rankDisplay = 0; rankDisplay < 8; ++rankDisplay) {
+        const int rank = whitePerspective ? (7 - rankDisplay) : rankDisplay;
+        std::cout << rank + 1 << " | ";
+        for (int fileDisplay = 0; fileDisplay < 8; ++fileDisplay) {
+            const int file = whitePerspective ? fileDisplay : (7 - fileDisplay);
+            const int sq = rank * 8 + file;
+            const auto p = pieceAt(sq);
+            if (p.has_value()) {
+                std::cout << pieceToChar(p->first, p->second) << ' ';
+            } else {
+                std::cout << ". ";
+            }
+        }
+        std::cout << "| " << rank + 1 << "\n";
+    }
+    std::cout << "  +-----------------+\n";
+    std::cout << "    ";
+    for (int fileDisplay = 0; fileDisplay < 8; ++fileDisplay) {
+        const int file = whitePerspective ? fileDisplay : (7 - fileDisplay);
+        std::cout << static_cast<char>('a' + file) << ' ';
+    }
+    std::cout << "\n\n";
+}
+
+void Board::printMoves(const std::vector<Move>& moves) const {
+    for (const Move& m : moves) {
+        std::cout << squareToString(m.from) << squareToString(m.to);
+        if (m.promotion.has_value()) {
+            std::cout << pieceToChar(Color::White, *m.promotion);
+        }
+        if (m.isKingSideCastle) std::cout << " (O-O)";
+        if (m.isQueenSideCastle) std::cout << " (O-O-O)";
+        std::cout << '\n';
+    }
 }
 

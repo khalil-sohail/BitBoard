@@ -2,110 +2,96 @@
 #define BOARD_HPP
 
 #include <array>
-#include <vector>
-#include <iostream>
-#include <map>
-#include <algorithm>
-#include <sstream>
-#include <limits>
+#include <cstdint>
+#include <optional>
 #include <string>
-#include <SFML/Graphics.hpp>
-#include "pieces.hpp"
+#include <utility>
+#include <vector>
 
-enum ChessPiece {
-    Empty = 0,
-    WhitePawn = 1,   BlackPawn = -1,
-    WhiteKnight = 3, BlackKnight = -3,
-    WhiteBishop = 4, BlackBishop = -4,
-    WhiteRook = 5,   BlackRook = -5,
-    WhiteQueen = 9,  BlackQueen = -9,
-    WhiteKing = 100000,  BlackKing = -100000
+enum class Color : int {
+    White = 0,
+    Black = 1
 };
 
-enum GameStage {
-    OPENING,
-    MIDDLEGAME,
-    ENDGAME
+enum class PieceType : int {
+    Pawn = 0,
+    Knight = 1,
+    Bishop = 2,
+    Rook = 3,
+    Queen = 4,
+    King = 5,
+    Count = 6
+};
+
+struct Move {
+    int from = -1;
+    int to = -1;
+    PieceType piece = PieceType::Pawn;
+    std::optional<PieceType> promotion;
+    bool isCapture = false;
+    bool isDoublePush = false;
+    bool isKingSideCastle = false;
+    bool isQueenSideCastle = false;
+    bool isEnPassant = false;
+};
+
+struct ParseResult {
+    std::optional<Move> move;
+    std::string error;
 };
 
 class Board {
-    private:
-        static constexpr double MATERIAL_WEIGHT = 1.0;
-        static constexpr double POSITION_WEIGHT = 0.5;
-        static constexpr double MOBILITY_WEIGHT = 0.2;
-    protected:
-        std::array<int, 64> board = {
-            BlackRook,   BlackKnight, BlackBishop, BlackQueen, BlackKing, BlackBishop, BlackKnight, BlackRook,
-            BlackPawn,   BlackPawn,   BlackPawn,   BlackPawn,  BlackPawn, BlackPawn,   BlackPawn,   BlackPawn,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-            WhitePawn,   WhitePawn,   WhitePawn,   WhitePawn,  WhitePawn, WhitePawn,   WhitePawn,   WhitePawn,
-            WhiteRook,   WhiteKnight, WhiteBishop, WhiteQueen, WhiteKing, WhiteBishop, WhiteKnight, WhiteRook
-        };
-        // std::array<int, 64> board = {
-        //     BlackRook,   Empty,       Empty,       Empty,      BlackKing, Empty,       Empty,       BlackRook,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       Empty,       Empty,
-        //     Empty,       Empty,       Empty,       Empty,      Empty,     Empty,       WhitePawn,       Empty,
-        //     WhiteRook,   Empty,       Empty,       Empty,      WhiteKing, Empty,       Empty,       WhiteRook
-        // };
-        std::map<int, std::vector<int>> allowed;
-        double evalBar;
-        int bestFrom;
-        int bestTo;
-        int lastBestTo;
-        int botMoves;
-        bool canWhiteCastleKingSide = true;
-        bool canWhiteCastleQueenSide = true;
-        bool canWhiteKingCastle = true;
-        bool canBlackKingCastle = true;
-        bool canBlackCastleKingSide = true;
-        bool canBlackCastleQueenSide = true;
-    public:
-        // Board() { }
+private:
+    std::array<std::array<uint64_t, static_cast<size_t>(PieceType::Count)>, 2> m_bitboards{};
+    Color m_sideToMove = Color::White;
+    uint8_t m_castlingRights = 0b1111; // WK WQ BK BQ
+    int m_enPassantSquare = -1;
+    int m_halfmoveClock = 0;
+    int m_fullmoveNumber = 1;
+    std::vector<std::string> m_sanHistory;
 
-        void printBoard();
-        void printPossibleMoves(const std::map<int, std::vector<int>>& allMoves);
-        std::vector<int> generatePawnMoves(int position, bool isWhite);
-        std::vector<int> generateBishopMoves(int position, bool isWhite);
-        std::vector<int> generateKnightMoves(int position, bool isWhite);
-        std::vector<int> generateRookMoves(int position, bool isWhite);
-        std::vector<int> generateQueenMoves(int position, bool isWhite);
-        std::vector<int> generateKingMoves(int position, bool isWhite);
-        std::map<int, std::vector<int>> generateAllMoves(bool isWhite);
+public:
+    static constexpr uint64_t FILE_A = 0x0101010101010101ULL;
+    static constexpr uint64_t FILE_H = 0x8080808080808080ULL;
+    static constexpr uint64_t RANK_1 = 0x00000000000000FFULL;
+    static constexpr uint64_t RANK_2 = 0x000000000000FF00ULL;
+    static constexpr uint64_t RANK_4 = 0x00000000FF000000ULL;
+    static constexpr uint64_t RANK_5 = 0x000000FF00000000ULL;
+    static constexpr uint64_t RANK_7 = 0x00FF000000000000ULL;
+    static constexpr uint64_t RANK_8 = 0xFF00000000000000ULL;
 
-        double eval(std::array<int, 64>& evaBoard);
-        GameStage evaluateGameStage(std::array<int, 64>& evaBoard);
-        double evaluatePiecePosition(ChessPiece piece, int square, GameStage stage);
-        bool isWhitePiece(int piece);
-        bool isBlackPiece(int piece);
+    Board();
+    void reset();
 
-        double minimaxi(int depth, bool isWhite, double alpha, double beta, Board& currentBoard);
-        double minimaxi(int depth, bool isWhite, Board& currentBoard);
+    [[nodiscard]] uint64_t occupancy(Color color) const;
+    [[nodiscard]] uint64_t occupancyAll() const;
+    [[nodiscard]] bool isSquareOccupied(int square) const;
+    [[nodiscard]] bool hasPiece(Color color, PieceType piece, int square) const;
+    [[nodiscard]] std::optional<std::pair<Color, PieceType>> pieceAt(int square) const;
 
-        int whiteCastlingKingSide(std::array<int, 64>& tmpBoard);
-        int whiteCastlingQueenSide(std::array<int, 64>& tmpBoard);
-        int blackCastlingKingSide(std::array<int, 64>& tmpBoard);
-        int blackCastlingQueenSide(std::array<int, 64>& tmpBoard);
+    [[nodiscard]] std::vector<Move> generatePseudoLegalMoves() const;
+    [[nodiscard]] std::vector<Move> generateLegalMoves() const;
+    [[nodiscard]] uint64_t perft(int depth) const;
+    [[nodiscard]] int evaluate() const;
+    [[nodiscard]] bool isSquareAttacked(int square, Color byColor) const;
+    [[nodiscard]] bool inCheck(Color color) const;
 
-        void undoMove(int from, int to);
-        void move(int from, int to);
-        int moveTo(int ip, int fp);
-        int moveTo(bool isWhite);
+    bool applyMove(const Move& move);
+    void makeMove(const Move& move);
 
-        std::array<int, 64>& getBoard() {
-            return (board);
-        }
+    [[nodiscard]] ParseResult parseMove(const std::string& input) const;
+    [[nodiscard]] static int squareFromString(const std::string& coord);
+    [[nodiscard]] static std::string squareToString(int square);
+
+    [[nodiscard]] Color sideToMove() const;
+    [[nodiscard]] char pieceToChar(Color color, PieceType piece) const;
+
+    void recordSanMove(const std::string& sanMove) { m_sanHistory.push_back(sanMove); }
+    void clearSanHistory() { m_sanHistory.clear(); }
+    [[nodiscard]] const std::vector<std::string>& sanHistory() const { return m_sanHistory; }
+
+    void printBoard(Color perspective = Color::White) const;
+    void printMoves(const std::vector<Move>& moves) const;
 };
-
-#include "window.hpp"
-
-
-
 
 #endif

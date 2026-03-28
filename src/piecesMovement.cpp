@@ -1,300 +1,446 @@
 #include "board.hpp"
 
-int Board::moveTo(int ip, int fp) {
-    std::vector<int> validMoves;
+#include <algorithm>
+#include <cctype>
+#include <sstream>
 
+namespace {
 
-    bool isWhite = board[ip] > 0;
-    if (ip >= 64 || ip < 0 || board[ip] == Empty) {
-        std::cout << "square is empty";
-        return (1);
-    }
-    else if (board[ip] == WhitePawn || board[ip] == BlackPawn) {
-        auto pawnMoves = generatePawnMoves(ip, isWhite);
-        if (pawnMoves.empty() == 0) {
-            validMoves = pawnMoves;
-        }
-    }
-    else if (board[ip] == WhiteRook || board[ip] == BlackRook) {
-        auto rookMoves = generateRookMoves(ip, isWhite);
-        if (rookMoves.empty() == 0) {
-            validMoves = rookMoves;
-        }
-    }
-    else if (board[ip] == WhiteBishop || board[ip] == BlackBishop) {
-        auto rookMoves = generateBishopMoves(ip, isWhite);
-        if (rookMoves.empty() == 0) {
-            validMoves = rookMoves;
-        }
-    }
-    else if (board[ip] == WhiteQueen || board[ip] == BlackQueen) {
-        auto rookMoves = generateQueenMoves(ip, isWhite);
-        if (rookMoves.empty() == 0) {
-            validMoves = rookMoves;
-        }
-    }
-    else if (board[ip] == WhiteKing || board[ip] == BlackKing) {
-        auto rookMoves = generateKingMoves(ip, isWhite);
-        if (rookMoves.empty() == 0) {
-            validMoves = rookMoves;
-        }
-    }
-    else if (board[ip] == WhiteKnight || board[ip] == BlackKnight) {
-        auto rookMoves = generateKnightMoves(ip, isWhite);
-        if (rookMoves.empty() == 0) {
-            validMoves = rookMoves;
-        }
-    }
+constexpr int WHITE_IDX = static_cast<int>(Color::White);
+constexpr int BLACK_IDX = static_cast<int>(Color::Black);
+constexpr int PAWN_IDX = static_cast<int>(PieceType::Pawn);
+constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
 
-    auto it = std::find(validMoves.begin(), validMoves.end(), fp);
-    if (it != validMoves.end()) {
-        if (*it == 4)
-            canBlackKingCastle = false;
-        else if (*it == 60)
-            canWhiteKingCastle = false;
-        else if (*it == 7)
-            canBlackCastleKingSide = false;
-        else if (*it == 63)
-            canWhiteCastleKingSide = false;
-        else if (*it == 0)
-            canBlackCastleQueenSide = false;
-        else if (*it == 56)
-            canWhiteCastleQueenSide = false;
-        board[*it] = board[ip];
-        board[ip] = Empty;
-    }
-    else {
-        std::cout << "piece Not found\n";
-        return (1);
-    }
-    return (0);
+constexpr uint8_t CASTLE_WK = 0b1000;
+constexpr uint8_t CASTLE_WQ = 0b0100;
+constexpr uint8_t CASTLE_BK = 0b0010;
+constexpr uint8_t CASTLE_BQ = 0b0001;
+
+uint64_t squareMask(int square) {
+    return 1ULL << square;
 }
 
-void Board::move(int from, int to) {
-    board[to] = board[from];
-    board[from] = Empty;
+PieceType pieceFromLetter(char c) {
+    switch (c) {
+        case 'N': return PieceType::Knight;
+        case 'B': return PieceType::Bishop;
+        case 'R': return PieceType::Rook;
+        case 'Q': return PieceType::Queen;
+        case 'K': return PieceType::King;
+        default: return PieceType::Pawn;
+    }
 }
 
-void Board::undoMove(int from, int to) {
-    board[from] = board[to];
-    board[to] = Empty;
+std::string trim(const std::string& s) {
+    const size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    const size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
 }
 
-int Board::whiteCastlingKingSide(std::array<int, 64>& tmpBoard) {
-    if (tmpBoard[61] != Empty || tmpBoard[62] != Empty)
-        return (1);
-    canBlackKingCastle = false;
-    tmpBoard[62] = tmpBoard[60];
-    tmpBoard[60] = Empty;
-    tmpBoard[61] = tmpBoard[63];
-    tmpBoard[63] = Empty;
-    return (0);
+bool isPieceLetter(char c) {
+    return c == 'K' || c == 'Q' || c == 'R' || c == 'B' || c == 'N';
 }
 
-int Board::whiteCastlingQueenSide(std::array<int, 64>& tmpBoard) {
-    if (tmpBoard[57] != Empty || tmpBoard[58] != Empty || tmpBoard[59] != Empty)
-        return (1);
-    canBlackKingCastle = false;
-    tmpBoard[58] = tmpBoard[60];
-    tmpBoard[60] = Empty;
-    tmpBoard[59] = tmpBoard[56];
-    tmpBoard[56] = Empty;
-    return (0);
+std::string describeMove(const Move& m) {
+    return Board::squareToString(m.from) + Board::squareToString(m.to);
 }
 
-
-int Board::blackCastlingKingSide(std::array<int, 64>& tmpBoard) {
-    if (tmpBoard[5] != Empty || tmpBoard[6] != Empty)
-        return (1);
-    canBlackKingCastle = false;
-    tmpBoard[6] = tmpBoard[4];
-    tmpBoard[4] = Empty;
-    tmpBoard[5] = tmpBoard[7];
-    tmpBoard[7] = Empty;
-    return (0);
+std::string joinMoves(const std::vector<Move>& moves) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < moves.size(); ++i) {
+        if (i > 0) oss << ", ";
+        oss << describeMove(moves[i]);
+    }
+    return oss.str();
 }
 
-int Board::blackCastlingQueenSide(std::array<int, 64>& tmpBoard) {
-    if (tmpBoard[1] != Empty || tmpBoard[2] != Empty || tmpBoard[3] != Empty)
-        return (1);
-    canBlackKingCastle = false;
-    tmpBoard[2] = tmpBoard[4];
-    tmpBoard[4] = Empty;
-    tmpBoard[3] = tmpBoard[0];
-    tmpBoard[0] = Empty;
-    return (0);
+bool fileMatches(int square, char file) {
+    return (square % 8) == (file - 'a');
 }
 
-int iD = 3;
+bool rankMatches(int square, char rank) {
+    return (square / 8) == (rank - '1');
+}
 
-int Board::moveTo(bool isWhite) {
-    bool kingSide = (isWhite) ? canWhiteCastleKingSide : canBlackCastleKingSide ;
-    bool queenSide = (isWhite) ?  canWhiteCastleQueenSide: canBlackCastleQueenSide ;
-    // double eva = minimaxi(iD, isWhite, -1000000, 1000000, *this);
-    double eva = minimaxi(iD, isWhite, *this);
-    
-    if (canBlackKingCastle && (kingSide || queenSide)) {
-        std::array<int, 64> b1 = board;
-        std::array<int, 64> b2 = board;
-        int t1, t2;
-        if (kingSide) {
-            (isWhite) ? t1 = whiteCastlingKingSide(b1) : t1 = blackCastlingKingSide(b1);
-        }
-        if (queenSide) {
-            (isWhite) ? t2 = whiteCastlingQueenSide(b2) : t2 = blackCastlingQueenSide(b2);
-        }
-        double tmpEva1 = eval(b1);
-        double tmpEva2 = eval(b2);
-        if (t1 == 0 && tmpEva1 < eva) {
-            board = b1;
-            eva = tmpEva1;
-        }
-        else if (t2 == 0 && tmpEva2 < eva) {
-            board = b2;
-            eva = tmpEva2;
-        }
-        else {
-            board[bestTo] = board[bestFrom];
-            board[bestFrom] = Empty;
+bool isMateAfterMove(const Board& board, const Move& mv) {
+    Board copy = board;
+    copy.makeMove(mv);
+    const Color side = copy.sideToMove();
+    return copy.inCheck(side) && copy.generateLegalMoves().empty();
+}
+
+bool isCheckAfterMove(const Board& board, const Move& mv) {
+    Board copy = board;
+    copy.makeMove(mv);
+    return copy.inCheck(copy.sideToMove());
+}
+
+} // namespace
+
+Color Board::sideToMove() const {
+    return m_sideToMove;
+}
+
+std::string Board::squareToString(int square) {
+    if (square < 0 || square >= 64) {
+        return "??";
+    }
+    const char file = static_cast<char>('a' + (square % 8));
+    const char rank = static_cast<char>('1' + (square / 8));
+    return std::string{file, rank};
+}
+
+int Board::squareFromString(const std::string& coord) {
+    if (coord.size() != 2) {
+        return -1;
+    }
+    const char file = static_cast<char>(std::tolower(static_cast<unsigned char>(coord[0])));
+    const char rank = coord[1];
+    if (file < 'a' || file > 'h' || rank < '1' || rank > '8') {
+        return -1;
+    }
+    return (rank - '1') * 8 + (file - 'a');
+}
+
+void Board::makeMove(const Move& move) {
+    const int us = static_cast<int>(m_sideToMove);
+    const int them = (us == WHITE_IDX) ? BLACK_IDX : WHITE_IDX;
+
+    const uint64_t fromMask = squareMask(move.from);
+    const uint64_t toMask = squareMask(move.to);
+    const int pieceIdx = static_cast<int>(move.piece);
+
+    m_bitboards[us][pieceIdx] &= ~fromMask;
+
+    for (int p = 0; p < static_cast<int>(PieceType::Count); ++p) {
+        if (m_bitboards[them][p] & toMask) {
+            m_bitboards[them][p] &= ~toMask;
         }
     }
-    else {
-        board[bestTo] = board[bestFrom];
-        board[bestFrom] = Empty;
+
+    if (move.isEnPassant) {
+        const int capSq = (m_sideToMove == Color::White) ? move.to - 8 : move.to + 8;
+        m_bitboards[them][PAWN_IDX] &= ~squareMask(capSq);
     }
 
-    
-    botMoves++;
-    lastBestTo = bestTo;
-    std::cout << "evalution-> " << eva << "\n";
+    if (move.promotion.has_value()) {
+        m_bitboards[us][static_cast<int>(*move.promotion)] |= toMask;
+    } else {
+        m_bitboards[us][pieceIdx] |= toMask;
+    }
 
-    return 0;
+    if (move.isKingSideCastle) {
+        if (m_sideToMove == Color::White) {
+            m_bitboards[us][ROOK_IDX] &= ~squareMask(7);
+            m_bitboards[us][ROOK_IDX] |= squareMask(5);
+        } else {
+            m_bitboards[us][ROOK_IDX] &= ~squareMask(63);
+            m_bitboards[us][ROOK_IDX] |= squareMask(61);
+        }
+    }
+    if (move.isQueenSideCastle) {
+        if (m_sideToMove == Color::White) {
+            m_bitboards[us][ROOK_IDX] &= ~squareMask(0);
+            m_bitboards[us][ROOK_IDX] |= squareMask(3);
+        } else {
+            m_bitboards[us][ROOK_IDX] &= ~squareMask(56);
+            m_bitboards[us][ROOK_IDX] |= squareMask(59);
+        }
+    }
+
+    if (m_sideToMove == Color::White) {
+        if (move.piece == PieceType::King) m_castlingRights &= ~(CASTLE_WK | CASTLE_WQ);
+        if (move.piece == PieceType::Rook && move.from == 0) m_castlingRights &= ~CASTLE_WQ;
+        if (move.piece == PieceType::Rook && move.from == 7) m_castlingRights &= ~CASTLE_WK;
+        if (move.to == 56) m_castlingRights &= ~CASTLE_BQ;
+        if (move.to == 63) m_castlingRights &= ~CASTLE_BK;
+    } else {
+        if (move.piece == PieceType::King) m_castlingRights &= ~(CASTLE_BK | CASTLE_BQ);
+        if (move.piece == PieceType::Rook && move.from == 56) m_castlingRights &= ~CASTLE_BQ;
+        if (move.piece == PieceType::Rook && move.from == 63) m_castlingRights &= ~CASTLE_BK;
+        if (move.to == 0) m_castlingRights &= ~CASTLE_WQ;
+        if (move.to == 7) m_castlingRights &= ~CASTLE_WK;
+    }
+
+    if (move.isDoublePush) {
+        m_enPassantSquare = (m_sideToMove == Color::White) ? move.to - 8 : move.to + 8;
+    } else {
+        m_enPassantSquare = -1;
+    }
+
+    if (move.piece == PieceType::Pawn || move.isCapture) {
+        m_halfmoveClock = 0;
+    } else {
+        ++m_halfmoveClock;
+    }
+
+    if (m_sideToMove == Color::Black) {
+        ++m_fullmoveNumber;
+    }
+
+    m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
 }
 
-double Board::minimaxi(int depth, bool isWhite, double alpha, double beta, Board& currentBoard) {
-    if (depth == 0) return currentBoard.eval(currentBoard.getBoard());
+bool Board::applyMove(const Move& move) {
+    const std::vector<Move> legal = generateLegalMoves();
+    auto it = std::find_if(legal.begin(), legal.end(), [&](const Move& m) {
+        return m.from == move.from &&
+               m.to == move.to &&
+               m.piece == move.piece &&
+               m.promotion == move.promotion;
+    });
+    if (it == legal.end()) {
+        return false;
+    }
+    makeMove(*it);
+    return true;
+}
 
-    std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
-    if (isWhite) {
-        double maxEval = std::numeric_limits<double>::lowest();
-        int bestFromLocal = -1, bestToLocal = -1;
+ParseResult Board::parseMove(const std::string& input) const {
+    ParseResult out;
+    std::string token = trim(input);
+    if (token.empty()) {
+        out.error = "Empty input. Enter a move like e2e4, Nf3, or O-O.";
+        return out;
+    }
 
-        for (const auto& it : allowed) {
-            int from = it.first;
-            const std::vector<int>& itV = it.second;
-            for (int m : itV) {
-                double to = m;
-                Board nextBoard = currentBoard;
-                nextBoard.move(from, to);
-                double currEval = minimaxi(depth - 1, alpha, beta, false, nextBoard);
-                alpha = (alpha > currEval) ? alpha : currEval;
-                if (currEval > maxEval) {
-                    maxEval = currEval;
-                    bestFromLocal = from;
-                    bestToLocal = to;
-                }
-                if (beta <= alpha)
-                    break;
+    std::vector<Move> legal = generateLegalMoves();
+    if (legal.empty()) {
+        out.error = "No legal moves available in this position.";
+        return out;
+    }
+
+    bool requiresCheck = false;
+    bool requiresMate = false;
+    if (!token.empty() && (token.back() == '+' || token.back() == '#')) {
+        requiresMate = token.back() == '#';
+        requiresCheck = token.back() == '+';
+        token.pop_back();
+        if (!token.empty() && (token.back() == '+' || token.back() == '#')) {
+            out.error = "Invalid SAN suffix. Use at most one of '+' or '#'.";
+            return out;
+        }
+    }
+
+    if (token == "O-O" || token == "0-0" || token == "o-o") {
+        std::vector<Move> matches;
+        for (const Move& m : legal) {
+            if (m.isKingSideCastle) matches.push_back(m);
+        }
+        if (matches.empty()) {
+            out.error = "Kingside castling is not legal in this position.";
+            return out;
+        }
+        if (requiresMate && !isMateAfterMove(*this, matches.front())) {
+            out.error = "Move does not result in checkmate, but '#' was provided.";
+            return out;
+        }
+        if (requiresCheck && !isCheckAfterMove(*this, matches.front())) {
+            out.error = "Move does not give check, but '+' was provided.";
+            return out;
+        }
+        out.move = matches.front();
+        return out;
+    }
+
+    if (token == "O-O-O" || token == "0-0-0" || token == "o-o-o") {
+        std::vector<Move> matches;
+        for (const Move& m : legal) {
+            if (m.isQueenSideCastle) matches.push_back(m);
+        }
+        if (matches.empty()) {
+            out.error = "Queenside castling is not legal in this position.";
+            return out;
+        }
+        if (requiresMate && !isMateAfterMove(*this, matches.front())) {
+            out.error = "Move does not result in checkmate, but '#' was provided.";
+            return out;
+        }
+        if (requiresCheck && !isCheckAfterMove(*this, matches.front())) {
+            out.error = "Move does not give check, but '+' was provided.";
+            return out;
+        }
+        out.move = matches.front();
+        return out;
+    }
+
+    // Coordinate notation: e2e4 or e7e8q
+    if (token.size() >= 4) {
+        const char f1 = static_cast<char>(std::tolower(static_cast<unsigned char>(token[0])));
+        const char r1 = token[1];
+        const char f2 = static_cast<char>(std::tolower(static_cast<unsigned char>(token[2])));
+        const char r2 = token[3];
+
+        const bool looksLikeCoordinate = (f1 >= 'a' && f1 <= 'h') &&
+                                         (r1 >= '1' && r1 <= '8') &&
+                                         (f2 >= 'a' && f2 <= 'h') &&
+                                         (r2 >= '1' && r2 <= '8');
+
+        if (!looksLikeCoordinate) {
+            // Not coordinate notation; continue to SAN parsing.
+        } else {
+            const int from = squareFromString(token.substr(0, 2));
+            const int to = squareFromString(token.substr(2, 2));
+            if (from == -1 || to == -1) {
+                out.error = "Invalid coordinate move. Expected format like e2e4.";
+                return out;
             }
-            if (beta <= alpha)
-                break;
-        }
 
-        if (depth == iD) {
-            bestFrom = bestFromLocal;
-            bestTo = bestToLocal;
-        }
-        return maxEval;
-    }
-    else {
-        double minEval = std::numeric_limits<double>::max();
-        int bestFromLocal = -1, bestToLocal = -1;
-
-        for (const auto& it : allowed) {
-            int from = it.first;
-            const std::vector<int>& itV = it.second;
-            for (int m : itV) {
-                double to = m;
-                Board nextBoard = currentBoard;
-                nextBoard.move(from, to);
-                double currEval = minimaxi(depth - 1, alpha, beta, true, nextBoard);
-                beta = (beta < currEval) ? beta : currEval;
-                if (currEval < minEval) {
-                    minEval = currEval;
-                    bestFromLocal = from;
-                    bestToLocal = to;
+            std::optional<PieceType> promotion;
+            if (token.size() > 4) {
+                char promoChar = static_cast<char>(std::toupper(static_cast<unsigned char>(token[4])));
+                PieceType p = pieceFromLetter(promoChar);
+                if (p == PieceType::Pawn || p == PieceType::King) {
+                    out.error = "Invalid promotion piece. Use one of Q, R, B, N.";
+                    return out;
                 }
-                if (beta <= alpha)
-                    break;
+                promotion = p;
             }
-            if (beta <= alpha)
-                break;
+
+            std::vector<Move> matches;
+            for (const Move& m : legal) {
+                if (m.from == from && m.to == to && m.promotion == promotion) {
+                    matches.push_back(m);
+                }
+            }
+            if (matches.empty()) {
+                out.error = "Illegal move for current position: " + token + ".";
+                return out;
+            }
+
+            const Move& chosen = matches.front();
+            if (requiresMate && !isMateAfterMove(*this, chosen)) {
+                out.error = "Move does not result in checkmate, but '#' was provided.";
+                return out;
+            }
+            if (requiresCheck && !isCheckAfterMove(*this, chosen)) {
+                out.error = "Move does not give check, but '+' was provided.";
+                return out;
+            }
+
+            out.move = chosen;
+            return out;
+        }
+    }
+
+    // SAN parsing
+    // Grammar (supported):
+    //  Piece? disambiguation? x? destination (=Promotion)?
+    //  Examples: Nf3, Nbd2, N1d2, Raxc1, exd5, e8=Q, exd8=Q
+    PieceType piece = PieceType::Pawn;
+    size_t pos = 0;
+    if (!token.empty() && isPieceLetter(token[0])) {
+        piece = pieceFromLetter(token[0]);
+        pos = 1;
+    }
+
+    size_t eqPos = token.find('=');
+    std::optional<PieceType> promotion;
+    if (eqPos != std::string::npos) {
+        if (eqPos + 1 >= token.size()) {
+            out.error = "Invalid SAN promotion syntax. Use e8=Q or exd8=Q.";
+            return out;
+        }
+        char promoChar = static_cast<char>(std::toupper(static_cast<unsigned char>(token[eqPos + 1])));
+        PieceType p = pieceFromLetter(promoChar);
+        if (p == PieceType::Pawn || p == PieceType::King) {
+            out.error = "Invalid promotion piece in SAN. Use Q, R, B, or N.";
+            return out;
+        }
+        promotion = p;
+        if (piece != PieceType::Pawn) {
+            out.error = "Only pawns may promote in SAN notation.";
+            return out;
+        }
+        token = token.substr(0, eqPos);
+    }
+
+    if (token.size() < pos + 2) {
+        out.error = "Incomplete SAN move.";
+        return out;
+    }
+
+    const std::string destStr = token.substr(token.size() - 2, 2);
+    const int to = squareFromString(destStr);
+    if (to == -1) {
+        out.error = "Invalid destination square in SAN move.";
+        return out;
+    }
+
+    std::string core = token.substr(pos, token.size() - pos - 2);
+    bool wantsCapture = false;
+    size_t xPos = core.find('x');
+    if (xPos != std::string::npos) {
+        wantsCapture = true;
+        core.erase(xPos, 1);
+        if (core.find('x') != std::string::npos) {
+            out.error = "Invalid SAN: too many capture markers 'x'.";
+            return out;
+        }
+    }
+
+    std::string disambiguation = core;
+
+    std::vector<Move> matches;
+    for (const Move& m : legal) {
+        if (m.piece != piece) continue;
+        if (m.to != to) continue;
+        if (m.promotion != promotion) continue;
+        if (wantsCapture != m.isCapture) continue;
+
+        bool disambOk = true;
+        if (!disambiguation.empty()) {
+            if (disambiguation.size() == 1) {
+                char c = disambiguation[0];
+                if (c >= 'a' && c <= 'h') {
+                    disambOk = fileMatches(m.from, c);
+                } else if (c >= '1' && c <= '8') {
+                    disambOk = rankMatches(m.from, c);
+                } else {
+                    disambOk = false;
+                }
+            } else if (disambiguation.size() == 2) {
+                int fromSq = squareFromString(disambiguation);
+                disambOk = (fromSq != -1 && m.from == fromSq);
+            } else {
+                disambOk = false;
+            }
         }
 
-        if (depth == iD) {
-            bestFrom = bestFromLocal;
-            bestTo = bestToLocal;
+        if (disambOk) {
+            matches.push_back(m);
         }
-        return minEval;
     }
+
+    if (piece == PieceType::Pawn && wantsCapture && disambiguation.size() == 1) {
+        const char srcFile = disambiguation[0];
+        if (!(srcFile >= 'a' && srcFile <= 'h')) {
+            out.error = "Invalid SAN pawn capture. Example: exd5.";
+            return out;
+        }
+    }
+
+    if (matches.empty()) {
+        out.error = "No legal SAN match for '" + input + "'.";
+        return out;
+    }
+
+    if (matches.size() > 1) {
+        out.error = "Ambiguous SAN move '" + input + "'. Candidates: " + joinMoves(matches) + ".";
+        return out;
+    }
+
+    const Move& chosen = matches.front();
+    if (requiresMate && !isMateAfterMove(*this, chosen)) {
+        out.error = "Move does not result in checkmate, but '#' was provided.";
+        return out;
+    }
+    if (requiresCheck && !isCheckAfterMove(*this, chosen)) {
+        out.error = "Move does not give check, but '+' was provided.";
+        return out;
+    }
+
+    out.move = chosen;
+    return out;
 }
-
-double Board::minimaxi(int depth, bool isWhite, Board& currentBoard) {
-    if (depth == 0) return currentBoard.eval(currentBoard.getBoard());
-
-    std::map<int, std::vector<int>> allowed = currentBoard.generateAllMoves(isWhite);
-    if (isWhite) {
-        double maxEval = std::numeric_limits<double>::lowest();
-        int bestFromLocal = -1, bestToLocal = -1;
-
-        for (const auto& it : allowed) {
-            int from = it.first;
-            const std::vector<int>& itV = it.second;
-            for (int m : itV) {
-                double to = m;
-                Board nextBoard = currentBoard;
-                nextBoard.move(from, to);
-                double currEval = minimaxi(depth - 1, false, nextBoard);
-                if (currEval > maxEval) {
-                    maxEval = currEval;
-                    bestFromLocal = from;
-                    bestToLocal = to;
-                }
-            }
-        }
-
-        if (depth == iD) {
-            bestFrom = bestFromLocal;
-            bestTo = bestToLocal;
-        }
-        return maxEval;
-    }
-    else {
-        double minEval = std::numeric_limits<double>::max();
-        int bestFromLocal = -1, bestToLocal = -1;
-
-        for (const auto& it : allowed) {
-            int from = it.first;
-            const std::vector<int>& itV = it.second;
-            for (int m : itV) {
-                double to = m;
-                Board nextBoard = currentBoard;
-                nextBoard.move(from, to);
-                double currEval = minimaxi(depth - 1, true, nextBoard);
-                if (currEval < minEval) {
-                    minEval = currEval;
-                    bestFromLocal = from;
-                    bestToLocal = to;
-                }
-            }
-        }
-
-        if (depth == iD) {
-            bestFrom = bestFromLocal;
-            bestTo = bestToLocal;
-        }
-        return minEval;
-    }
-}
-
-

@@ -1,8 +1,6 @@
 #ifndef PIECES_HPP
 #define PIECES_HPP
 
-// OPENINGS
-
 const double WHITE_PAWN_SQUARES[64] = {
      0,  0,  0,  0,  0,  0,  0,  0,
      5, 10, 10,-20,-20, 10, 10,  5,
@@ -92,7 +90,6 @@ const double BLACK_ROOK_SQUARES[64] = {
      0,  0,  0,  0,  0,  0,  0,  0
 };
 
-
 const double WHITE_QUEEN_SQUARES[64] = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
@@ -104,8 +101,6 @@ const double WHITE_QUEEN_SQUARES[64] = {
     -20,-10,-10, -5, -5,-10,-10,-20
 };
 
-
-// Black Queen Squares
 const double BLACK_QUEEN_SQUARES[64] = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  5,  0,  0,  0,  0,-10,
@@ -116,35 +111,6 @@ const double BLACK_QUEEN_SQUARES[64] = {
     -10,  0,  0,  0,  0,  0,  0,-10,
     -20,-10,-10, -5, -5,-10,-10,-20
 };
-
-// // White King Openings Squares
-
-// const double WHITE_OPENINGS_KING_SQUARES[64] = {
-//     -20,-10,-10, -5, -5,-10,-10,-20,
-//     -10,  0,  0,  0,  0,  0,  0,-10,
-//     -10,  0,  5,  5,  5,  5,  0,-10,
-//      -5,  0,  5,  5,  5,  5,  0, -5,
-//       0,  0,  5,  5,  5,  5,  0, -5,
-//     -10,  5,  5,  5,  5,  5,  0,-10,
-//     -10,  0,  5,  0,  0,  0,  0,-10,
-//     -20,-10,-10, -5, -5,-10,-10,-20
-// };
-
-// // Black King Openings Squares
-
-// const double BLACK_OPENINGS_KING_SQUARES[64] = {
-//     -20,-10,-10, -5, -5,-10,-10,-20,
-//     -10,  0,  0,  0,  0,  0,  0,-10,
-//     -10,  0,  5,  5,  5,  5,  0,-10,
-//      -5,  0,  5,  5,  5,  5,  0, -5,
-//       0,  0,  5,  5,  5,  5,  0, -5,
-//     -10,  5,  5,  5,  5,  5,  0,-10,
-//     -10,  0,  5,  0,  0,  0,  0,-10,
-//     -20,-10,-10, -5, -5,-10,-10,-20
-// };
-
-
-// White King Middlegame Squares
 
 const double WHITE_MG_KING_SQUARES[64] = {
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -157,8 +123,6 @@ const double WHITE_MG_KING_SQUARES[64] = {
      20, 30, 10,  0,  0, 10, 30, 20
 };
 
-// Black King Middlegame Squares
-
 const double BLACK_MG_KING_SQUARES[64] = {
      20, 30, 10,  0,  0, 10, 30, 20,
      20, 20,  0,  0,  0,  0, 20, 20,
@@ -169,8 +133,6 @@ const double BLACK_MG_KING_SQUARES[64] = {
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30
 };
-
-// White King Endgame Squares
 
 const double WHITE_END_KING_SQUARES[64] = {
     -50,-40,-30,-20,-20,-30,-40,-50,
@@ -183,8 +145,6 @@ const double WHITE_END_KING_SQUARES[64] = {
     -50,-30,-30,-30,-30,-30,-30,-50
 };
 
-// Black King Endgame Squares
-
 const double BLACK_END_KING_SQUARES[64] = {
     -50,-30,-30,-30,-30,-30,-30,-50,
     -30,-30,  0,  0,  0,  0,-30,-30,
@@ -195,6 +155,5 @@ const double BLACK_END_KING_SQUARES[64] = {
     -30,-20,-10,  0,  0,-10,-20,-30,
     -50,-40,-30,-20,-20,-30,-40,-50
 };
-
 
 #endif
