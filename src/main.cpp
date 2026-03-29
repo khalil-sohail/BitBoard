@@ -14,6 +14,7 @@ enum class ExecutionMode {
 };
 
 std::string g_pendingCliMessage;
+constexpr const char* OPENINGS_ABSOLUTE_PATH = "/home/ksohail-/Documents/chess-engine/openings";
 
 bool hasFlag(int argc, char* argv[], const std::string& flag) {
     for (int i = 1; i < argc; ++i) {
@@ -206,11 +207,19 @@ std::string compactInput(const std::string& input) {
 }
 
 void runCliMode(Board& board,
-                OpeningBook& openingBook,
                 Color userColor,
                 Color aiColor,
                 int searchDepth,
                 bool showBoard) {
+    OpeningBook openingBook(OPENINGS_ABSOLUTE_PATH);
+    openingBook.load();
+
+    if (openingBook.lineCount() > 0) {
+        std::cout << "[System] Opening book loaded: " << openingBook.lineCount() << " moves found.\n";
+    } else {
+        std::cout << "[Error] Opening book failed to load from openings/performance.bin.\n";
+    }
+
     std::string input;
     std::string message = std::move(g_pendingCliMessage);
     g_pendingCliMessage.clear();
@@ -247,15 +256,15 @@ void runCliMode(Board& board,
         }
 
         if (board.sideToMove() == aiColor) {
-            std::optional<std::string> bookMove = openingBook.getBookMove(board.sanHistory());
+            std::optional<Move> bookMove = openingBook.getBookMove(board);
             if (bookMove.has_value()) {
-                ParseResult parsedBookMove = board.parseMove(*bookMove);
-                if (parsedBookMove.move.has_value() && board.applyMove(*parsedBookMove.move)) {
-                    board.recordSanMove(*bookMove);
-                    message = "AI played: " + *bookMove;
+                if (board.applyMove(*bookMove)) {
+                    const std::string moveText = moveToCompactString(board, *bookMove);
+                    board.recordSanMove(moveText);
+                    message = "AI played (book): " + moveText;
                     continue;
                 }
-                message = "Opening book produced an invalid move for current position: " + *bookMove;
+                message = "Opening book produced an invalid move for current position.";
                 continue;
             }
 
@@ -303,33 +312,48 @@ void runCliMode(Board& board,
     }
 }
 
-void runGuiMode(Board& board, OpeningBook& openingBook, int searchDepth) {
+void runGuiMode(Board& board, int searchDepth) {
+    std::cout.setf(std::ios::unitbuf);
+
+    std::optional<OpeningBook> openingBook;
+    bool openingBookStatusPrinted = false;
+    auto ensureOpeningBookLoaded = [&]() {
+        if (!openingBook.has_value()) {
+            openingBook.emplace(OPENINGS_ABSOLUTE_PATH);
+            openingBook->load();
+        }
+        if (!openingBookStatusPrinted) {
+            if (openingBook->lineCount() > 0) {
+                std::cout << "[System] Opening book loaded: " << openingBook->lineCount() << " moves found." << std::endl;
+            } else {
+                std::cout << "[Error] Opening book failed to load from openings/performance.bin." << std::endl;
+            }
+            openingBookStatusPrinted = true;
+        }
+    };
+
     std::string input;
-    while (true) {
-        if (!std::getline(std::cin, input)) {
-            break;
+    while (std::getline(std::cin, input)) {
+        if (!input.empty() && input.back() == '\r') {
+            input.pop_back();
         }
 
-        if (input == "uci") {
-            std::cout << "id name BitboardEngine\n";
-            std::cout << "id author Khalil\n";
-            std::cout << "uciok\n";
-            continue;
-        }
-
-        if (input == "isready") {
-            std::cout << "readyok\n";
-            continue;
-        }
-
-        if (input == "ucinewgame") {
+        if (input.rfind("uci", 0) == 0 &&
+            (input.size() == 3 || std::isspace(static_cast<unsigned char>(input[3])))) {
+            std::cout << "id name BitboardEngine" << std::endl;
+            std::cout << "id author Khalil" << std::endl;
+            std::cout << "uciok" << std::endl;
+            ensureOpeningBookLoaded();
+        } 
+        else if (input.rfind("isready", 0) == 0) {
+            std::cout << "readyok" << std::endl;
+        } 
+        else if (input.rfind("ucinewgame", 0) == 0) {
             board.reset();
             board.clearSanHistory();
-            continue;
-        }
-
-        if (input.rfind("position", 0) == 0) {
-            if (input.rfind("position startpos", 0) == 0) {
+        } 
+        else if (input.rfind("position", 0) == 0) {
+            if (input.find("startpos") != std::string::npos) {
                 board.reset();
                 board.clearSanHistory();
             }
@@ -345,33 +369,30 @@ void runGuiMode(Board& board, OpeningBook& openingBook, int searchDepth) {
                     }
                 }
             }
-            continue;
-        }
+        } 
+        else if (input.rfind("go", 0) == 0) {
+            ensureOpeningBookLoaded();
 
-        if (input.rfind("go", 0) == 0) {
             int depth = searchDepth;
-            {
-                std::istringstream iss(input);
-                std::string token;
-                while (iss >> token) {
-                    if (token == "depth") {
-                        std::string depthToken;
-                        if (iss >> depthToken) {
-                            std::string ignore;
-                            depth = parseDepthValue(depthToken, ignore);
-                        }
-                        break;
+            std::istringstream iss(input);
+            std::string token;
+            
+            while (iss >> token) {
+                if (token == "depth") {
+                    std::string depthToken;
+                    if (iss >> depthToken) {
+                        std::string ignore;
+                        depth = parseDepthValue(depthToken, ignore);
                     }
+                    break;
                 }
             }
 
             std::string bestMoveText = "0000";
-
-            std::optional<std::string> bookMove = openingBook.getBookMove(board.sanHistory());
-            if (bookMove.has_value()) {
-                ParseResult parsedBookMove = board.parseMove(*bookMove);
-                if (parsedBookMove.move.has_value()) {
-                    bestMoveText = moveToCompactString(board, *parsedBookMove.move);
+            if (openingBook.has_value()) {
+                std::optional<Move> bookMove = openingBook->getBookMove(board);
+                if (bookMove.has_value()) {
+                    bestMoveText = moveToCompactString(board, *bookMove);
                 }
             }
 
@@ -382,11 +403,9 @@ void runGuiMode(Board& board, OpeningBook& openingBook, int searchDepth) {
                 }
             }
 
-            std::cout << "bestmove " << bestMoveText << "\n";
-            continue;
-        }
-
-        if (input == "quit") {
+            std::cout << "bestmove " << bestMoveText << std::endl;
+        } 
+        else if (input.rfind("quit", 0) == 0) {
             break;
         }
     }
@@ -396,7 +415,6 @@ void runGuiMode(Board& board, OpeningBook& openingBook, int searchDepth) {
 
 int main(int argc, char* argv[]) {
     Board board;
-    OpeningBook openingBook("openings");
     std::string message;
     const bool showBoard = !hasFlag(argc, argv, "--no-board");
 
@@ -405,18 +423,11 @@ int main(int argc, char* argv[]) {
     const int searchDepth = parseSearchDepth(argc, argv, message);
     const ExecutionMode mode = parseExecutionMode(argc, argv, message);
 
-    if (openingBook.lineCount() == 0) {
-        if (!message.empty()) {
-            message += "\n";
-        }
-        message += "Opening book not loaded. Place opening files under openings/.";
-    }
-
     if (mode == ExecutionMode::Gui) {
-        runGuiMode(board, openingBook, searchDepth);
+        runGuiMode(board, searchDepth);
     } else {
         g_pendingCliMessage = std::move(message);
-        runCliMode(board, openingBook, userColor, aiColor, searchDepth, showBoard);
+        runCliMode(board, userColor, aiColor, searchDepth, showBoard);
     }
 
     return 0;
