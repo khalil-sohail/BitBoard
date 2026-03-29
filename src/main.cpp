@@ -2,7 +2,9 @@
 #include "openingBook.hpp"
 #include "search.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 
@@ -210,14 +212,14 @@ void runCliMode(Board& board,
                 Color userColor,
                 Color aiColor,
                 int searchDepth,
-                bool showBoard) {
-    OpeningBook openingBook(OPENINGS_ABSOLUTE_PATH);
-    openingBook.load();
+                bool showBoard,
+                const std::string& bookPath) {
+    OpeningBook openingBook(bookPath);
 
     if (openingBook.lineCount() > 0) {
         std::cout << "[System] Opening book loaded: " << openingBook.lineCount() << " moves found.\n";
     } else {
-        std::cout << "[Error] Opening book failed to load from openings/performance.bin.\n";
+        std::cout << "[System] Failed to load book: " << bookPath << ". Falling back to search.\n";
     }
 
     std::string input;
@@ -312,21 +314,22 @@ void runCliMode(Board& board,
     }
 }
 
-void runGuiMode(Board& board, int searchDepth) {
+void runGuiMode(Board& board, int searchDepth, const std::string& bookPath) {
+    (void)searchDepth;
     std::cout.setf(std::ios::unitbuf);
 
     std::optional<OpeningBook> openingBook;
     bool openingBookStatusPrinted = false;
     auto ensureOpeningBookLoaded = [&]() {
         if (!openingBook.has_value()) {
-            openingBook.emplace(OPENINGS_ABSOLUTE_PATH);
+            openingBook.emplace(bookPath);
             openingBook->load();
         }
         if (!openingBookStatusPrinted) {
             if (openingBook->lineCount() > 0) {
                 std::cout << "[System] Opening book loaded: " << openingBook->lineCount() << " moves found." << std::endl;
             } else {
-                std::cout << "[Error] Opening book failed to load from openings/performance.bin." << std::endl;
+                std::cout << "info string Failed to load book: " << bookPath << ". Falling back to search." << std::endl;
             }
             openingBookStatusPrinted = true;
         }
@@ -373,38 +376,69 @@ void runGuiMode(Board& board, int searchDepth) {
         else if (input.rfind("go", 0) == 0) {
             ensureOpeningBookLoaded();
 
-            int depth = searchDepth;
+            int wtime = 0;
+            int btime = 0;
+            int winc = 0;
+            int binc = 0;
+            int movetime = 0;
+            int parsedDepth = 0;
+
             std::istringstream iss(input);
             std::string token;
-            
             while (iss >> token) {
-                if (token == "depth") {
-                    std::string depthToken;
-                    if (iss >> depthToken) {
-                        std::string ignore;
-                        depth = parseDepthValue(depthToken, ignore);
-                    }
-                    break;
+                if (token == "wtime") {
+                    iss >> wtime;
+                } else if (token == "btime") {
+                    iss >> btime;
+                } else if (token == "winc") {
+                    iss >> winc;
+                } else if (token == "binc") {
+                    iss >> binc;
+                } else if (token == "movetime") {
+                    iss >> movetime;
+                } else if (token == "depth") {
+                    iss >> parsedDepth;
                 }
             }
+
+            const bool whiteToMove = board.sideToMove() == Color::White;
+            const int timeLeft = whiteToMove ? wtime : btime;
+            const int increment = whiteToMove ? winc : binc;
+
+            long long timeLimitMs = 2000;
+            if (movetime > 0) {
+                timeLimitMs = movetime;
+            } else if (timeLeft > 0) {
+                timeLimitMs = std::max(100, (timeLeft / 20) + (increment / 2));
+            }
+
+            const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 32;
 
             std::string bestMoveText = "0000";
             if (openingBook.has_value()) {
                 std::optional<Move> bookMove = openingBook->getBookMove(board);
                 if (bookMove.has_value()) {
-                    bestMoveText = moveToCompactString(board, *bookMove);
+                    std::vector<Move> legalMoves = board.generateLegalMoves();
+                    const auto it = std::find_if(legalMoves.begin(), legalMoves.end(), [&](const Move& legalMove) {
+                        return legalMove.from == bookMove->from &&
+                               legalMove.to == bookMove->to &&
+                               legalMove.promotion == bookMove->promotion;
+                    });
+                    if (it != legalMoves.end()) {
+                        bestMoveText = moveToCompactString(board, *bookMove);
+                    }
                 }
             }
 
             if (bestMoveText == "0000") {
-                Move bestMove = findBestMove(board, depth);
+                Move bestMove = findBestMove(board, maxDepthToSearch, timeLimitMs);
                 if (bestMove.from >= 0 && bestMove.to >= 0) {
                     bestMoveText = moveToCompactString(board, bestMove);
                 }
             }
 
             std::cout << "bestmove " << bestMoveText << std::endl;
-        } 
+        }
         else if (input.rfind("quit", 0) == 0) {
             break;
         }
@@ -418,16 +452,44 @@ int main(int argc, char* argv[]) {
     std::string message;
     const bool showBoard = !hasFlag(argc, argv, "--no-board");
 
+    std::string bookPath = OPENINGS_ABSOLUTE_PATH;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        std::string value;
+
+        if (arg.rfind("--book=", 0) == 0) {
+            value = arg.substr(std::string("--book=").size());
+        } else if (arg.rfind("book=", 0) == 0) {
+            value = arg.substr(std::string("book=").size());
+        } else {
+            continue;
+        }
+
+        if (value.empty()) {
+            continue;
+        }
+
+        const bool hasSlash = value.find('/') != std::string::npos || value.find('\\') != std::string::npos;
+        if (hasSlash) {
+            bookPath = value;
+        } else {
+            const std::filesystem::path defaultBookPath(OPENINGS_ABSOLUTE_PATH);
+            const std::filesystem::path defaultBookDir =
+                defaultBookPath.has_extension() ? defaultBookPath.parent_path() : defaultBookPath;
+            bookPath = (defaultBookDir / value).string();
+        }
+    }
+
     Color userColor = parseUserColor(argc, argv, message);
     const Color aiColor = oppositeColor(userColor);
     const int searchDepth = parseSearchDepth(argc, argv, message);
     const ExecutionMode mode = parseExecutionMode(argc, argv, message);
 
     if (mode == ExecutionMode::Gui) {
-        runGuiMode(board, searchDepth);
+        runGuiMode(board, searchDepth, bookPath);
     } else {
         g_pendingCliMessage = std::move(message);
-        runCliMode(board, userColor, aiColor, searchDepth, showBoard);
+        runCliMode(board, userColor, aiColor, searchDepth, showBoard, bookPath);
     }
 
     return 0;
