@@ -12,6 +12,27 @@ constexpr int MATE_SCORE = 1'000'000;
 constexpr int NULL_MOVE_REDUCTION = 2;
 constexpr uint64_t TIME_CHECK_MASK = 2047ULL;
 
+enum class TTFlag {
+    Exact,
+    Alpha,
+    Beta
+};
+
+struct TTEntry {
+    uint64_t hash = 0ULL;
+    int depth = 0;
+    TTFlag flag = TTFlag::Exact;
+    int score = 0;
+    Move bestMove{};
+};
+
+constexpr size_t TT_SIZE = 1048576;
+std::vector<TTEntry> g_TT(TT_SIZE);
+
+void clearTT() {
+    g_TT.assign(TT_SIZE, TTEntry{});
+}
+
 using SearchClock = std::chrono::steady_clock;
 
 SearchClock::time_point g_searchStartTime;
@@ -136,9 +157,34 @@ int quiescenceSearch(Board& board, int alpha, int beta, int colorMultiplier) {
     return alpha;
 }
 
-int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot) {
+int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot, int plyFromRoot) {
     if (shouldAbortSearch()) {
         return alpha;
+    }
+
+    if (plyFromRoot >= 64) {
+        return colorMultiplier * board.evaluate();
+    }
+
+    const int originalAlpha = alpha;
+    const uint64_t hash = board.computePolyglotHash();
+    const TTEntry& entry = g_TT[hash % TT_SIZE];
+
+    Move ttBestMove{};
+    if (entry.hash == hash) {
+        ttBestMove = entry.bestMove;
+
+        if (entry.depth >= depth) {
+            if (entry.flag == TTFlag::Exact) {
+                return entry.score;
+            }
+            if (entry.flag == TTFlag::Alpha && entry.score <= alpha) {
+                return alpha;
+            }
+            if (entry.flag == TTFlag::Beta && entry.score >= beta) {
+                return beta;
+            }
+        }
     }
 
     if (depth == 0) {
@@ -154,7 +200,8 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
             -beta,
             -beta + 1,
             -colorMultiplier,
-            false
+            false,
+            plyFromRoot + 1
         );
         board.undoMove();
 
@@ -172,15 +219,22 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
     }
 
     sortMovesByScore(board, legal);
+    if (ttBestMove.from >= 0) {
+        prioritizeMove(legal, ttBestMove);
+    }
 
     int bestScore = -INF_SCORE;
+    Move bestMoveFoundInLoop = legal.front();
 
     for (const Move& move : legal) {
         board.makeMove(move);
-        const int score = -negamax(board, depth - 1, -beta, -alpha, -colorMultiplier, false);
+        const bool givesCheck = board.inCheck(board.sideToMove());
+        const int extension = givesCheck ? 1 : 0;
+        const int score = -negamax(board, depth - 1 + extension, -beta, -alpha, -colorMultiplier, false, plyFromRoot + 1);
         board.undoMove();
         if (score > bestScore) {
             bestScore = score;
+            bestMoveFoundInLoop = move;
         }
         if (score > alpha) {
             alpha = score;
@@ -190,14 +244,29 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
         }
     }
 
+    TTFlag flag = TTFlag::Exact;
+    if (bestScore <= originalAlpha) {
+        flag = TTFlag::Alpha;
+    } else if (bestScore >= beta) {
+        flag = TTFlag::Beta;
+    }
+    g_TT[hash % TT_SIZE] = {hash, depth, flag, bestScore, bestMoveFoundInLoop};
+
     return bestScore;
 }
 
 Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
+    constexpr int WINDOW_SIZE = 50;
+
     std::vector<Move> rootMoves = board.generateLegalMoves();
     if (rootMoves.empty()) {
         return Move{};
     }
+    if (rootMoves.size() == 1) {
+        return rootMoves.front();
+    }
+
+    long long softTimeLimitMs = timeLimitMs / 2;
 
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
 
@@ -210,6 +279,10 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
 
     Move previousIterationBest = rootMoves.front();
     Move bestCompletedMove = rootMoves.front();
+    int stableMoveCount = 0;
+    int previousIterationScore = 0;
+
+    clearTT();
 
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
         if (g_timeToAbort.load(std::memory_order_relaxed)) {
@@ -219,9 +292,13 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         std::vector<Move> moves = rootMoves;
         prioritizeMove(moves, previousIterationBest);
 
+        int alpha = (currentDepth >= 4) ? previousIterationScore - WINDOW_SIZE : -INF_SCORE;
+        int beta = (currentDepth >= 4) ? previousIterationScore + WINDOW_SIZE : INF_SCORE;
+
         int depthBestScore = -INF_SCORE;
         Move depthBestMove = moves.front();
         bool completedDepth = true;
+        int localAlpha = alpha;
 
         for (const Move& move : moves) {
             if (shouldAbortSearch()) {
@@ -233,10 +310,11 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
             const int score = -negamax(
                 board,
                 std::max(0, currentDepth - 1),
-                -INF_SCORE,
-                INF_SCORE,
+                -beta,
+                -localAlpha,
                 -rootColorMultiplier,
-                false
+                false,
+                0
             );
             board.undoMove();
 
@@ -249,14 +327,83 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
                 depthBestScore = score;
                 depthBestMove = move;
             }
+
+            if (score > localAlpha) {
+                localAlpha = score;
+            }
+
+            if (localAlpha >= beta) {
+                break;
+            }
+        }
+
+        if (completedDepth && currentDepth >= 4 && (depthBestScore <= alpha || depthBestScore >= beta)) {
+            depthBestScore = -INF_SCORE;
+            depthBestMove = moves.front();
+
+            for (const Move& move : moves) {
+                if (shouldAbortSearch()) {
+                    completedDepth = false;
+                    break;
+                }
+
+                board.makeMove(move);
+                const int score = -negamax(
+                    board,
+                    std::max(0, currentDepth - 1),
+                    -INF_SCORE,
+                    INF_SCORE,
+                    -rootColorMultiplier,
+                    false,
+                    0
+                );
+                board.undoMove();
+
+                if (g_timeToAbort.load(std::memory_order_relaxed)) {
+                    completedDepth = false;
+                    break;
+                }
+
+                if (score > depthBestScore) {
+                    depthBestScore = score;
+                    depthBestMove = move;
+                }
+            }
         }
 
         if (!completedDepth) {
             break;
         }
 
+        const bool panicMode = (currentDepth >= 5 && depthBestScore <= previousIterationScore - 50);
         bestCompletedMove = depthBestMove;
+
+        const bool sameBestMove =
+            bestCompletedMove.from == previousIterationBest.from &&
+            bestCompletedMove.to == previousIterationBest.to &&
+            bestCompletedMove.piece == previousIterationBest.piece &&
+            bestCompletedMove.promotion == previousIterationBest.promotion;
+
+        if (sameBestMove) {
+            ++stableMoveCount;
+        } else {
+            stableMoveCount = 0;
+        }
+
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            SearchClock::now() - g_searchStartTime
+        ).count();
+
         previousIterationBest = depthBestMove;
+        previousIterationScore = depthBestScore;
+
+        if (!panicMode && elapsedMs >= softTimeLimitMs) {
+            break;
+        }
+
+        if (stableMoveCount >= 3 && currentDepth >= 5) {
+            break;
+        }
     }
 
     return bestCompletedMove;
