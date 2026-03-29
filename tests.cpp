@@ -386,6 +386,29 @@ void test_nmp_zugzwang_safety() {
     require(best.from != best.to, "Search failed or returned an invalid null move.");
 }
 
+void test_mate_distance_scoring() {
+    Board board;
+    board.reset();
+
+    const std::vector<std::string> sequence = {
+        "e2e4", "a7a6", "f1c4", "b7b6", "d1h5", "h7h6"
+    };
+
+    for (const std::string& moveText : sequence) {
+        ParseResult parsed = board.parseMove(moveText);
+        require(parsed.move.has_value(), "Expected move to parse: '" + moveText + "', got error: " + parsed.error);
+        require(board.applyMove(*parsed.move), "Expected move to apply: '" + moveText + "'");
+    }
+
+    Move bestMove = findBestMove(board, 4, 2000);
+
+    int expectedFrom = Board::squareFromString("h5");
+    int expectedTo = Board::squareFromString("f7");
+
+    require(bestMove.from == expectedFrom && bestMove.to == expectedTo,
+            "Engine failed to find fastest mate! Mate Distance bounds might be pruning the winning line.");
+}
+
 } // namespace
 
 int main() {
@@ -408,6 +431,7 @@ int main() {
         {"Mate in three tactical search", test_mate_in_three},
         {"Quiescence horizon effect", test_quiescence_horizon_effect},
         {"NMP zugzwang safety", test_nmp_zugzwang_safety},
+        {"Mate distance scoring", test_mate_distance_scoring},
     };
 
     int passed = 0;

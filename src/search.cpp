@@ -166,6 +166,15 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
         return colorMultiplier * board.evaluate();
     }
 
+    if (plyFromRoot > 0 && board.isRepetition()) {
+        return 0;
+    }
+
+    int mateValue = MATE_SCORE - plyFromRoot;
+    if (alpha < -mateValue) alpha = -mateValue;
+    if (beta > mateValue - 1) beta = mateValue - 1;
+    if (alpha >= beta) return alpha;
+
     const int originalAlpha = alpha;
     const uint64_t hash = board.computePolyglotHash();
     const TTEntry& entry = g_TT[hash % TT_SIZE];
@@ -213,7 +222,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
     std::vector<Move> legal = board.generateLegalMoves();
     if (legal.empty()) {
         if (sideInCheck) {
-            return -MATE_SCORE;
+            return -MATE_SCORE + plyFromRoot;
         }
         return 0;
     }

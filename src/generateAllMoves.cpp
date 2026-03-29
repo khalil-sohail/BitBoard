@@ -139,6 +139,7 @@ void Board::reset() {
     m_sideToMove = Color::White;
     m_castlingRights = 0b1111;
     m_enPassantSquare = -1;
+    m_hashHistory.clear();
     m_undoStack.clear();
     m_sanHistory.clear();
 
