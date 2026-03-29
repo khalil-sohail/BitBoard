@@ -59,6 +59,7 @@ private:
     std::array<int, 2> m_mgScore{};
     std::array<int, 2> m_egScore{};
     int m_gamePhase = 0;
+    std::vector<uint64_t> m_hashHistory;
     std::vector<std::string> m_sanHistory;
     std::vector<UndoState> m_undoStack;
 
@@ -91,6 +92,7 @@ public:
     [[nodiscard]] int evaluate() const;
     [[nodiscard]] int computeStaticEvaluation() const;
     [[nodiscard]] uint64_t computePolyglotHash() const;
+    [[nodiscard]] bool isRepetition() const;
     [[nodiscard]] bool isSquareAttacked(int square, Color byColor) const;
     [[nodiscard]] bool inCheck(Color color) const;
 

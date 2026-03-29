@@ -104,6 +104,8 @@ int Board::squareFromString(const std::string& coord) {
 }
 
 void Board::makeMove(const Move& move) {
+    m_hashHistory.push_back(computePolyglotHash());
+
     m_undoStack.push_back({
         .bitboards = m_bitboards,
         .sideToMove = m_sideToMove,
@@ -199,6 +201,8 @@ void Board::makeMove(const Move& move) {
 }
 
 void Board::makeNullMove() {
+    m_hashHistory.push_back(computePolyglotHash());
+
     m_undoStack.push_back({
         .bitboards = m_bitboards,
         .sideToMove = m_sideToMove,
@@ -227,6 +231,11 @@ bool Board::undoMove() {
     m_egScore = prev.egScore;
     m_gamePhase = prev.gamePhase;
     m_undoStack.pop_back();
+
+    if (!m_hashHistory.empty()) {
+        m_hashHistory.pop_back();
+    }
+
     return true;
 }
 
