@@ -139,8 +139,7 @@ void Board::reset() {
     m_sideToMove = Color::White;
     m_castlingRights = 0b1111;
     m_enPassantSquare = -1;
-    m_halfmoveClock = 0;
-    m_fullmoveNumber = 1;
+    m_undoStack.clear();
     m_sanHistory.clear();
 
     m_bitboards[WHITE_IDX][PAWN_IDX] = Board::RANK_2;
@@ -160,6 +159,8 @@ void Board::reset() {
 
     m_bitboards[WHITE_IDX][KING_IDX] = squareMask(4);
     m_bitboards[BLACK_IDX][KING_IDX] = squareMask(60);
+
+    resetEvalStateFromBoard();
 }
 
 uint64_t Board::occupancy(Color color) const {

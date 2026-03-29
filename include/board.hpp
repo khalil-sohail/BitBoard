@@ -42,13 +42,29 @@ struct ParseResult {
 
 class Board {
 private:
+    struct UndoState {
+        std::array<std::array<uint64_t, static_cast<size_t>(PieceType::Count)>, 2> bitboards{};
+        Color sideToMove = Color::White;
+        uint8_t castlingRights = 0;
+        int enPassantSquare = -1;
+        std::array<int, 2> mgScore{};
+        std::array<int, 2> egScore{};
+        int gamePhase = 0;
+    };
+
     std::array<std::array<uint64_t, static_cast<size_t>(PieceType::Count)>, 2> m_bitboards{};
     Color m_sideToMove = Color::White;
     uint8_t m_castlingRights = 0b1111; // WK WQ BK BQ
     int m_enPassantSquare = -1;
-    int m_halfmoveClock = 0;
-    int m_fullmoveNumber = 1;
+    std::array<int, 2> m_mgScore{};
+    std::array<int, 2> m_egScore{};
+    int m_gamePhase = 0;
     std::vector<std::string> m_sanHistory;
+    std::vector<UndoState> m_undoStack;
+
+    void resetEvalStateFromBoard();
+    void addPieceEval(Color color, PieceType piece, int square);
+    void removePieceEval(Color color, PieceType piece, int square);
 
 public:
     static constexpr uint64_t FILE_A = 0x0101010101010101ULL;
@@ -73,11 +89,15 @@ public:
     [[nodiscard]] std::vector<Move> generateLegalMoves() const;
     [[nodiscard]] uint64_t perft(int depth) const;
     [[nodiscard]] int evaluate() const;
+    [[nodiscard]] int computeStaticEvaluation() const;
+    [[nodiscard]] uint64_t computePolyglotHash() const;
     [[nodiscard]] bool isSquareAttacked(int square, Color byColor) const;
     [[nodiscard]] bool inCheck(Color color) const;
 
     bool applyMove(const Move& move);
     void makeMove(const Move& move);
+    void makeNullMove();
+    bool undoMove();
 
     [[nodiscard]] ParseResult parseMove(const std::string& input) const;
     [[nodiscard]] static int squareFromString(const std::string& coord);

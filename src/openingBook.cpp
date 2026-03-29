@@ -1,169 +1,223 @@
 #include "openingBook.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
-#include <sstream>
-#include <unordered_set>
+#include <limits>
 
 namespace {
 
-bool isOnlyDigitsAndDots(const std::string& token) {
-    if (token.empty()) return false;
-    for (char c : token) {
-        if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.') {
-            return false;
-        }
+bool hasBinExtension(const std::filesystem::path& path) {
+    const std::string ext = path.extension().string();
+    std::string lowered;
+    lowered.reserve(ext.size());
+    for (char c : ext) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     }
-    return true;
+    return lowered == ".bin";
 }
 
-std::string trim(const std::string& in) {
-    const size_t first = in.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return "";
-    const size_t last = in.find_last_not_of(" \t\r\n");
-    return in.substr(first, last - first + 1);
+std::filesystem::path resolveBookPath(const std::filesystem::path& configuredPath) {
+    std::error_code ec;
+
+    if (std::filesystem::is_regular_file(configuredPath, ec)) {
+        return configuredPath;
+    }
+
+    ec.clear();
+    if (std::filesystem::is_directory(configuredPath, ec)) {
+        std::vector<std::filesystem::path> candidates;
+        for (const auto& entry : std::filesystem::directory_iterator(configuredPath, ec)) {
+            if (ec) {
+                break;
+            }
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+            if (hasBinExtension(entry.path())) {
+                candidates.push_back(entry.path());
+            }
+        }
+
+        if (!candidates.empty()) {
+            std::sort(candidates.begin(), candidates.end());
+            return candidates.front();
+        }
+    }
+
+    return configuredPath;
+}
+
+std::optional<PieceType> decodePromotion(int promotionCode) {
+    switch (promotionCode) {
+        case 0: return std::nullopt;
+        case 1: return PieceType::Knight;
+        case 2: return PieceType::Bishop;
+        case 3: return PieceType::Rook;
+        case 4: return PieceType::Queen;
+        default: return std::nullopt;
+    }
 }
 
 } // namespace
 
-OpeningBook::OpeningBook(const std::string& directoryPath)
-    : m_directoryPath(directoryPath),
+OpeningBook::OpeningBook(const std::string& bookPath)
+    : m_bookPath(bookPath),
       m_rng(std::random_device{}()) {
     load();
 }
 
 bool OpeningBook::load() {
-    m_openingLines.clear();
+    m_entries.clear();
 
-    std::error_code ec;
-    if (!std::filesystem::exists(m_directoryPath, ec) || !std::filesystem::is_directory(m_directoryPath, ec)) {
+    const std::filesystem::path resolvedPath = resolveBookPath(m_bookPath);
+
+    std::ifstream file(resolvedPath, std::ios::binary);
+    if (!file.is_open()) {
         return false;
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(m_directoryPath, ec)) {
-        if (ec) {
+    while (true) {
+        PolyGlotEntry entry{};
+
+        file.read(reinterpret_cast<char*>(&entry.key), sizeof(entry.key));
+        if (file.eof()) {
             break;
         }
-        if (!entry.is_regular_file()) {
-            continue;
+
+        file.read(reinterpret_cast<char*>(&entry.move), sizeof(entry.move));
+        file.read(reinterpret_cast<char*>(&entry.weight), sizeof(entry.weight));
+        file.read(reinterpret_cast<char*>(&entry.learn), sizeof(entry.learn));
+
+        if (!file) {
+            m_entries.clear();
+            return false;
         }
 
-        std::ifstream file(entry.path());
-        if (!file.is_open()) {
-            continue;
-        }
+#if __cpp_lib_byteswap >= 202110L
+        entry.key = std::byteswap(entry.key);
+        entry.move = std::byteswap(entry.move);
+        entry.weight = std::byteswap(entry.weight);
+        entry.learn = std::byteswap(entry.learn);
+#else
+        entry.key = __builtin_bswap64(entry.key);
+        entry.move = __builtin_bswap16(entry.move);
+        entry.weight = __builtin_bswap16(entry.weight);
+        entry.learn = __builtin_bswap32(entry.learn);
+#endif
 
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        std::vector<std::string> line = parseOpeningText(buffer.str());
-        if (!line.empty()) {
-            m_openingLines.push_back(std::move(line));
-        }
+        m_entries.push_back(entry);
     }
 
-    return !m_openingLines.empty();
+    std::sort(
+        m_entries.begin(),
+        m_entries.end(),
+        [](const PolyGlotEntry& lhs, const PolyGlotEntry& rhs) {
+            return lhs.key < rhs.key;
+        });
+
+    return true;
 }
 
 size_t OpeningBook::lineCount() const {
-    return m_openingLines.size();
+    return m_entries.size();
 }
 
-std::string OpeningBook::normalizeMoveToken(const std::string& token) {
-    std::string cleaned = trim(token);
-    if (cleaned.empty()) {
-        return "";
-    }
+std::pair<size_t, size_t> OpeningBook::findEntryRange(uint64_t hash) const {
+    auto lower = std::lower_bound(
+        m_entries.begin(),
+        m_entries.end(),
+        hash,
+        [](const PolyGlotEntry& entry, uint64_t key) {
+            return entry.key < key;
+        });
 
-    cleaned.erase(std::remove(cleaned.begin(), cleaned.end(), '\r'), cleaned.end());
-    cleaned.erase(std::remove(cleaned.begin(), cleaned.end(), '\n'), cleaned.end());
+    auto upper = std::upper_bound(
+        lower,
+        m_entries.end(),
+        hash,
+        [](uint64_t key, const PolyGlotEntry& entry) {
+            return key < entry.key;
+        });
 
-    while (!cleaned.empty() &&
-           (cleaned.back() == ',' || cleaned.back() == ';' || cleaned.back() == '!' || cleaned.back() == '?')) {
-        cleaned.pop_back();
-    }
-
-    const std::unordered_set<std::string> results = {"1-0", "0-1", "1/2-1/2", "*"};
-    if (results.find(cleaned) != results.end()) {
-        return "";
-    }
-
-    size_t prefix = 0;
-    while (prefix < cleaned.size() && std::isdigit(static_cast<unsigned char>(cleaned[prefix]))) {
-        ++prefix;
-    }
-    if (prefix > 0 && prefix < cleaned.size() && cleaned[prefix] == '.') {
-        while (prefix < cleaned.size() && cleaned[prefix] == '.') {
-            ++prefix;
-        }
-        cleaned = cleaned.substr(prefix);
-    }
-
-    if (isOnlyDigitsAndDots(cleaned)) {
-        return "";
-    }
-
-    if (cleaned == "0-0") cleaned = "O-O";
-    if (cleaned == "0-0-0") cleaned = "O-O-O";
-
-    while (!cleaned.empty() && (cleaned.back() == '+' || cleaned.back() == '#')) {
-        cleaned.pop_back();
-    }
-
-    return cleaned;
+    return {
+        static_cast<size_t>(std::distance(m_entries.begin(), lower)),
+        static_cast<size_t>(std::distance(m_entries.begin(), upper))
+    };
 }
 
-std::vector<std::string> OpeningBook::parseOpeningText(const std::string& text) {
-    std::vector<std::string> moves;
-    std::istringstream input(text);
-    std::string token;
+std::optional<Move> OpeningBook::decodePolyGlotMove(uint16_t encodedMove, const Board& board) const {
+    int toFile = encodedMove & 0x7;
+    int toRank = (encodedMove >> 3) & 0x7;
+    int fromFile = (encodedMove >> 6) & 0x7;
+    int fromRank = (encodedMove >> 9) & 0x7;
+    int promotionCode = (encodedMove >> 12) & 0x7;
 
-    while (input >> token) {
-        if (!token.empty() && token.front() == '{') {
-            while (!token.empty() && token.back() != '}' && (input >> token)) {
-            }
-            continue;
-        }
-
-        std::string normalized = normalizeMoveToken(token);
-        if (!normalized.empty()) {
-            moves.push_back(normalized);
-        }
-    }
-
-    return moves;
-}
-
-std::optional<std::string> OpeningBook::getBookMove(const std::vector<std::string>& currentHistory) const {
-    if (m_openingLines.empty()) {
+    std::optional<PieceType> promotion = decodePromotion(promotionCode);
+    if (!promotion.has_value() && promotionCode != 0) {
         return std::nullopt;
     }
 
-    std::vector<std::string> normalizedHistory;
-    normalizedHistory.reserve(currentHistory.size());
-    for (const std::string& move : currentHistory) {
-        std::string token = normalizeMoveToken(move);
-        if (!token.empty()) {
-            normalizedHistory.push_back(token);
-        }
-    }
+    int fromSquare = fromRank * 8 + fromFile;
+    int toSquare = toRank * 8 + toFile;
 
-    std::vector<std::string> candidates;
-    for (const auto& line : m_openingLines) {
-        if (normalizedHistory.size() >= line.size()) {
-            continue;
-        }
+    std::vector<Move> legalMoves = board.generateLegalMoves();
 
-        bool isPrefixMatch = true;
-        for (size_t i = 0; i < normalizedHistory.size(); ++i) {
-            if (line[i] != normalizedHistory[i]) {
-                isPrefixMatch = false;
-                break;
+    auto findMatch = [&](int from, int to) -> std::optional<Move> {
+        for (const Move& move : legalMoves) {
+            if (move.from == from && move.to == to && move.promotion == promotion) {
+                return move;
             }
         }
+        return std::nullopt;
+    };
 
-        if (isPrefixMatch) {
-            candidates.push_back(line[normalizedHistory.size()]);
+    if (std::optional<Move> exact = findMatch(fromSquare, toSquare)) {
+        return exact;
+    }
+
+    if (fromSquare == 4 && toSquare == 7) {
+        return findMatch(4, 6);
+    }
+    if (fromSquare == 4 && toSquare == 0) {
+        return findMatch(4, 2);
+    }
+    if (fromSquare == 60 && toSquare == 63) {
+        return findMatch(60, 62);
+    }
+    if (fromSquare == 60 && toSquare == 56) {
+        return findMatch(60, 58);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<Move> OpeningBook::getBookMove(const Board& board) const {
+    if (m_entries.empty()) {
+        return std::nullopt;
+    }
+
+    const uint64_t hash = board.computePolyglotHash();
+    const auto [beginIndex, endIndex] = findEntryRange(hash);
+
+    if (beginIndex == endIndex) {
+        return std::nullopt;
+    }
+
+    struct Candidate {
+        Move move;
+        uint16_t weight;
+    };
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(endIndex - beginIndex);
+
+    for (size_t i = beginIndex; i < endIndex; ++i) {
+        std::optional<Move> decoded = decodePolyGlotMove(m_entries[i].move, board);
+        if (decoded.has_value()) {
+            candidates.push_back(Candidate{*decoded, m_entries[i].weight});
         }
     }
 
@@ -171,6 +225,26 @@ std::optional<std::string> OpeningBook::getBookMove(const std::vector<std::strin
         return std::nullopt;
     }
 
-    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
-    return candidates[dist(m_rng)];
+    uint64_t totalWeight = 0;
+    for (const Candidate& c : candidates) {
+        totalWeight += static_cast<uint64_t>(c.weight);
+    }
+
+    if (totalWeight == 0) {
+        std::uniform_int_distribution<size_t> uniform(0, candidates.size() - 1);
+        return candidates[uniform(m_rng)].move;
+    }
+
+    std::uniform_int_distribution<uint64_t> weighted(0, totalWeight - 1);
+    const uint64_t target = weighted(m_rng);
+
+    uint64_t cumulative = 0;
+    for (const Candidate& c : candidates) {
+        cumulative += static_cast<uint64_t>(c.weight);
+        if (target < cumulative) {
+            return c.move;
+        }
+    }
+
+    return candidates.back().move;
 }
