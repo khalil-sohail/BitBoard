@@ -299,6 +299,10 @@ void Board::makeNullMove() {
     m_hash ^= SIDE_TO_MOVE_HASH;
 }
 
+void Board::undoNullMove() {
+    (void)undoMove();
+}
+
 bool Board::undoMove() {
     if (m_undoStack.empty()) {
         return false;

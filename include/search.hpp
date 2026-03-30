@@ -3,15 +3,20 @@
 
 #include "board.hpp"
 
+#include <chrono>
 #include <atomic>
 #include <cstdint>
 
-extern std::atomic<bool> g_timeToAbort;
+extern std::atomic<bool> timeAborted;
+extern std::chrono::time_point<std::chrono::steady_clock> startTime;
+extern long long allocatedTimeMs;
 extern uint64_t qNodes;
 extern uint64_t deltaPruneSkips;
 
-int quiescenceSearch(Board& board, int alpha, int beta);
-int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot = false, int plyFromRoot = 0);
+void checkTime();
+
+int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot);
+int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot = false, int plyFromRoot = 0, bool allowNull = true);
 Move findBestMove(Board& board, int maxDepth, long long timeLimitMs = 2000);
 
 #endif

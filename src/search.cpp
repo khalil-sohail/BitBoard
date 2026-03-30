@@ -44,9 +44,6 @@ void clearKillers() {
 }
 
 using SearchClock = std::chrono::steady_clock;
-
-SearchClock::time_point g_searchStartTime;
-long long g_searchTimeLimitMs = 2000;
 uint64_t g_nodesSearched = 0;
 
 constexpr std::array<std::array<int, static_cast<size_t>(PieceType::Count)>, static_cast<size_t>(PieceType::Count)> MVV_LVA = {{
@@ -58,13 +55,6 @@ constexpr std::array<std::array<int, static_cast<size_t>(PieceType::Count)>, sta
     {{100, 200, 300, 400, 500, 600}}
 }};
 
-bool hasTimedOut() {
-    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        SearchClock::now() - g_searchStartTime
-    ).count();
-    return elapsedMs >= g_searchTimeLimitMs;
-}
-
 constexpr std::array<int, static_cast<size_t>(PieceType::Count)> PIECE_VALUES = {
     100, 320, 330, 500, 900, 0
 };
@@ -74,26 +64,27 @@ int getPieceValue(PieceType piece) {
 }
 
 inline bool shouldAbortSearch() {
-    if (g_timeToAbort.load(std::memory_order_relaxed)) {
+    if (timeAborted.load(std::memory_order_relaxed)) {
         return true;
     }
 
     ++g_nodesSearched;
-    if ((g_nodesSearched & TIME_CHECK_MASK) != 0ULL) {
-        return false;
+    if ((g_nodesSearched & TIME_CHECK_MASK) == 0ULL) {
+        checkTime();
     }
 
-    if (hasTimedOut()) {
-        g_timeToAbort.store(true, std::memory_order_relaxed);
-        return true;
-    }
-
-    return false;
+    return timeAborted.load(std::memory_order_relaxed);
 }
 
 int scoreMove(const Board& board, const Move& move) {
+    int score = 0;
+
+    if (move.promotion.has_value()) {
+        score += 700 + getPieceValue(*move.promotion);
+    }
+
     if (!move.isCapture) {
-        return 0;
+        return score;
     }
 
     PieceType victim = PieceType::Pawn;
@@ -109,7 +100,8 @@ int scoreMove(const Board& board, const Move& move) {
 
     const int victimIdx = static_cast<int>(victim);
     const int attackerIdx = static_cast<int>(move.piece);
-    return MVV_LVA[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
+    score += MVV_LVA[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
+    return score;
 }
 
 void sortMovesByScore(const Board& board, std::vector<Move>& moves) {
@@ -133,54 +125,79 @@ void prioritizeMove(std::vector<Move>& moves, const Move& preferred) {
 
 } // namespace
 
-std::atomic<bool> g_timeToAbort{false};
+std::atomic<bool> timeAborted{false};
+std::chrono::time_point<std::chrono::steady_clock> startTime;
+long long allocatedTimeMs = 2000;
 uint64_t qNodes = 0;
 uint64_t deltaPruneSkips = 0;
 
-int quiescenceSearch(Board& board, int alpha, int beta) {
+void checkTime() {
+    if (timeAborted.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    const auto now = SearchClock::now();
+    const long long usedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+    if (usedMs >= allocatedTimeMs) {
+        timeAborted.store(true, std::memory_order_relaxed);
+    }
+}
+
+int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     if (shouldAbortSearch()) {
         return alpha;
     }
 
     ++qNodes;
 
-    const int standPat = board.evaluateSideToMove();
-    if (standPat >= beta) {
-        return beta;
-    }
-    if (standPat > alpha) {
-        alpha = standPat;
+    const bool inCheck = board.inCheck(board.sideToMove());
+    int standPat = -INF_SCORE;
+
+    if (!inCheck) {
+        standPat = board.evaluateSideToMove();
+        if (standPat >= beta) {
+            return beta;
+        }
+        if (alpha < standPat) {
+            alpha = standPat;
+        }
     }
 
-    std::vector<Move> captures = board.generatePseudoLegalCaptures();
-    sortMovesByScore(board, captures);
+    std::vector<Move> moves;
+    if (inCheck) {
+        moves = board.generateLegalMoves();
+    } else {
+        moves = board.generatePseudoLegalCaptures();
+    }
+    sortMovesByScore(board, moves);
 
-    for (const Move& move : captures) {
-        int capturedValue = 0;
-        if (move.isEnPassant) {
-            capturedValue = getPieceValue(PieceType::Pawn);
-        } else {
-            const auto captured = board.pieceAt(move.to);
-            if (captured.has_value()) {
-                capturedValue = getPieceValue(captured->second);
+    for (const Move& move : moves) {
+        if (!inCheck && move.isCapture) {
+            int capturedValue = 0;
+            if (move.isEnPassant) {
+                capturedValue = getPieceValue(PieceType::Pawn);
+            } else {
+                const auto captured = board.pieceAt(move.to);
+                if (captured.has_value()) {
+                    capturedValue = getPieceValue(captured->second);
+                }
+            }
+
+            if (standPat + capturedValue + 200 < alpha) {
+                ++deltaPruneSkips;
+                continue;
             }
         }
 
-        if (standPat + capturedValue + 200 < alpha) {
-            ++deltaPruneSkips;
-            continue;
-        }
-
         const Color movedColor = board.sideToMove();
-
         board.makeMove(move);
 
-        if (board.inCheck(movedColor)) {
+        if (!inCheck && board.inCheck(movedColor)) {
             board.undoMove();
             continue;
         }
 
-        const int score = -quiescenceSearch(board, -beta, -alpha);
+        const int score = -quiescenceSearch(board, -beta, -alpha, plyFromRoot + 1);
         board.undoMove();
 
         if (score >= beta) {
@@ -191,10 +208,16 @@ int quiescenceSearch(Board& board, int alpha, int beta) {
         }
     }
 
+    if (inCheck && moves.empty()) {
+        return -9999 + plyFromRoot;
+    }
+
     return alpha;
 }
 
-int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot, int plyFromRoot) {
+int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, bool isRoot, int plyFromRoot, bool allowNull) {
+    (void)isRoot;
+
     if (shouldAbortSearch()) {
         return alpha;
     }
@@ -234,11 +257,11 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
     }
 
     if (depth == 0) {
-        return quiescenceSearch(board, alpha, beta);
+        return quiescenceSearch(board, alpha, beta, plyFromRoot);
     }
 
     const bool sideInCheck = board.inCheck(board.sideToMove());
-    if (!isRoot && !sideInCheck && depth >= 4) {
+    if (allowNull && depth >= 3 && !sideInCheck && board.hasNonPawnMaterial(board.sideToMove())) {
         board.makeNullMove();
         const int nullScore = -negamax(
             board,
@@ -247,9 +270,10 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
             -beta + 1,
             -colorMultiplier,
             false,
-            plyFromRoot + 1
+            plyFromRoot + 1,
+            false
         );
-        board.undoMove();
+        board.undoNullMove();
 
         if (nullScore >= beta) {
             return beta;
@@ -347,27 +371,48 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         return rootMoves.front();
     }
 
-    long long softTimeLimitMs = timeLimitMs / 2;
+    long long hardTimeLimit = allocatedTimeMs;
+    long long softTimeLimit = hardTimeLimit / 2;
+    Move bestMoveLastIteration{};
+    int stableCount = 0;
 
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
 
-    g_searchStartTime = SearchClock::now();
-    g_searchTimeLimitMs = std::max(1LL, timeLimitMs);
+    allocatedTimeMs = std::max(1LL, timeLimitMs);
+    startTime = SearchClock::now();
     g_nodesSearched = 0;
-    g_timeToAbort.store(false, std::memory_order_relaxed);
+    timeAborted.store(false, std::memory_order_relaxed);
+
+    hardTimeLimit = allocatedTimeMs;
+    softTimeLimit = hardTimeLimit / 2;
 
     sortMovesByScore(board, rootMoves);
 
     Move previousIterationBest = rootMoves.front();
     Move bestCompletedMove = rootMoves.front();
-    int stableMoveCount = 0;
     int previousIterationScore = 0;
 
     clearTT();
     clearKillers();
 
+    auto moveToUci = [&](const Move& move) {
+        std::string text = Board::squareToString(move.from) + Board::squareToString(move.to);
+        if (move.promotion.has_value()) {
+            char promo = 'q';
+            switch (*move.promotion) {
+                case PieceType::Knight: promo = 'n'; break;
+                case PieceType::Bishop: promo = 'b'; break;
+                case PieceType::Rook: promo = 'r'; break;
+                case PieceType::Queen: promo = 'q'; break;
+                default: break;
+            }
+            text.push_back(promo);
+        }
+        return text;
+    };
+
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
-        if (g_timeToAbort.load(std::memory_order_relaxed)) {
+        if (timeAborted.load(std::memory_order_relaxed)) {
             break;
         }
 
@@ -400,7 +445,7 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
             );
             board.undoMove();
 
-            if (g_timeToAbort.load(std::memory_order_relaxed)) {
+            if (timeAborted.load(std::memory_order_relaxed)) {
                 completedDepth = false;
                 break;
             }
@@ -441,7 +486,7 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
                 );
                 board.undoMove();
 
-                if (g_timeToAbort.load(std::memory_order_relaxed)) {
+                if (timeAborted.load(std::memory_order_relaxed)) {
                     completedDepth = false;
                     break;
                 }
@@ -457,33 +502,40 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
             break;
         }
 
-        const bool panicMode = (currentDepth >= 5 && depthBestScore <= previousIterationScore - 50);
         bestCompletedMove = depthBestMove;
 
-        const bool sameBestMove =
-            bestCompletedMove.from == previousIterationBest.from &&
-            bestCompletedMove.to == previousIterationBest.to &&
-            bestCompletedMove.piece == previousIterationBest.piece &&
-            bestCompletedMove.promotion == previousIterationBest.promotion;
+        const bool sameAsLastIteration =
+            currentDepth > 1 &&
+            bestCompletedMove.from == bestMoveLastIteration.from &&
+            bestCompletedMove.to == bestMoveLastIteration.to &&
+            bestCompletedMove.piece == bestMoveLastIteration.piece &&
+            bestCompletedMove.promotion == bestMoveLastIteration.promotion;
 
-        if (sameBestMove) {
-            ++stableMoveCount;
+        if (sameAsLastIteration) {
+            ++stableCount;
         } else {
-            stableMoveCount = 0;
+            stableCount = 0;
+            softTimeLimit = hardTimeLimit * 4 / 5;
         }
 
+        bestMoveLastIteration = bestCompletedMove;
+
         const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            SearchClock::now() - g_searchStartTime
+            SearchClock::now() - startTime
         ).count();
 
         previousIterationBest = depthBestMove;
         previousIterationScore = depthBestScore;
 
-        if (!panicMode && elapsedMs >= softTimeLimitMs) {
+        std::cout << "info depth " << currentDepth
+                  << " score cp " << depthBestScore
+                  << " pv " << moveToUci(bestCompletedMove) << "\n";
+
+        if (elapsedMs > softTimeLimit && stableCount >= 2) {
             break;
         }
 
-        if (stableMoveCount >= 3 && currentDepth >= 5) {
+        if (elapsedMs > (hardTimeLimit * 3 / 4)) {
             break;
         }
     }
