@@ -2,6 +2,7 @@
 #include "search.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -409,6 +410,20 @@ void test_mate_distance_scoring() {
             "Engine failed to find fastest mate! Mate Distance bounds might be pruning the winning line.");
 }
 
+void test_quiescence_counters() {
+    Board board;
+    require(board.loadFEN("r3k2r/p1p2ppp/2ppbn2/2b5/4P2q/2NB1Q1P/PPP2PP1/R1B2RK1 b kq - 2 10"),
+            "Failed to load tactical FEN for quiescence counter test.");
+
+    qNodes = 0;
+    deltaPruneSkips = 0;
+
+    (void)findBestMove(board, 2, 2000);
+
+    assert(qNodes > 0 && "Quiescence search failed to evaluate any nodes!");
+    assert(deltaPruneSkips > 0 && "Delta pruning failed to skip any bad captures!");
+}
+
 } // namespace
 
 int main() {
@@ -432,6 +447,7 @@ int main() {
         {"Quiescence horizon effect", test_quiescence_horizon_effect},
         {"NMP zugzwang safety", test_nmp_zugzwang_safety},
         {"Mate distance scoring", test_mate_distance_scoring},
+        {"Quiescence counters", test_quiescence_counters},
     };
 
     int passed = 0;

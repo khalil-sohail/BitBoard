@@ -162,6 +162,7 @@ void Board::reset() {
     m_bitboards[BLACK_IDX][KING_IDX] = squareMask(60);
 
     resetEvalStateFromBoard();
+    m_hash = computePolyglotHash();
 }
 
 uint64_t Board::occupancy(Color color) const {
@@ -287,35 +288,32 @@ std::vector<Move> Board::generatePseudoLegalMoves() const {
             moves.push_back(m);
         }
 
-        uint64_t leftTargets = ((pawns & ~Board::FILE_A) << 7);
-        uint64_t rightTargets = ((pawns & ~Board::FILE_H) << 9);
+        uint64_t capLeft = ((pawns & ~Board::FILE_A) << 7) & oppOcc;
+        uint64_t capRight = ((pawns & ~Board::FILE_H) << 9) & oppOcc;
 
-        uint64_t capLeft = leftTargets & oppOcc;
-        uint64_t capRight = rightTargets & oppOcc;
+        uint64_t capLeftNormal = capLeft & ~Board::RANK_8;
+        uint64_t capRightNormal = capRight & ~Board::RANK_8;
+        uint64_t capLeftPromo = capLeft & Board::RANK_8;
+        uint64_t capRightPromo = capRight & Board::RANK_8;
 
-        uint64_t capPromo = (capLeft | capRight) & Board::RANK_8;
-        uint64_t capNormal = (capLeft | capRight) & ~Board::RANK_8;
-
-        while (capNormal) {
-            const int to = popLsb(capNormal);
-            Move m = buildMove(to - 7, to, PieceType::Pawn);
-            if (!hasPiece(Color::White, PieceType::Pawn, m.from)) {
-                m.from = to - 9;
-            }
-            m.isCapture = true;
-            moves.push_back(m);
+        while (capLeftNormal) {
+            const int to = popLsb(capLeftNormal);
+            Move m = buildMove(to - 7, to, PieceType::Pawn); m.isCapture = true; moves.push_back(m);
         }
-
-        while (capPromo) {
-            const int to = popLsb(capPromo);
+        while (capRightNormal) {
+            const int to = popLsb(capRightNormal);
+            Move m = buildMove(to - 9, to, PieceType::Pawn); m.isCapture = true; moves.push_back(m);
+        }
+        while (capLeftPromo) {
+            const int to = popLsb(capLeftPromo);
             for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
-                Move m = buildMove(to - 7, to, PieceType::Pawn);
-                if (!hasPiece(Color::White, PieceType::Pawn, m.from)) {
-                    m.from = to - 9;
-                }
-                m.isCapture = true;
-                m.promotion = promo;
-                moves.push_back(m);
+                Move m = buildMove(to - 7, to, PieceType::Pawn); m.isCapture = true; m.promotion = promo; moves.push_back(m);
+            }
+        }
+        while (capRightPromo) {
+            const int to = popLsb(capRightPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to - 9, to, PieceType::Pawn); m.isCapture = true; m.promotion = promo; moves.push_back(m);
             }
         }
 
@@ -364,35 +362,32 @@ std::vector<Move> Board::generatePseudoLegalMoves() const {
             moves.push_back(m);
         }
 
-        uint64_t leftTargets = ((pawns & ~Board::FILE_A) >> 9);
-        uint64_t rightTargets = ((pawns & ~Board::FILE_H) >> 7);
+        uint64_t capLeft = ((pawns & ~Board::FILE_A) >> 9) & oppOcc;
+        uint64_t capRight = ((pawns & ~Board::FILE_H) >> 7) & oppOcc;
 
-        uint64_t capLeft = leftTargets & oppOcc;
-        uint64_t capRight = rightTargets & oppOcc;
+        uint64_t capLeftNormal = capLeft & ~Board::RANK_1;
+        uint64_t capRightNormal = capRight & ~Board::RANK_1;
+        uint64_t capLeftPromo = capLeft & Board::RANK_1;
+        uint64_t capRightPromo = capRight & Board::RANK_1;
 
-        uint64_t capPromo = (capLeft | capRight) & Board::RANK_1;
-        uint64_t capNormal = (capLeft | capRight) & ~Board::RANK_1;
-
-        while (capNormal) {
-            const int to = popLsb(capNormal);
-            Move m = buildMove(to + 7, to, PieceType::Pawn);
-            if (!hasPiece(Color::Black, PieceType::Pawn, m.from)) {
-                m.from = to + 9;
-            }
-            m.isCapture = true;
-            moves.push_back(m);
+        while (capLeftNormal) {
+            const int to = popLsb(capLeftNormal);
+            Move m = buildMove(to + 9, to, PieceType::Pawn); m.isCapture = true; moves.push_back(m);
         }
-
-        while (capPromo) {
-            const int to = popLsb(capPromo);
+        while (capRightNormal) {
+            const int to = popLsb(capRightNormal);
+            Move m = buildMove(to + 7, to, PieceType::Pawn); m.isCapture = true; moves.push_back(m);
+        }
+        while (capLeftPromo) {
+            const int to = popLsb(capLeftPromo);
             for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
-                Move m = buildMove(to + 7, to, PieceType::Pawn);
-                if (!hasPiece(Color::Black, PieceType::Pawn, m.from)) {
-                    m.from = to + 9;
-                }
-                m.isCapture = true;
-                m.promotion = promo;
-                moves.push_back(m);
+                Move m = buildMove(to + 9, to, PieceType::Pawn); m.isCapture = true; m.promotion = promo; moves.push_back(m);
+            }
+        }
+        while (capRightPromo) {
+            const int to = popLsb(capRightPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to + 7, to, PieceType::Pawn); m.isCapture = true; m.promotion = promo; moves.push_back(m);
             }
         }
 
@@ -483,6 +478,179 @@ std::vector<Move> Board::generatePseudoLegalMoves() const {
                 m.isQueenSideCastle = true;
                 moves.push_back(m);
             }
+        }
+    }
+
+    return moves;
+}
+
+std::vector<Move> Board::generatePseudoLegalCaptures() const {
+    std::vector<Move> moves;
+
+    const Color usColor = m_sideToMove;
+    const Color themColor = (usColor == Color::White) ? Color::Black : Color::White;
+    const int us = static_cast<int>(usColor);
+
+    const uint64_t ownOcc = occupancy(usColor);
+    const uint64_t oppOcc = occupancy(themColor);
+    const uint64_t allOcc = ownOcc | oppOcc;
+
+    const uint64_t pawns = m_bitboards[us][PAWN_IDX];
+    if (usColor == Color::White) {
+        uint64_t capLeft = ((pawns & ~Board::FILE_A) << 7) & oppOcc;
+        uint64_t capRight = ((pawns & ~Board::FILE_H) << 9) & oppOcc;
+
+        uint64_t capLeftNormal = capLeft & ~Board::RANK_8;
+        uint64_t capRightNormal = capRight & ~Board::RANK_8;
+        uint64_t capLeftPromo = capLeft & Board::RANK_8;
+        uint64_t capRightPromo = capRight & Board::RANK_8;
+
+        while (capLeftNormal) {
+            const int to = popLsb(capLeftNormal);
+            Move m = buildMove(to - 7, to, PieceType::Pawn);
+            m.isCapture = true;
+            moves.push_back(m);
+        }
+        while (capRightNormal) {
+            const int to = popLsb(capRightNormal);
+            Move m = buildMove(to - 9, to, PieceType::Pawn);
+            m.isCapture = true;
+            moves.push_back(m);
+        }
+        while (capLeftPromo) {
+            const int to = popLsb(capLeftPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to - 7, to, PieceType::Pawn);
+                m.isCapture = true;
+                m.promotion = promo;
+                moves.push_back(m);
+            }
+        }
+        while (capRightPromo) {
+            const int to = popLsb(capRightPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to - 9, to, PieceType::Pawn);
+                m.isCapture = true;
+                m.promotion = promo;
+                moves.push_back(m);
+            }
+        }
+
+        if (m_enPassantSquare != -1) {
+            const uint64_t epMask = squareMask(m_enPassantSquare);
+            uint64_t epLeft = ((pawns & ~Board::FILE_A) << 7) & epMask;
+            uint64_t epRight = ((pawns & ~Board::FILE_H) << 9) & epMask;
+            if (epLeft) {
+                Move m = buildMove(m_enPassantSquare - 7, m_enPassantSquare, PieceType::Pawn);
+                m.isCapture = true;
+                m.isEnPassant = true;
+                moves.push_back(m);
+            }
+            if (epRight) {
+                Move m = buildMove(m_enPassantSquare - 9, m_enPassantSquare, PieceType::Pawn);
+                m.isCapture = true;
+                m.isEnPassant = true;
+                moves.push_back(m);
+            }
+        }
+    } else {
+        uint64_t capLeft = ((pawns & ~Board::FILE_A) >> 9) & oppOcc;
+        uint64_t capRight = ((pawns & ~Board::FILE_H) >> 7) & oppOcc;
+
+        uint64_t capLeftNormal = capLeft & ~Board::RANK_1;
+        uint64_t capRightNormal = capRight & ~Board::RANK_1;
+        uint64_t capLeftPromo = capLeft & Board::RANK_1;
+        uint64_t capRightPromo = capRight & Board::RANK_1;
+
+        while (capLeftNormal) {
+            const int to = popLsb(capLeftNormal);
+            Move m = buildMove(to + 9, to, PieceType::Pawn);
+            m.isCapture = true;
+            moves.push_back(m);
+        }
+        while (capRightNormal) {
+            const int to = popLsb(capRightNormal);
+            Move m = buildMove(to + 7, to, PieceType::Pawn);
+            m.isCapture = true;
+            moves.push_back(m);
+        }
+        while (capLeftPromo) {
+            const int to = popLsb(capLeftPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to + 9, to, PieceType::Pawn);
+                m.isCapture = true;
+                m.promotion = promo;
+                moves.push_back(m);
+            }
+        }
+        while (capRightPromo) {
+            const int to = popLsb(capRightPromo);
+            for (PieceType promo : {PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight}) {
+                Move m = buildMove(to + 7, to, PieceType::Pawn);
+                m.isCapture = true;
+                m.promotion = promo;
+                moves.push_back(m);
+            }
+        }
+
+        if (m_enPassantSquare != -1) {
+            const uint64_t epMask = squareMask(m_enPassantSquare);
+            uint64_t epLeft = ((pawns & ~Board::FILE_A) >> 9) & epMask;
+            uint64_t epRight = ((pawns & ~Board::FILE_H) >> 7) & epMask;
+            if (epLeft) {
+                Move m = buildMove(m_enPassantSquare + 9, m_enPassantSquare, PieceType::Pawn);
+                m.isCapture = true;
+                m.isEnPassant = true;
+                moves.push_back(m);
+            }
+            if (epRight) {
+                Move m = buildMove(m_enPassantSquare + 7, m_enPassantSquare, PieceType::Pawn);
+                m.isCapture = true;
+                m.isEnPassant = true;
+                moves.push_back(m);
+            }
+        }
+    }
+
+    auto addCapturesFromMask = [&](uint64_t pieces, PieceType piece, auto attacksFn) {
+        uint64_t bb = pieces;
+        while (bb) {
+            const int from = popLsb(bb);
+            uint64_t targets = attacksFn(from) & oppOcc;
+            while (targets) {
+                const int to = popLsb(targets);
+                Move m = buildMove(from, to, piece);
+                m.isCapture = true;
+                moves.push_back(m);
+            }
+        }
+    };
+
+    addCapturesFromMask(m_bitboards[us][KNIGHT_IDX], PieceType::Knight, [&](int from) {
+        return knightAttacks(from);
+    });
+
+    addCapturesFromMask(m_bitboards[us][BISHOP_IDX], PieceType::Bishop, [&](int from) {
+        return bishopAttacks(from, allOcc);
+    });
+
+    addCapturesFromMask(m_bitboards[us][ROOK_IDX], PieceType::Rook, [&](int from) {
+        return rookAttacks(from, allOcc);
+    });
+
+    addCapturesFromMask(m_bitboards[us][QUEEN_IDX], PieceType::Queen, [&](int from) {
+        return bishopAttacks(from, allOcc) | rookAttacks(from, allOcc);
+    });
+
+    uint64_t king = m_bitboards[us][KING_IDX];
+    if (king) {
+        const int from = lsbIndex(king);
+        uint64_t targets = kingAttacks(from) & oppOcc;
+        while (targets) {
+            const int to = popLsb(targets);
+            Move m = buildMove(from, to, PieceType::King);
+            m.isCapture = true;
+            moves.push_back(m);
         }
     }
 

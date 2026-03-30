@@ -59,6 +59,7 @@ private:
     std::array<int, 2> m_mgScore{};
     std::array<int, 2> m_egScore{};
     int m_gamePhase = 0;
+    uint64_t m_hash = 0ULL;
     std::vector<uint64_t> m_hashHistory;
     std::vector<std::string> m_sanHistory;
     std::vector<UndoState> m_undoStack;
@@ -79,6 +80,7 @@ public:
 
     Board();
     void reset();
+    bool loadFEN(const std::string& fen);
 
     [[nodiscard]] uint64_t occupancy(Color color) const;
     [[nodiscard]] uint64_t occupancyAll() const;
@@ -87,10 +89,13 @@ public:
     [[nodiscard]] std::optional<std::pair<Color, PieceType>> pieceAt(int square) const;
 
     [[nodiscard]] std::vector<Move> generatePseudoLegalMoves() const;
+    [[nodiscard]] std::vector<Move> generatePseudoLegalCaptures() const;
     [[nodiscard]] std::vector<Move> generateLegalMoves() const;
     [[nodiscard]] uint64_t perft(int depth) const;
     [[nodiscard]] int evaluate() const;
+    [[nodiscard]] int evaluateSideToMove() const;
     [[nodiscard]] int computeStaticEvaluation() const;
+    [[nodiscard]] uint64_t getHash() const { return m_hash; }
     [[nodiscard]] uint64_t computePolyglotHash() const;
     [[nodiscard]] bool isRepetition() const;
     [[nodiscard]] bool isSquareAttacked(int square, Color byColor) const;
