@@ -1,6 +1,8 @@
 #include "board.hpp"
 
+#include <cctype>
 #include <cstdint>
+#include <sstream>
 
 namespace {
 
@@ -83,11 +85,99 @@ uint64_t Board::computePolyglotHash() const {
 }
 
 bool Board::isRepetition() const {
-    const uint64_t currentHash = computePolyglotHash();
+    const uint64_t currentHash = m_hash;
     for (auto it = m_hashHistory.rbegin(); it != m_hashHistory.rend(); ++it) {
         if (*it == currentHash) {
             return true;
         }
     }
     return false;
+}
+
+bool Board::loadFEN(const std::string& fen) {
+    m_bitboards = {};
+    m_mgScore = {0, 0};
+    m_egScore = {0, 0};
+    m_gamePhase = 0;
+    m_castlingRights = 0;
+    m_enPassantSquare = -1;
+    m_hashHistory.clear();
+    m_undoStack.clear();
+
+    std::istringstream iss(fen);
+    std::string pieces;
+    std::string active;
+    std::string castling;
+    std::string enpassant;
+    if (!(iss >> pieces >> active >> castling >> enpassant)) {
+        return false;
+    }
+
+    int rank = 7;
+    int file = 0;
+    for (char c : pieces) {
+        if (c == '/') {
+            if (file != 8) {
+                return false;
+            }
+            --rank;
+            file = 0;
+            continue;
+        }
+
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            file += (c - '0');
+            if (file > 8) {
+                return false;
+            }
+            continue;
+        }
+
+        if (!std::isalpha(static_cast<unsigned char>(c)) || rank < 0 || file > 7) {
+            return false;
+        }
+
+        const Color color = std::isupper(static_cast<unsigned char>(c)) ? Color::White : Color::Black;
+        const char p = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        PieceType piece = PieceType::Pawn;
+        switch (p) {
+            case 'p': piece = PieceType::Pawn; break;
+            case 'n': piece = PieceType::Knight; break;
+            case 'b': piece = PieceType::Bishop; break;
+            case 'r': piece = PieceType::Rook; break;
+            case 'q': piece = PieceType::Queen; break;
+            case 'k': piece = PieceType::King; break;
+            default: return false;
+        }
+
+        const int square = rank * 8 + file;
+        m_bitboards[static_cast<int>(color)][static_cast<int>(piece)] |= (1ULL << square);
+        addPieceEval(color, piece, square);
+        ++file;
+    }
+
+    if (rank != 0 || file != 8) {
+        return false;
+    }
+
+    m_sideToMove = (active == "b") ? Color::Black : Color::White;
+
+    if (castling != "-") {
+        if (castling.find('K') != std::string::npos) m_castlingRights |= CASTLE_WK;
+        if (castling.find('Q') != std::string::npos) m_castlingRights |= CASTLE_WQ;
+        if (castling.find('k') != std::string::npos) m_castlingRights |= CASTLE_BK;
+        if (castling.find('q') != std::string::npos) m_castlingRights |= CASTLE_BQ;
+    }
+
+    if (enpassant != "-") {
+        const int epSquare = squareFromString(enpassant);
+        if (epSquare == -1) {
+            return false;
+        }
+        m_enPassantSquare = epSquare;
+    }
+
+    m_hash = computePolyglotHash();
+    return true;
 }

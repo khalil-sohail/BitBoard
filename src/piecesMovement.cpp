@@ -1,7 +1,9 @@
 #include "board.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
+#include <iostream>
 #include <sstream>
 
 namespace {
@@ -16,9 +18,62 @@ constexpr uint8_t CASTLE_WQ = 0b0100;
 constexpr uint8_t CASTLE_BK = 0b0010;
 constexpr uint8_t CASTLE_BQ = 0b0001;
 
+constexpr uint64_t kPolyglotRandom[781] = {
+#include "polyglot_random_values.inc"
+};
+
 uint64_t squareMask(int square) {
     return 1ULL << square;
 }
+
+int colorToPolyglotPivot(Color color) {
+    return (color == Color::Black) ? 0 : 1;
+}
+
+uint64_t pieceHash(Color color, PieceType piece, int square) {
+    const int polyPieceIndex = static_cast<int>(piece) * 2 + colorToPolyglotPivot(color);
+    const int randomIndex = 64 * polyPieceIndex + square;
+    return kPolyglotRandom[randomIndex];
+}
+
+uint64_t castlingHash(uint8_t rights) {
+    uint64_t key = 0ULL;
+    if (rights & CASTLE_WK) key ^= kPolyglotRandom[768];
+    if (rights & CASTLE_WQ) key ^= kPolyglotRandom[769];
+    if (rights & CASTLE_BK) key ^= kPolyglotRandom[770];
+    if (rights & CASTLE_BQ) key ^= kPolyglotRandom[771];
+    return key;
+}
+
+uint64_t enPassantHash(Color sideToMove,
+                       int enPassantSquare,
+                       const std::array<std::array<uint64_t, static_cast<size_t>(PieceType::Count)>, 2>& bitboards) {
+    if (enPassantSquare < 0 || enPassantSquare >= 64) {
+        return 0ULL;
+    }
+
+    uint64_t epMask = 1ULL << enPassantSquare;
+    if (sideToMove == Color::White) {
+        epMask >>= 8;
+    } else {
+        epMask <<= 8;
+    }
+
+    const uint64_t adjacentPawns =
+        ((epMask & ~Board::FILE_A) >> 1) |
+        ((epMask & ~Board::FILE_H) << 1);
+
+    const int us = static_cast<int>(sideToMove);
+    const uint64_t ownPawns = bitboards[us][PAWN_IDX];
+    if ((adjacentPawns & ownPawns) == 0ULL) {
+        return 0ULL;
+    }
+
+    const int epFile = enPassantSquare % 8;
+    return kPolyglotRandom[772 + epFile];
+}
+
+constexpr uint64_t SIDE_TO_MOVE_HASH = kPolyglotRandom[780];
 
 PieceType pieceFromLetter(char c) {
     switch (c) {
@@ -104,7 +159,7 @@ int Board::squareFromString(const std::string& coord) {
 }
 
 void Board::makeMove(const Move& move) {
-    m_hashHistory.push_back(computePolyglotHash());
+    m_hashHistory.push_back(m_hash);
 
     m_undoStack.push_back({
         .bitboards = m_bitboards,
@@ -120,10 +175,18 @@ void Board::makeMove(const Move& move) {
     const int them = (us == WHITE_IDX) ? BLACK_IDX : WHITE_IDX;
     const Color usColor = m_sideToMove;
     const Color themColor = (usColor == Color::White) ? Color::Black : Color::White;
+    const uint8_t oldCastlingRights = m_castlingRights;
+    const int oldEnPassantSquare = m_enPassantSquare;
+    const Color oldSideToMove = m_sideToMove;
 
     const uint64_t fromMask = squareMask(move.from);
     const uint64_t toMask = squareMask(move.to);
     const int pieceIdx = static_cast<int>(move.piece);
+
+    m_hash ^= castlingHash(oldCastlingRights);
+    m_hash ^= enPassantHash(oldSideToMove, oldEnPassantSquare, m_bitboards);
+
+    m_hash ^= pieceHash(usColor, move.piece, move.from);
 
     removePieceEval(usColor, move.piece, move.from);
 
@@ -131,6 +194,7 @@ void Board::makeMove(const Move& move) {
 
     for (int p = 0; p < static_cast<int>(PieceType::Count); ++p) {
         if (m_bitboards[them][p] & toMask) {
+            m_hash ^= pieceHash(themColor, static_cast<PieceType>(p), move.to);
             removePieceEval(themColor, static_cast<PieceType>(p), move.to);
             m_bitboards[them][p] &= ~toMask;
         }
@@ -138,25 +202,32 @@ void Board::makeMove(const Move& move) {
 
     if (move.isEnPassant) {
         const int capSq = (m_sideToMove == Color::White) ? move.to - 8 : move.to + 8;
+        m_hash ^= pieceHash(themColor, PieceType::Pawn, capSq);
         removePieceEval(themColor, PieceType::Pawn, capSq);
         m_bitboards[them][PAWN_IDX] &= ~squareMask(capSq);
     }
 
     if (move.promotion.has_value()) {
+        m_hash ^= pieceHash(usColor, *move.promotion, move.to);
         addPieceEval(usColor, *move.promotion, move.to);
         m_bitboards[us][static_cast<int>(*move.promotion)] |= toMask;
     } else {
+        m_hash ^= pieceHash(usColor, move.piece, move.to);
         addPieceEval(usColor, move.piece, move.to);
         m_bitboards[us][pieceIdx] |= toMask;
     }
 
     if (move.isKingSideCastle) {
         if (m_sideToMove == Color::White) {
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 7);
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 5);
             removePieceEval(usColor, PieceType::Rook, 7);
             addPieceEval(usColor, PieceType::Rook, 5);
             m_bitboards[us][ROOK_IDX] &= ~squareMask(7);
             m_bitboards[us][ROOK_IDX] |= squareMask(5);
         } else {
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 63);
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 61);
             removePieceEval(usColor, PieceType::Rook, 63);
             addPieceEval(usColor, PieceType::Rook, 61);
             m_bitboards[us][ROOK_IDX] &= ~squareMask(63);
@@ -165,11 +236,15 @@ void Board::makeMove(const Move& move) {
     }
     if (move.isQueenSideCastle) {
         if (m_sideToMove == Color::White) {
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 0);
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 3);
             removePieceEval(usColor, PieceType::Rook, 0);
             addPieceEval(usColor, PieceType::Rook, 3);
             m_bitboards[us][ROOK_IDX] &= ~squareMask(0);
             m_bitboards[us][ROOK_IDX] |= squareMask(3);
         } else {
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 56);
+            m_hash ^= pieceHash(usColor, PieceType::Rook, 59);
             removePieceEval(usColor, PieceType::Rook, 56);
             addPieceEval(usColor, PieceType::Rook, 59);
             m_bitboards[us][ROOK_IDX] &= ~squareMask(56);
@@ -198,10 +273,15 @@ void Board::makeMove(const Move& move) {
     }
 
     m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
+    m_hash ^= castlingHash(m_castlingRights);
+    m_hash ^= enPassantHash(m_sideToMove, m_enPassantSquare, m_bitboards);
+    m_hash ^= SIDE_TO_MOVE_HASH;
+
+    // assert(m_hash == computePolyglotHash() && "Incremental hash desync in makeMove!");
 }
 
 void Board::makeNullMove() {
-    m_hashHistory.push_back(computePolyglotHash());
+    m_hashHistory.push_back(m_hash);
 
     m_undoStack.push_back({
         .bitboards = m_bitboards,
@@ -213,8 +293,10 @@ void Board::makeNullMove() {
         .gamePhase = m_gamePhase,
     });
 
+    m_hash ^= enPassantHash(m_sideToMove, m_enPassantSquare, m_bitboards);
     m_enPassantSquare = -1;
     m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
+    m_hash ^= SIDE_TO_MOVE_HASH;
 }
 
 bool Board::undoMove() {
@@ -232,9 +314,9 @@ bool Board::undoMove() {
     m_gamePhase = prev.gamePhase;
     m_undoStack.pop_back();
 
-    if (!m_hashHistory.empty()) {
-        m_hashHistory.pop_back();
-    }
+    assert(!m_hashHistory.empty() && "Missing hash history entry on undoMove");
+    m_hash = m_hashHistory.back();
+    m_hashHistory.pop_back();
 
     return true;
 }
@@ -256,16 +338,20 @@ bool Board::applyMove(const Move& move) {
 
 ParseResult Board::parseMove(const std::string& input) const {
     ParseResult out;
+    auto fail = [&](const std::string& msg) {
+        out.error = msg;
+        std::cout << "info string PARSE ERROR: " << msg << " (input: " << input << ")\n";
+        return out;
+    };
+
     std::string token = trim(input);
     if (token.empty()) {
-        out.error = "Empty input. Enter a move like e2e4, Nf3, or O-O.";
-        return out;
+        return fail("Empty input. Enter a move like e2e4, Nf3, or O-O.");
     }
 
     std::vector<Move> legal = generateLegalMoves();
     if (legal.empty()) {
-        out.error = "No legal moves available in this position.";
-        return out;
+        return fail("No legal moves available in this position.");
     }
 
     bool requiresCheck = false;
@@ -275,8 +361,7 @@ ParseResult Board::parseMove(const std::string& input) const {
         requiresCheck = token.back() == '+';
         token.pop_back();
         if (!token.empty() && (token.back() == '+' || token.back() == '#')) {
-            out.error = "Invalid SAN suffix. Use at most one of '+' or '#'.";
-            return out;
+            return fail("Invalid SAN suffix. Use at most one of '+' or '#'.");
         }
     }
 
@@ -286,16 +371,13 @@ ParseResult Board::parseMove(const std::string& input) const {
             if (m.isKingSideCastle) matches.push_back(m);
         }
         if (matches.empty()) {
-            out.error = "Kingside castling is not legal in this position.";
-            return out;
+            return fail("Kingside castling is not legal in this position.");
         }
         if (requiresMate && !isMateAfterMove(*this, matches.front())) {
-            out.error = "Move does not result in checkmate, but '#' was provided.";
-            return out;
+            return fail("Move does not result in checkmate, but '#' was provided.");
         }
         if (requiresCheck && !isCheckAfterMove(*this, matches.front())) {
-            out.error = "Move does not give check, but '+' was provided.";
-            return out;
+            return fail("Move does not give check, but '+' was provided.");
         }
         out.move = matches.front();
         return out;
@@ -307,16 +389,13 @@ ParseResult Board::parseMove(const std::string& input) const {
             if (m.isQueenSideCastle) matches.push_back(m);
         }
         if (matches.empty()) {
-            out.error = "Queenside castling is not legal in this position.";
-            return out;
+            return fail("Queenside castling is not legal in this position.");
         }
         if (requiresMate && !isMateAfterMove(*this, matches.front())) {
-            out.error = "Move does not result in checkmate, but '#' was provided.";
-            return out;
+            return fail("Move does not result in checkmate, but '#' was provided.");
         }
         if (requiresCheck && !isCheckAfterMove(*this, matches.front())) {
-            out.error = "Move does not give check, but '+' was provided.";
-            return out;
+            return fail("Move does not give check, but '+' was provided.");
         }
         out.move = matches.front();
         return out;
@@ -340,8 +419,7 @@ ParseResult Board::parseMove(const std::string& input) const {
             const int from = squareFromString(token.substr(0, 2));
             const int to = squareFromString(token.substr(2, 2));
             if (from == -1 || to == -1) {
-                out.error = "Invalid coordinate move. Expected format like e2e4.";
-                return out;
+                return fail("Invalid coordinate move. Expected format like e2e4.");
             }
 
             std::optional<PieceType> promotion;
@@ -349,8 +427,7 @@ ParseResult Board::parseMove(const std::string& input) const {
                 char promoChar = static_cast<char>(std::toupper(static_cast<unsigned char>(token[4])));
                 PieceType p = pieceFromLetter(promoChar);
                 if (p == PieceType::Pawn || p == PieceType::King) {
-                    out.error = "Invalid promotion piece. Use one of Q, R, B, N.";
-                    return out;
+                    return fail("Invalid promotion piece. Use one of Q, R, B, N.");
                 }
                 promotion = p;
             }
@@ -362,18 +439,15 @@ ParseResult Board::parseMove(const std::string& input) const {
                 }
             }
             if (matches.empty()) {
-                out.error = "Illegal move for current position: " + token + ".";
-                return out;
+                return fail("Illegal move for current position: " + token + ".");
             }
 
             const Move& chosen = matches.front();
             if (requiresMate && !isMateAfterMove(*this, chosen)) {
-                out.error = "Move does not result in checkmate, but '#' was provided.";
-                return out;
+                return fail("Move does not result in checkmate, but '#' was provided.");
             }
             if (requiresCheck && !isCheckAfterMove(*this, chosen)) {
-                out.error = "Move does not give check, but '+' was provided.";
-                return out;
+                return fail("Move does not give check, but '+' was provided.");
             }
 
             out.move = chosen;
@@ -396,33 +470,28 @@ ParseResult Board::parseMove(const std::string& input) const {
     std::optional<PieceType> promotion;
     if (eqPos != std::string::npos) {
         if (eqPos + 1 >= token.size()) {
-            out.error = "Invalid SAN promotion syntax. Use e8=Q or exd8=Q.";
-            return out;
+            return fail("Invalid SAN promotion syntax. Use e8=Q or exd8=Q.");
         }
         char promoChar = static_cast<char>(std::toupper(static_cast<unsigned char>(token[eqPos + 1])));
         PieceType p = pieceFromLetter(promoChar);
         if (p == PieceType::Pawn || p == PieceType::King) {
-            out.error = "Invalid promotion piece in SAN. Use Q, R, B, or N.";
-            return out;
+            return fail("Invalid promotion piece in SAN. Use Q, R, B, or N.");
         }
         promotion = p;
         if (piece != PieceType::Pawn) {
-            out.error = "Only pawns may promote in SAN notation.";
-            return out;
+            return fail("Only pawns may promote in SAN notation.");
         }
         token = token.substr(0, eqPos);
     }
 
     if (token.size() < pos + 2) {
-        out.error = "Incomplete SAN move.";
-        return out;
+        return fail("Incomplete SAN move.");
     }
 
     const std::string destStr = token.substr(token.size() - 2, 2);
     const int to = squareFromString(destStr);
     if (to == -1) {
-        out.error = "Invalid destination square in SAN move.";
-        return out;
+        return fail("Invalid destination square in SAN move.");
     }
 
     std::string core = token.substr(pos, token.size() - pos - 2);
@@ -432,8 +501,7 @@ ParseResult Board::parseMove(const std::string& input) const {
         wantsCapture = true;
         core.erase(xPos, 1);
         if (core.find('x') != std::string::npos) {
-            out.error = "Invalid SAN: too many capture markers 'x'.";
-            return out;
+            return fail("Invalid SAN: too many capture markers 'x'.");
         }
     }
 
@@ -473,29 +541,24 @@ ParseResult Board::parseMove(const std::string& input) const {
     if (piece == PieceType::Pawn && wantsCapture && disambiguation.size() == 1) {
         const char srcFile = disambiguation[0];
         if (!(srcFile >= 'a' && srcFile <= 'h')) {
-            out.error = "Invalid SAN pawn capture. Example: exd5.";
-            return out;
+            return fail("Invalid SAN pawn capture. Example: exd5.");
         }
     }
 
     if (matches.empty()) {
-        out.error = "No legal SAN match for '" + input + "'.";
-        return out;
+        return fail("No legal SAN match for '" + input + "'.");
     }
 
     if (matches.size() > 1) {
-        out.error = "Ambiguous SAN move '" + input + "'. Candidates: " + joinMoves(matches) + ".";
-        return out;
+        return fail("Ambiguous SAN move '" + input + "'. Candidates: " + joinMoves(matches) + ".");
     }
 
     const Move& chosen = matches.front();
     if (requiresMate && !isMateAfterMove(*this, chosen)) {
-        out.error = "Move does not result in checkmate, but '#' was provided.";
-        return out;
+        return fail("Move does not result in checkmate, but '#' was provided.");
     }
     if (requiresCheck && !isCheckAfterMove(*this, chosen)) {
-        out.error = "Move does not give check, but '+' was provided.";
-        return out;
+        return fail("Move does not give check, but '+' was provided.");
     }
 
     out.move = chosen;

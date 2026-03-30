@@ -356,9 +356,25 @@ void runGuiMode(Board& board, int searchDepth, const std::string& bookPath) {
             board.clearSanHistory();
         } 
         else if (input.rfind("position", 0) == 0) {
-            if (input.find("startpos") != std::string::npos) {
-                board.reset();
-                board.clearSanHistory();
+            std::istringstream iss(input);
+            std::string token;
+            iss >> token; // position
+            if (iss >> token) {
+                if (token == "startpos") {
+                    board.reset();
+                    board.clearSanHistory();
+                } else if (token == "fen") {
+                    std::string fen;
+                    for (int i = 0; i < 6 && iss >> token && token != "moves"; ++i) {
+                        if (i > 0) fen += " ";
+                        fen += token;
+                    }
+                    if (!fen.empty() && !board.loadFEN(fen)) {
+                        std::cout << "info string Invalid FEN: " << fen << std::endl;
+                    } else if (!fen.empty()) {
+                        board.clearSanHistory();
+                    }
+                }
             }
 
             const std::size_t movesPos = input.find(" moves ");

@@ -12,6 +12,11 @@ constexpr int BLACK_IDX = static_cast<int>(Color::Black);
 constexpr int PAWN_IDX = static_cast<int>(PieceType::Pawn);
 constexpr int BISHOP_IDX = static_cast<int>(PieceType::Bishop);
 constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
+constexpr int KING_IDX = static_cast<int>(PieceType::King);
+constexpr uint8_t CASTLE_WK = 0b1000;
+constexpr uint8_t CASTLE_WQ = 0b0100;
+constexpr uint8_t CASTLE_BK = 0b0010;
+constexpr uint8_t CASTLE_BQ = 0b0001;
 
 inline int lsbIndex(uint64_t bb) {
 	return __builtin_ctzll(bb);
@@ -170,6 +175,7 @@ constexpr int fileOf(int square) {
 struct EvalMasks {
 	std::array<uint64_t, 8> FILE_MASKS{};
 	std::array<std::array<uint64_t, 64>, 2> PASSED_PAWN_MASKS{};
+	std::array<std::array<uint64_t, 64>, 2> KING_SHIELD_MASKS{};
 
 	constexpr EvalMasks() {
 		for (int i = 0; i < 8; ++i) {
@@ -200,6 +206,34 @@ struct EvalMasks {
 				}
 
 				PASSED_PAWN_MASKS[static_cast<size_t>(color)][static_cast<size_t>(sq)] = mask;
+
+				uint64_t shieldMask = 0ULL;
+				const int startFile = std::max(0, file - 1);
+				const int endFile = std::min(7, file + 1);
+
+				for (int f = startFile; f <= endFile; ++f) {
+					if (color == WHITE_IDX) {
+						const int rank1 = rank + 1;
+						const int rank2 = rank + 2;
+						if (rank1 < 8) {
+							shieldMask |= (1ULL << (rank1 * 8 + f));
+						}
+						if (rank2 < 8) {
+							shieldMask |= (1ULL << (rank2 * 8 + f));
+						}
+					} else {
+						const int rank1 = rank - 1;
+						const int rank2 = rank - 2;
+						if (rank1 >= 0) {
+							shieldMask |= (1ULL << (rank1 * 8 + f));
+						}
+						if (rank2 >= 0) {
+							shieldMask |= (1ULL << (rank2 * 8 + f));
+						}
+					}
+				}
+
+				KING_SHIELD_MASKS[static_cast<size_t>(color)][static_cast<size_t>(sq)] = shieldMask;
 			}
 		}
 	}
@@ -239,6 +273,158 @@ int rookOpenFileBonus(uint64_t rooks, uint64_t allPawns) {
 	}
 
 	return bonus;
+}
+
+int kingPawnShieldBonus(Color color, int kingSquare, uint64_t ownPawns) {
+	const int colorIdx = (color == Color::White) ? WHITE_IDX : BLACK_IDX;
+	const uint64_t shield = MASKS.KING_SHIELD_MASKS[static_cast<size_t>(colorIdx)][static_cast<size_t>(kingSquare)] & ownPawns;
+	const int count = std::popcount(shield);
+	return std::min(count, 3) * 15;
+}
+
+int pawnStructurePenalty(uint64_t ownPawns) {
+	int penalty = 0;
+
+	for (int file = 0; file < 8; ++file) {
+		const uint64_t filePawns = ownPawns & MASKS.FILE_MASKS[static_cast<size_t>(file)];
+		if (filePawns == 0ULL) {
+			continue;
+		}
+
+		const int count = std::popcount(filePawns);
+		if (count > 1) {
+			penalty += (count - 1) * 15;
+		}
+
+		uint64_t adjMask = 0ULL;
+		if (file > 0) {
+			adjMask |= MASKS.FILE_MASKS[static_cast<size_t>(file - 1)];
+		}
+		if (file < 7) {
+			adjMask |= MASKS.FILE_MASKS[static_cast<size_t>(file + 1)];
+		}
+
+		if ((ownPawns & adjMask) == 0ULL) {
+			penalty += count * 20;
+		}
+	}
+
+	return penalty;
+}
+
+int mopUpEval(int winningKingSq, int losingKingSq) {
+	const int losingFile = fileOf(losingKingSq);
+	const int losingRank = losingKingSq >> 3;
+	const int centerDistance = std::abs(losingFile - 3) + std::abs(losingRank - 3);
+
+	const int winningFile = fileOf(winningKingSq);
+	const int winningRank = winningKingSq >> 3;
+	const int kingDistance = std::abs(winningFile - losingFile) + std::abs(winningRank - losingRank);
+
+	return centerDistance * 10 + (14 - kingDistance) * 4;
+}
+
+int passedPawnBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
+	int bonus = 0;
+	uint64_t pawns = ownPawns;
+
+	while (pawns != 0ULL) {
+		const int square = lsbIndex(pawns);
+		pawns &= (pawns - 1);
+
+		const int file = fileOf(square);
+		const int rank = square >> 3;
+
+		uint64_t mask = 0ULL;
+		const int startFile = std::max(0, file - 1);
+		const int endFile = std::min(7, file + 1);
+
+		if (color == Color::White) {
+			for (int targetRank = rank + 1; targetRank < 8; ++targetRank) {
+				for (int targetFile = startFile; targetFile <= endFile; ++targetFile) {
+					mask |= (1ULL << (targetRank * 8 + targetFile));
+				}
+			}
+		} else {
+			for (int targetRank = rank - 1; targetRank >= 0; --targetRank) {
+				for (int targetFile = startFile; targetFile <= endFile; ++targetFile) {
+					mask |= (1ULL << (targetRank * 8 + targetFile));
+				}
+			}
+		}
+
+		if ((mask & enemyPawns) == 0ULL) {
+			const int relativeRank = (color == Color::White) ? (rank + 1) : (8 - rank);
+			bonus += (relativeRank * relativeRank) * 5;
+		}
+	}
+
+	return bonus;
+}
+
+int trappedRookPenalty(Color color, uint64_t rooks, uint64_t king) {
+	if (king == 0ULL) {
+		return 0;
+	}
+
+	if (color == Color::White) {
+		const bool rookInCorner = (rooks & ((1ULL << 0) | (1ULL << 7))) != 0ULL;
+		const bool kingTrapsRook = (king & ((1ULL << 1) | (1ULL << 2) | (1ULL << 5) | (1ULL << 6))) != 0ULL;
+		return (rookInCorner && kingTrapsRook) ? 50 : 0;
+	}
+
+	const bool rookInCorner = (rooks & ((1ULL << 56) | (1ULL << 63))) != 0ULL;
+	const bool kingTrapsRook = (king & ((1ULL << 57) | (1ULL << 58) | (1ULL << 61) | (1ULL << 62))) != 0ULL;
+	return (rookInCorner && kingTrapsRook) ? 50 : 0;
+}
+
+int badBishopPenalty(uint64_t ownPawns, uint64_t ownBishops, Color color) {
+	int penalty = 0;
+	if (color == Color::White) {
+		if ((ownBishops & 512ULL) && (ownPawns & 262144ULL)) penalty += 150;
+		if ((ownBishops & 16384ULL) && (ownPawns & 2097152ULL)) penalty += 150;
+		if ((ownBishops & 4ULL) && (ownPawns & 2048ULL)) penalty += 120;
+		if ((ownBishops & 32ULL) && (ownPawns & 4096ULL)) penalty += 120;
+	} else {
+		if ((ownBishops & 562949953421312ULL) && (ownPawns & 4398046511104ULL)) penalty += 150;
+		if ((ownBishops & 18014398509481984ULL) && (ownPawns & 35184372088832ULL)) penalty += 150;
+		if ((ownBishops & 288230376151711744ULL) && (ownPawns & 2251799813685248ULL)) penalty += 120;
+		if ((ownBishops & 2305843009213693952ULL) && (ownPawns & 4503599627370496ULL)) penalty += 120;
+	}
+	return penalty;
+}
+
+int earlyQueenPenalty(uint64_t ownQueen, uint64_t ownKnights, uint64_t ownBishops, Color color) {
+	if (!ownQueen) return 0;
+
+	int penalty = 0;
+	uint64_t startingRank = (color == Color::White) ? Board::RANK_1 : Board::RANK_8;
+
+	if ((ownQueen & startingRank) == 0ULL) {
+		int undevelopedMinors = std::popcount((ownKnights | ownBishops) & startingRank);
+		if (undevelopedMinors >= 2) {
+			penalty += 40 * (undevelopedMinors - 1);
+		}
+	}
+	return penalty;
+}
+
+int uncastledKingPenalty(uint64_t king, uint8_t castlingRights, Color color) {
+	if (!king) return 0;
+	int penalty = 0;
+	int kingSq = lsbIndex(king);
+	int file = kingSq % 8;
+
+	if (file >= 2 && file <= 5) {
+		penalty += 40;
+
+		if (color == Color::White && !(castlingRights & (CASTLE_WK | CASTLE_WQ))) {
+			penalty += 120;
+		} else if (color == Color::Black && !(castlingRights & (CASTLE_BK | CASTLE_BQ))) {
+			penalty += 120;
+		}
+	}
+	return penalty;
 }
 
 } // namespace
@@ -300,13 +486,73 @@ int Board::evaluate() const {
 	mg += rookOpenFileBonus(m_bitboards[WHITE_IDX][ROOK_IDX], allPawns);
 	mg -= rookOpenFileBonus(m_bitboards[BLACK_IDX][ROOK_IDX], allPawns);
 
+	const int whiteKingSquare = lsbIndex(m_bitboards[WHITE_IDX][KING_IDX]);
+	const int blackKingSquare = lsbIndex(m_bitboards[BLACK_IDX][KING_IDX]);
+	mg += kingPawnShieldBonus(Color::White, whiteKingSquare, m_bitboards[WHITE_IDX][PAWN_IDX]);
+	mg -= kingPawnShieldBonus(Color::Black, blackKingSquare, m_bitboards[BLACK_IDX][PAWN_IDX]);
+
+	const int whitePawnPenalty = pawnStructurePenalty(m_bitboards[WHITE_IDX][PAWN_IDX]);
+	const int blackPawnPenalty = pawnStructurePenalty(m_bitboards[BLACK_IDX][PAWN_IDX]);
+	mg -= whitePawnPenalty;
+	eg -= whitePawnPenalty;
+	mg += blackPawnPenalty;
+	eg += blackPawnPenalty;
+
 	const int passedWhite = passedPawnCount(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
 	const int passedBlack = passedPawnCount(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
 	mg += 20 * (passedWhite - passedBlack);
 	eg += 40 * (passedWhite - passedBlack);
 
+	const int whitePassed = passedPawnBonus(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
+	const int blackPassed = passedPawnBonus(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
+	mg += whitePassed;
+	mg -= blackPassed;
+	eg += 2 * whitePassed;
+	eg -= 2 * blackPassed;
+
+	const int whiteTrapped = trappedRookPenalty(Color::White, m_bitboards[WHITE_IDX][ROOK_IDX], m_bitboards[WHITE_IDX][KING_IDX]);
+	const int blackTrapped = trappedRookPenalty(Color::Black, m_bitboards[BLACK_IDX][ROOK_IDX], m_bitboards[BLACK_IDX][KING_IDX]);
+	mg -= whiteTrapped;
+	mg += blackTrapped;
+
+	const int whiteBadBishop = badBishopPenalty(m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][BISHOP_IDX], Color::White);
+	const int blackBadBishop = badBishopPenalty(m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][BISHOP_IDX], Color::Black);
+	const int whiteEarlyQueen = earlyQueenPenalty(
+		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)],
+		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)],
+		m_bitboards[WHITE_IDX][BISHOP_IDX],
+		Color::White
+	);
+	const int blackEarlyQueen = earlyQueenPenalty(
+		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)],
+		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)],
+		m_bitboards[BLACK_IDX][BISHOP_IDX],
+		Color::Black
+	);
+
+	mg -= (whiteBadBishop + whiteEarlyQueen);
+	mg += (blackBadBishop + blackEarlyQueen);
+	eg -= whiteBadBishop;
+	eg += blackBadBishop;
+
+	int whiteUncastled = uncastledKingPenalty(m_bitboards[WHITE_IDX][KING_IDX], m_castlingRights, Color::White);
+	int blackUncastled = uncastledKingPenalty(m_bitboards[BLACK_IDX][KING_IDX], m_castlingRights, Color::Black);
+	mg -= whiteUncastled;
+	mg += blackUncastled;
+
+	if (eg > 400) {
+		eg += mopUpEval(whiteKingSquare, blackKingSquare);
+	} else if (eg < -400) {
+		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
+	}
+
 	const int phase = std::clamp(m_gamePhase, 0, 24);
 	return (mg * phase + eg * (24 - phase)) / 24;
+}
+
+int Board::evaluateSideToMove() const {
+	const int eval = evaluate();
+	return (m_sideToMove == Color::White) ? eval : -eval;
 }
 
 int Board::computeStaticEvaluation() const {
@@ -348,10 +594,65 @@ int Board::computeStaticEvaluation() const {
 	mg += rookOpenFileBonus(m_bitboards[WHITE_IDX][ROOK_IDX], allPawns);
 	mg -= rookOpenFileBonus(m_bitboards[BLACK_IDX][ROOK_IDX], allPawns);
 
+	const int whiteKingSquare = lsbIndex(m_bitboards[WHITE_IDX][KING_IDX]);
+	const int blackKingSquare = lsbIndex(m_bitboards[BLACK_IDX][KING_IDX]);
+	mg += kingPawnShieldBonus(Color::White, whiteKingSquare, m_bitboards[WHITE_IDX][PAWN_IDX]);
+	mg -= kingPawnShieldBonus(Color::Black, blackKingSquare, m_bitboards[BLACK_IDX][PAWN_IDX]);
+
+	const int whitePawnPenalty = pawnStructurePenalty(m_bitboards[WHITE_IDX][PAWN_IDX]);
+	const int blackPawnPenalty = pawnStructurePenalty(m_bitboards[BLACK_IDX][PAWN_IDX]);
+	mg -= whitePawnPenalty;
+	eg -= whitePawnPenalty;
+	mg += blackPawnPenalty;
+	eg += blackPawnPenalty;
+
 	const int passedWhite = passedPawnCount(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
 	const int passedBlack = passedPawnCount(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
 	mg += 20 * (passedWhite - passedBlack);
 	eg += 40 * (passedWhite - passedBlack);
+
+	const int whitePassed = passedPawnBonus(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
+	const int blackPassed = passedPawnBonus(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
+	mg += whitePassed;
+	mg -= blackPassed;
+	eg += 2 * whitePassed;
+	eg -= 2 * blackPassed;
+
+	const int whiteTrapped = trappedRookPenalty(Color::White, m_bitboards[WHITE_IDX][ROOK_IDX], m_bitboards[WHITE_IDX][KING_IDX]);
+	const int blackTrapped = trappedRookPenalty(Color::Black, m_bitboards[BLACK_IDX][ROOK_IDX], m_bitboards[BLACK_IDX][KING_IDX]);
+	mg -= whiteTrapped;
+	mg += blackTrapped;
+
+	const int whiteBadBishop = badBishopPenalty(m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][BISHOP_IDX], Color::White);
+	const int blackBadBishop = badBishopPenalty(m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][BISHOP_IDX], Color::Black);
+	const int whiteEarlyQueen = earlyQueenPenalty(
+		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)],
+		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)],
+		m_bitboards[WHITE_IDX][BISHOP_IDX],
+		Color::White
+	);
+	const int blackEarlyQueen = earlyQueenPenalty(
+		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)],
+		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)],
+		m_bitboards[BLACK_IDX][BISHOP_IDX],
+		Color::Black
+	);
+
+	mg -= (whiteBadBishop + whiteEarlyQueen);
+	mg += (blackBadBishop + blackEarlyQueen);
+	eg -= whiteBadBishop;
+	eg += blackBadBishop;
+
+	int whiteUncastled = uncastledKingPenalty(m_bitboards[WHITE_IDX][KING_IDX], m_castlingRights, Color::White);
+	int blackUncastled = uncastledKingPenalty(m_bitboards[BLACK_IDX][KING_IDX], m_castlingRights, Color::Black);
+	mg -= whiteUncastled;
+	mg += blackUncastled;
+
+	if (eg > 400) {
+		eg += mopUpEval(whiteKingSquare, blackKingSquare);
+	} else if (eg < -400) {
+		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
+	}
 
 	const int clampedPhase = std::clamp(phase, 0, 24);
 	return (mg * clampedPhase + eg * (24 - clampedPhase)) / 24;
