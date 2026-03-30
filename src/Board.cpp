@@ -94,6 +94,14 @@ bool Board::isRepetition() const {
     return false;
 }
 
+bool Board::hasNonPawnMaterial(Color color) const {
+    const int c = static_cast<int>(color);
+    return (m_bitboards[c][static_cast<int>(PieceType::Knight)] |
+            m_bitboards[c][static_cast<int>(PieceType::Bishop)] |
+            m_bitboards[c][static_cast<int>(PieceType::Rook)] |
+            m_bitboards[c][static_cast<int>(PieceType::Queen)]) != 0ULL;
+}
+
 bool Board::loadFEN(const std::string& fen) {
     m_bitboards = {};
     m_mgScore = {0, 0};

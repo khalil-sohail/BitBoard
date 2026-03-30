@@ -3,6 +3,7 @@
 #include "search.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <filesystem>
 #include <iostream>
@@ -418,17 +419,39 @@ void runGuiMode(Board& board, int searchDepth, const std::string& bookPath) {
             }
 
             const bool whiteToMove = board.sideToMove() == Color::White;
-            const int timeLeft = whiteToMove ? wtime : btime;
-            const int increment = whiteToMove ? winc : binc;
+            const long long timeLeft = whiteToMove ? wtime : btime;
+            const long long increment = whiteToMove ? winc : binc;
 
             long long timeLimitMs = 2000;
             if (movetime > 0) {
-                timeLimitMs = movetime;
+                timeLimitMs = std::max(10LL, static_cast<long long>(movetime));
             } else if (timeLeft > 0) {
-                timeLimitMs = std::max(100, (timeLeft / 20) + (increment / 2));
+                uint64_t activePieces =
+                    board.getBitboard(Color::White, PieceType::Knight) |
+                    board.getBitboard(Color::White, PieceType::Bishop) |
+                    board.getBitboard(Color::White, PieceType::Rook) |
+                    board.getBitboard(Color::White, PieceType::Queen) |
+                    board.getBitboard(Color::Black, PieceType::Knight) |
+                    board.getBitboard(Color::Black, PieceType::Bishop) |
+                    board.getBitboard(Color::Black, PieceType::Rook) |
+                    board.getBitboard(Color::Black, PieceType::Queen);
+
+                int pieceCount = std::popcount(activePieces);
+
+                int movesToGo = 30;
+                if (pieceCount >= 10) {
+                    movesToGo = 20;
+                } else if (pieceCount <= 6) {
+                    movesToGo = 40;
+                }
+
+                timeLimitMs = (timeLeft / movesToGo) + (increment * 3 / 4) - 50;
+                if (timeLimitMs < 10) {
+                    timeLimitMs = 10;
+                }
             }
 
-            const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 32;
+            const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 64;
 
             std::string bestMoveText = "0000";
             if (openingBook.has_value()) {

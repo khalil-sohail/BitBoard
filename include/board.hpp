@@ -84,6 +84,9 @@ public:
 
     [[nodiscard]] uint64_t occupancy(Color color) const;
     [[nodiscard]] uint64_t occupancyAll() const;
+    [[nodiscard]] uint64_t getBitboard(Color color, PieceType piece) const {
+        return m_bitboards[static_cast<int>(color)][static_cast<int>(piece)];
+    }
     [[nodiscard]] bool isSquareOccupied(int square) const;
     [[nodiscard]] bool hasPiece(Color color, PieceType piece, int square) const;
     [[nodiscard]] std::optional<std::pair<Color, PieceType>> pieceAt(int square) const;
@@ -104,7 +107,9 @@ public:
     bool applyMove(const Move& move);
     void makeMove(const Move& move);
     void makeNullMove();
+    void undoNullMove();
     bool undoMove();
+    [[nodiscard]] bool hasNonPawnMaterial(Color color) const;
 
     [[nodiscard]] ParseResult parseMove(const std::string& input) const;
     [[nodiscard]] static int squareFromString(const std::string& coord);

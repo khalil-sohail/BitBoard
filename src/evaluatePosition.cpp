@@ -332,8 +332,9 @@ int passedPawnBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
 		const int square = lsbIndex(pawns);
 		pawns &= (pawns - 1);
 
-		const int file = fileOf(square);
-		const int rank = square >> 3;
+		const int sq = square;
+		const int file = fileOf(sq);
+		const int rank = sq >> 3;
 
 		uint64_t mask = 0ULL;
 		const int startFile = std::max(0, file - 1);
@@ -355,7 +356,14 @@ int passedPawnBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
 
 		if ((mask & enemyPawns) == 0ULL) {
 			const int relativeRank = (color == Color::White) ? (rank + 1) : (8 - rank);
-			bonus += (relativeRank * relativeRank) * 5;
+			int pawnBonus = (relativeRank * relativeRank) * 5;
+			uint64_t forwardSq = (color == Color::White) ? (1ULL << (sq + 8)) : (1ULL << (sq - 8));
+			uint64_t oppOcc = enemyPawns;
+
+			if (forwardSq & oppOcc) {
+				pawnBonus /= 2;
+			}
+			bonus += pawnBonus;
 		}
 	}
 
@@ -467,6 +475,19 @@ void Board::resetEvalStateFromBoard() {
 }
 
 int Board::evaluate() const {
+	bool noWhitePawns = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
+	bool noBlackPawns = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
+	bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+	bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+
+	if (noWhitePawns && noBlackPawns && noWhiteMajors && noBlackMajors) {
+		int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
+		int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
+		if (whiteMinors < 2 && blackMinors < 2) {
+			return 0;
+		}
+	}
+
 	int mg = m_mgScore[WHITE_IDX] - m_mgScore[BLACK_IDX];
 	int eg = m_egScore[WHITE_IDX] - m_egScore[BLACK_IDX];
 
@@ -540,14 +561,22 @@ int Board::evaluate() const {
 	mg -= whiteUncastled;
 	mg += blackUncastled;
 
-	if (eg > 400) {
+	if (eg > 200) {
 		eg += mopUpEval(whiteKingSquare, blackKingSquare);
-	} else if (eg < -400) {
+	} else if (eg < -200) {
 		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
 	}
 
 	const int phase = std::clamp(m_gamePhase, 0, 24);
-	return (mg * phase + eg * (24 - phase)) / 24;
+	int score = (mg * phase + eg * (24 - phase)) / 24;
+
+	if (score > 0 && noWhitePawns) {
+		score /= 2;
+	} else if (score < 0 && noBlackPawns) {
+		score /= 2;
+	}
+
+	return score;
 }
 
 int Board::evaluateSideToMove() const {
@@ -556,6 +585,19 @@ int Board::evaluateSideToMove() const {
 }
 
 int Board::computeStaticEvaluation() const {
+	bool noWhitePawns = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
+	bool noBlackPawns = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
+	bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+	bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+
+	if (noWhitePawns && noBlackPawns && noWhiteMajors && noBlackMajors) {
+		int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
+		int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
+		if (whiteMinors < 2 && blackMinors < 2) {
+			return 0;
+		}
+	}
+
 	std::array<int, 2> mgScore = {0, 0};
 	std::array<int, 2> egScore = {0, 0};
 	int phase = 0;
@@ -648,12 +690,20 @@ int Board::computeStaticEvaluation() const {
 	mg -= whiteUncastled;
 	mg += blackUncastled;
 
-	if (eg > 400) {
+	if (eg > 200) {
 		eg += mopUpEval(whiteKingSquare, blackKingSquare);
-	} else if (eg < -400) {
+	} else if (eg < -200) {
 		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
 	}
 
 	const int clampedPhase = std::clamp(phase, 0, 24);
-	return (mg * clampedPhase + eg * (24 - clampedPhase)) / 24;
+	int score = (mg * clampedPhase + eg * (24 - clampedPhase)) / 24;
+
+	if (score > 0 && noWhitePawns) {
+		score /= 2;
+	} else if (score < 0 && noBlackPawns) {
+		score /= 2;
+	}
+
+	return score;
 }
