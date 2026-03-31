@@ -12,6 +12,8 @@ constexpr int INF_SCORE = 1'000'000'000;
 constexpr int MATE_SCORE = 1'000'000;
 constexpr int MAX_PLY = 64;
 constexpr int NULL_MOVE_REDUCTION = 2;
+constexpr int DELTA_PRUNING_MARGIN = 260;
+constexpr int ASPIRATION_WINDOW_SIZE = 75;
 constexpr uint64_t TIME_CHECK_MASK = 2047ULL;
 
 enum class TTFlag {
@@ -183,7 +185,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
                 }
             }
 
-            if (standPat + capturedValue + 200 < alpha) {
+            if (standPat + capturedValue + DELTA_PRUNING_MARGIN < alpha) {
                 ++deltaPruneSkips;
                 continue;
             }
@@ -358,8 +360,6 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
 }
 
 Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
-    constexpr int WINDOW_SIZE = 50;
-
     qNodes = 0;
     deltaPruneSkips = 0;
 
@@ -419,8 +419,8 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         std::vector<Move> moves = rootMoves;
         prioritizeMove(moves, previousIterationBest);
 
-        int alpha = (currentDepth >= 4) ? previousIterationScore - WINDOW_SIZE : -INF_SCORE;
-        int beta = (currentDepth >= 4) ? previousIterationScore + WINDOW_SIZE : INF_SCORE;
+        int alpha = (currentDepth >= 4) ? previousIterationScore - ASPIRATION_WINDOW_SIZE : -INF_SCORE;
+        int beta = (currentDepth >= 4) ? previousIterationScore + ASPIRATION_WINDOW_SIZE : INF_SCORE;
 
         int depthBestScore = -INF_SCORE;
         Move depthBestMove = moves.front();
@@ -540,8 +540,14 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         }
     }
 
-    std::cout << "info string qNodes: " << qNodes
-              << " deltaSkips: " << deltaPruneSkips << "\n";
+    const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        SearchClock::now() - startTime
+    ).count();
+
+    std::cout << "info string nodes: " << g_nodesSearched
+              << " qNodes: " << qNodes
+              << " deltaSkips: " << deltaPruneSkips
+              << " elapsedMs: " << totalElapsedMs << "\n";
 
     return bestCompletedMove;
 }

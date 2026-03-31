@@ -99,6 +99,9 @@ public:
     [[nodiscard]] int evaluate() const;
     [[nodiscard]] int evaluateSideToMove() const;
     [[nodiscard]] int computeStaticEvaluation() const;
+#if !defined(NDEBUG) || defined(EVAL_TUNING_DIAGNOSTICS)
+    void printEvalBreakdown() const;
+#endif
     [[nodiscard]] uint64_t getHash() const { return m_hash; }
     [[nodiscard]] uint64_t computePolyglotHash() const;
     [[nodiscard]] bool isRepetition() const;

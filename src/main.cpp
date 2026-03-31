@@ -17,7 +17,7 @@ enum class ExecutionMode {
 };
 
 std::string g_pendingCliMessage;
-constexpr const char* OPENINGS_ABSOLUTE_PATH = "/home/ksohail-/Documents/chess-engine/openings";
+constexpr const char* OPENINGS_ABSOLUTE_PATH = "./openings";
 
 bool hasFlag(int argc, char* argv[], const std::string& flag) {
     for (int i = 1; i < argc; ++i) {
@@ -390,6 +390,15 @@ void runGuiMode(Board& board, int searchDepth, const std::string& bookPath) {
                 }
             }
         } 
+        else if ((input.rfind("eval", 0) == 0 &&
+                  (input.size() == 4 || std::isspace(static_cast<unsigned char>(input[4])))) ||
+                 input == "d") {
+#if !defined(NDEBUG) || defined(EVAL_TUNING_DIAGNOSTICS)
+            board.printEvalBreakdown();
+#else
+            std::cout << "info string eval diagnostics disabled in this build" << std::endl;
+#endif
+        }
         else if (input.rfind("go", 0) == 0) {
             ensureOpeningBookLoaded();
 
