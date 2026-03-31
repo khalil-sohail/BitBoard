@@ -16,3 +16,5 @@ chess-engine
 chess-engine-tests
 bench
 .github/*
+.github/
+.github

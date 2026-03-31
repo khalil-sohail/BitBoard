@@ -67,6 +67,25 @@ constexpr std::array<int, 9> CONNECTED_PAWN_BONUS_EG_BY_RANK = {
 	0, 0, 3, 7, 12, 20, 32, 0, 0
 };
 
+constexpr std::array<int, 9> CANDIDATE_PAWN_BONUS_MG_BY_RANK = {
+	0, 0, 1, 3, 6, 10, 14, 0, 0
+};
+
+constexpr std::array<int, 9> CANDIDATE_PAWN_BONUS_EG_BY_RANK = {
+	0, 0, 2, 5, 9, 14, 20, 0, 0
+};
+
+constexpr std::array<int, 9> BACKWARD_PAWN_PENALTY_MG_BY_RANK = {
+	0, 0, 6, 9, 12, 15, 18, 0, 0
+};
+
+constexpr std::array<int, 9> BACKWARD_PAWN_PENALTY_EG_BY_RANK = {
+	0, 0, 4, 6, 8, 10, 12, 0, 0
+};
+
+constexpr int PAWN_ISLAND_PENALTY_MG = 8;
+constexpr int PAWN_ISLAND_PENALTY_EG = 10;
+
 constexpr std::array<int, 9> KING_ATTACK_PRESSURE_PENALTY = {
 	0, 8, 22, 45, 80, 120, 160, 200, 240
 };
@@ -128,6 +147,12 @@ constexpr const auto& ROOK_ACTIVITY_BONUS_MG = EvalWeights::ROOK_ACTIVITY_BONUS_
 constexpr const auto& ROOK_ACTIVITY_BONUS_EG = EvalWeights::ROOK_ACTIVITY_BONUS_EG;
 constexpr const auto& CONNECTED_PAWN_BONUS_MG_BY_RANK = EvalWeights::CONNECTED_PAWN_BONUS_MG_BY_RANK;
 constexpr const auto& CONNECTED_PAWN_BONUS_EG_BY_RANK = EvalWeights::CONNECTED_PAWN_BONUS_EG_BY_RANK;
+constexpr const auto& CANDIDATE_PAWN_BONUS_MG_BY_RANK = EvalWeights::CANDIDATE_PAWN_BONUS_MG_BY_RANK;
+constexpr const auto& CANDIDATE_PAWN_BONUS_EG_BY_RANK = EvalWeights::CANDIDATE_PAWN_BONUS_EG_BY_RANK;
+constexpr const auto& BACKWARD_PAWN_PENALTY_MG_BY_RANK = EvalWeights::BACKWARD_PAWN_PENALTY_MG_BY_RANK;
+constexpr const auto& BACKWARD_PAWN_PENALTY_EG_BY_RANK = EvalWeights::BACKWARD_PAWN_PENALTY_EG_BY_RANK;
+constexpr int PAWN_ISLAND_PENALTY_MG = EvalWeights::PAWN_ISLAND_PENALTY_MG;
+constexpr int PAWN_ISLAND_PENALTY_EG = EvalWeights::PAWN_ISLAND_PENALTY_EG;
 constexpr const auto& KING_ATTACK_PRESSURE_PENALTY = EvalWeights::KING_ATTACK_PRESSURE_PENALTY;
 constexpr int BISHOP_PAIR_BONUS_MG = EvalWeights::BISHOP_PAIR_BONUS_MG;
 constexpr int BISHOP_PAIR_BONUS_EG = EvalWeights::BISHOP_PAIR_BONUS_EG;
@@ -165,6 +190,12 @@ constexpr int MOP_UP_KING_DISTANCE_WEIGHT = EvalWeights::MOP_UP_KING_DISTANCE_WE
 struct TaperTerms {
 	int mg = 0;
 	int eg = 0;
+};
+
+struct PieceScoreDelta {
+	int mg = 0;
+	int eg = 0;
+	int phase = 0;
 };
 
 constexpr std::array<std::array<int, 64>, static_cast<size_t>(PieceType::Count)> MG_PESTO = {{
@@ -607,6 +638,166 @@ int connectedPawnsBonusEg(Color color, uint64_t ownPawns) {
 	return connectedPawnsBonusByRank(color, ownPawns, CONNECTED_PAWN_BONUS_EG_BY_RANK);
 }
 
+uint64_t pawnAttacks(Color color, uint64_t pawns) {
+	if (color == Color::White) {
+		return ((pawns & ~Board::FILE_A) << 7) | ((pawns & ~Board::FILE_H) << 9);
+	}
+	return ((pawns & ~Board::FILE_A) >> 9) | ((pawns & ~Board::FILE_H) >> 7);
+}
+
+bool hasAdjacentPawnSupport(Color color, uint64_t ownPawns, int square) {
+	const int rank = square >> 3;
+	const int file = fileOf(square);
+
+	for (int df = -1; df <= 1; df += 2) {
+		const int adjFile = file + df;
+		if (adjFile < 0 || adjFile > 7) {
+			continue;
+		}
+
+		if (color == Color::White) {
+			for (int r = 0; r <= rank; ++r) {
+				if ((ownPawns & squareMask(r * 8 + adjFile)) != 0ULL) {
+					return true;
+				}
+			}
+		} else {
+			for (int r = 7; r >= rank; --r) {
+				if ((ownPawns & squareMask(r * 8 + adjFile)) != 0ULL) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+int candidatePawnsBonusByRank(Color color, uint64_t ownPawns, uint64_t enemyPawns, const std::array<int, 9>& bonusByRank) {
+	int bonus = 0;
+	uint64_t pawns = ownPawns;
+	const int colorIdx = (color == Color::White) ? WHITE_IDX : BLACK_IDX;
+
+	while (pawns != 0ULL) {
+		const int square = lsbIndex(pawns);
+		pawns &= (pawns - 1);
+
+		const uint64_t frontMask = MASKS.PASSED_PAWN_MASKS[static_cast<size_t>(colorIdx)][static_cast<size_t>(square)];
+		if ((enemyPawns & frontMask) == 0ULL) {
+			continue;
+		}
+
+		const uint64_t fileMask = MASKS.FILE_MASKS[static_cast<size_t>(fileOf(square))];
+		const uint64_t sameFileFront = frontMask & fileMask;
+		if ((enemyPawns & sameFileFront) != 0ULL) {
+			continue;
+		}
+
+		const uint64_t adjacentFront = frontMask & ~fileMask;
+		const int enemyAdjacent = std::popcount(enemyPawns & adjacentFront);
+		if (enemyAdjacent > 1) {
+			continue;
+		}
+
+		const bool hasSupport = hasAdjacentPawnSupport(color, ownPawns, square);
+		if (!hasSupport && enemyAdjacent > 0) {
+			continue;
+		}
+
+		const int rank = square >> 3;
+		const int relativeRank = (color == Color::White) ? (rank + 1) : (8 - rank);
+		bonus += bonusByRank[static_cast<size_t>(std::clamp(relativeRank, 0, 8))];
+	}
+
+	return bonus;
+}
+
+int candidatePawnsBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
+	return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, CANDIDATE_PAWN_BONUS_MG_BY_RANK);
+}
+
+int candidatePawnsBonusEg(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
+	return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, CANDIDATE_PAWN_BONUS_EG_BY_RANK);
+}
+
+int backwardPawnsPenaltyByRank(
+	Color color,
+	uint64_t ownPawns,
+	uint64_t enemyPawns,
+	uint64_t allOcc,
+	const std::array<int, 9>& penaltyByRank
+) {
+	int penalty = 0;
+	uint64_t pawns = ownPawns;
+	const Color enemyColor = (color == Color::White) ? Color::Black : Color::White;
+	const uint64_t enemyPawnAttackMap = pawnAttacks(enemyColor, enemyPawns);
+
+	while (pawns != 0ULL) {
+		const int square = lsbIndex(pawns);
+		pawns &= (pawns - 1);
+
+		if (hasAdjacentPawnSupport(color, ownPawns, square)) {
+			continue;
+		}
+
+		const int advanceSquare = (color == Color::White) ? square + 8 : square - 8;
+		if (advanceSquare < 0 || advanceSquare >= 64) {
+			continue;
+		}
+
+		const uint64_t advanceMask = squareMask(advanceSquare);
+		const bool blocked = (allOcc & advanceMask) != 0ULL;
+		const bool pressured = (enemyPawnAttackMap & advanceMask) != 0ULL;
+		if (!blocked && !pressured) {
+			continue;
+		}
+
+		const int rank = square >> 3;
+		const int relativeRank = (color == Color::White) ? (rank + 1) : (8 - rank);
+		penalty += penaltyByRank[static_cast<size_t>(std::clamp(relativeRank, 0, 8))];
+	}
+
+	return penalty;
+}
+
+int backwardPawnsPenalty(Color color, uint64_t ownPawns, uint64_t enemyPawns, uint64_t allOcc) {
+	return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, BACKWARD_PAWN_PENALTY_MG_BY_RANK);
+}
+
+int backwardPawnsPenaltyEg(Color color, uint64_t ownPawns, uint64_t enemyPawns, uint64_t allOcc) {
+	return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, BACKWARD_PAWN_PENALTY_EG_BY_RANK);
+}
+
+int pawnIslands(uint64_t ownPawns) {
+	unsigned int occupiedFiles = 0;
+	for (int file = 0; file < 8; ++file) {
+		if ((ownPawns & MASKS.FILE_MASKS[static_cast<size_t>(file)]) != 0ULL) {
+			occupiedFiles |= (1U << file);
+		}
+	}
+
+	int islands = 0;
+	bool inIsland = false;
+	for (int file = 0; file < 8; ++file) {
+		const bool hasPawn = (occupiedFiles & (1U << file)) != 0U;
+		if (hasPawn && !inIsland) {
+			++islands;
+		}
+		inIsland = hasPawn;
+	}
+
+	return islands;
+}
+
+TaperTerms pawnIslandPenalty(uint64_t ownPawns) {
+	const int islands = pawnIslands(ownPawns);
+	const int extraIslands = std::max(0, islands - 1);
+	return {
+		extraIslands * PAWN_ISLAND_PENALTY_MG,
+		extraIslands * PAWN_ISLAND_PENALTY_EG
+	};
+}
+
 int kingAttackPressure(
 	Color color,
 	int kingSquare,
@@ -939,26 +1130,34 @@ int uncastledKingPenalty(uint64_t king, uint8_t castlingRights, Color color) {
 	return penalty;
 }
 
+PieceScoreDelta pieceScoreDelta(Color color, PieceType piece, int square) {
+	const size_t pieceIdx = static_cast<size_t>(piece);
+	const int idx = pestoSquare(color, square);
+	return {
+		MG_VALUE[pieceIdx] + MG_PESTO[pieceIdx][static_cast<size_t>(idx)],
+		EG_VALUE[pieceIdx] + EG_PESTO[pieceIdx][static_cast<size_t>(idx)],
+		GAME_PHASE_INC[pieceIdx]
+	};
+}
+
 } // namespace
 
 void Board::addPieceEval(Color color, PieceType piece, int square) {
 	const int c = static_cast<int>(color);
-	const int p = static_cast<int>(piece);
-	const int idx = pestoSquare(color, square);
+	const PieceScoreDelta delta = pieceScoreDelta(color, piece, square);
 
-	m_mgScore[c] += MG_VALUE[static_cast<size_t>(p)] + MG_PESTO[static_cast<size_t>(p)][static_cast<size_t>(idx)];
-	m_egScore[c] += EG_VALUE[static_cast<size_t>(p)] + EG_PESTO[static_cast<size_t>(p)][static_cast<size_t>(idx)];
-	m_gamePhase += GAME_PHASE_INC[static_cast<size_t>(p)];
+	m_mgScore[c] += delta.mg;
+	m_egScore[c] += delta.eg;
+	m_gamePhase += delta.phase;
 }
 
 void Board::removePieceEval(Color color, PieceType piece, int square) {
 	const int c = static_cast<int>(color);
-	const int p = static_cast<int>(piece);
-	const int idx = pestoSquare(color, square);
+	const PieceScoreDelta delta = pieceScoreDelta(color, piece, square);
 
-	m_mgScore[c] -= MG_VALUE[static_cast<size_t>(p)] + MG_PESTO[static_cast<size_t>(p)][static_cast<size_t>(idx)];
-	m_egScore[c] -= EG_VALUE[static_cast<size_t>(p)] + EG_PESTO[static_cast<size_t>(p)][static_cast<size_t>(idx)];
-	m_gamePhase -= GAME_PHASE_INC[static_cast<size_t>(p)];
+	m_mgScore[c] -= delta.mg;
+	m_egScore[c] -= delta.eg;
+	m_gamePhase -= delta.phase;
 }
 
 void Board::resetEvalStateFromBoard() {
@@ -1008,10 +1207,14 @@ int Board::computeStaticEvaluation() const {
 				const int square = lsbIndex(bb);
 				bb &= (bb - 1);
 
-				const int idx = pestoSquare(static_cast<Color>(color), square);
-				mgScore[color] += MG_VALUE[static_cast<size_t>(piece)] + MG_PESTO[static_cast<size_t>(piece)][static_cast<size_t>(idx)];
-				egScore[color] += EG_VALUE[static_cast<size_t>(piece)] + EG_PESTO[static_cast<size_t>(piece)][static_cast<size_t>(idx)];
-				phase += GAME_PHASE_INC[static_cast<size_t>(piece)];
+				const PieceScoreDelta delta = pieceScoreDelta(
+					static_cast<Color>(color),
+					static_cast<PieceType>(piece),
+					square
+				);
+				mgScore[color] += delta.mg;
+				egScore[color] += delta.eg;
+				phase += delta.phase;
 			}
 		}
 	}
@@ -1139,6 +1342,16 @@ void Board::printEvalBreakdown() const {
 	eg += connectedEg;
 	printTerm("connected_pawns", connectedMg, connectedEg);
 
+	const int whiteCandidateMg = candidatePawnsBonus(Color::White, whitePawns, blackPawns);
+	const int blackCandidateMg = candidatePawnsBonus(Color::Black, blackPawns, whitePawns);
+	const int whiteCandidateEg = candidatePawnsBonusEg(Color::White, whitePawns, blackPawns);
+	const int blackCandidateEg = candidatePawnsBonusEg(Color::Black, blackPawns, whitePawns);
+	const int candidateMg = whiteCandidateMg - blackCandidateMg;
+	const int candidateEg = whiteCandidateEg - blackCandidateEg;
+	mg += candidateMg;
+	eg += candidateEg;
+	printTerm("candidate_pawns", candidateMg, candidateEg);
+
 	const int whiteKingPressure = kingAttackPressure(
 		Color::White,
 		whiteKingSquare,
@@ -1173,6 +1386,24 @@ void Board::printEvalBreakdown() const {
 	mg += pawnStructureMg;
 	eg += pawnStructureEg;
 	printTerm("pawn_structure", pawnStructureMg, pawnStructureEg);
+
+	const int whiteBackwardMg = backwardPawnsPenalty(Color::White, whitePawns, blackPawns, allOcc);
+	const int blackBackwardMg = backwardPawnsPenalty(Color::Black, blackPawns, whitePawns, allOcc);
+	const int whiteBackwardEg = backwardPawnsPenaltyEg(Color::White, whitePawns, blackPawns, allOcc);
+	const int blackBackwardEg = backwardPawnsPenaltyEg(Color::Black, blackPawns, whitePawns, allOcc);
+	const int backwardMg = -whiteBackwardMg + blackBackwardMg;
+	const int backwardEg = -whiteBackwardEg + blackBackwardEg;
+	mg += backwardMg;
+	eg += backwardEg;
+	printTerm("backward_pawns", backwardMg, backwardEg);
+
+	const TaperTerms whiteIslands = pawnIslandPenalty(whitePawns);
+	const TaperTerms blackIslands = pawnIslandPenalty(blackPawns);
+	const int islandsMg = -whiteIslands.mg + blackIslands.mg;
+	const int islandsEg = -whiteIslands.eg + blackIslands.eg;
+	mg += islandsMg;
+	eg += islandsEg;
+	printTerm("pawn_islands", islandsMg, islandsEg);
 
 	const int passedWhite = passedPawnCount(Color::White, whitePawns, blackPawns);
 	const int passedBlack = passedPawnCount(Color::Black, blackPawns, whitePawns);
@@ -1350,6 +1581,14 @@ void Board::printEvalBreakdown() const {
 	mg += whiteConnectedMg - blackConnectedMg;
 	eg += whiteConnectedEg - blackConnectedEg;
 
+	const int whiteCandidateMg = candidatePawnsBonus(Color::White, whitePawns, blackPawns);
+	const int blackCandidateMg = candidatePawnsBonus(Color::Black, blackPawns, whitePawns);
+	const int whiteCandidateEg = candidatePawnsBonusEg(Color::White, whitePawns, blackPawns);
+	const int blackCandidateEg = candidatePawnsBonusEg(Color::Black, blackPawns, whitePawns);
+
+	mg += whiteCandidateMg - blackCandidateMg;
+	eg += whiteCandidateEg - blackCandidateEg;
+
 	const int whiteKingPressure = kingAttackPressure(
 		Color::White,
 		whiteKingSquare,
@@ -1380,6 +1619,22 @@ void Board::printEvalBreakdown() const {
 	eg -= whitePawnPenalty;
 	mg += blackPawnPenalty;
 	eg += blackPawnPenalty;
+
+	const int whiteBackwardMg = backwardPawnsPenalty(Color::White, whitePawns, blackPawns, allOcc);
+	const int blackBackwardMg = backwardPawnsPenalty(Color::Black, blackPawns, whitePawns, allOcc);
+	const int whiteBackwardEg = backwardPawnsPenaltyEg(Color::White, whitePawns, blackPawns, allOcc);
+	const int blackBackwardEg = backwardPawnsPenaltyEg(Color::Black, blackPawns, whitePawns, allOcc);
+	mg -= whiteBackwardMg;
+	mg += blackBackwardMg;
+	eg -= whiteBackwardEg;
+	eg += blackBackwardEg;
+
+	const TaperTerms whiteIslands = pawnIslandPenalty(whitePawns);
+	const TaperTerms blackIslands = pawnIslandPenalty(blackPawns);
+	mg -= whiteIslands.mg;
+	mg += blackIslands.mg;
+	eg -= whiteIslands.eg;
+	eg += blackIslands.eg;
 
 	const int passedWhite = passedPawnCount(Color::White, whitePawns, blackPawns);
 	const int passedBlack = passedPawnCount(Color::Black, blackPawns, whitePawns);
