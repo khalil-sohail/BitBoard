@@ -474,23 +474,11 @@ void Board::resetEvalStateFromBoard() {
 	}
 }
 
-int Board::evaluate() const {
-	bool noWhitePawns = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
-	bool noBlackPawns = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
-	bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
-	bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
-
-	if (noWhitePawns && noBlackPawns && noWhiteMajors && noBlackMajors) {
-		int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
-		int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
-		if (whiteMinors < 2 && blackMinors < 2) {
-			return 0;
-		}
-	}
-
-	int mg = m_mgScore[WHITE_IDX] - m_mgScore[BLACK_IDX];
-	int eg = m_egScore[WHITE_IDX] - m_egScore[BLACK_IDX];
-
+// Shared scoring pipeline: applies all bonus/penalty terms and the tapered blend.
+// mg and eg are white-minus-black piece-score differentials (midgame and endgame).
+// phase is either taken from the incremental cache or freshly computed by the caller.
+// noWhitePawns / noBlackPawns drive the draw-scaling heuristic at the end.
+int Board::applyBonusTermsAndTaper(int mg, int eg, int phase, bool noWhitePawns, bool noBlackPawns) const {
 	const int whiteBishops = std::popcount(m_bitboards[WHITE_IDX][BISHOP_IDX]);
 	const int blackBishops = std::popcount(m_bitboards[BLACK_IDX][BISHOP_IDX]);
 
@@ -556,8 +544,8 @@ int Board::evaluate() const {
 	eg -= whiteBadBishop;
 	eg += blackBadBishop;
 
-	int whiteUncastled = uncastledKingPenalty(m_bitboards[WHITE_IDX][KING_IDX], m_castlingRights, Color::White);
-	int blackUncastled = uncastledKingPenalty(m_bitboards[BLACK_IDX][KING_IDX], m_castlingRights, Color::Black);
+	const int whiteUncastled = uncastledKingPenalty(m_bitboards[WHITE_IDX][KING_IDX], m_castlingRights, Color::White);
+	const int blackUncastled = uncastledKingPenalty(m_bitboards[BLACK_IDX][KING_IDX], m_castlingRights, Color::Black);
 	mg -= whiteUncastled;
 	mg += blackUncastled;
 
@@ -567,8 +555,8 @@ int Board::evaluate() const {
 		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
 	}
 
-	const int phase = std::clamp(m_gamePhase, 0, 24);
-	int score = (mg * phase + eg * (24 - phase)) / 24;
+	const int clampedPhase = std::clamp(phase, 0, 24);
+	int score = (mg * clampedPhase + eg * (24 - clampedPhase)) / 24;
 
 	if (score > 0 && noWhitePawns) {
 		score /= 2;
@@ -579,20 +567,42 @@ int Board::evaluate() const {
 	return score;
 }
 
+// Uses the incrementally maintained piece scores from the board state.
+int Board::evaluate() const {
+	const bool noWhitePawns  = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
+	const bool noBlackPawns  = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
+	const bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+	const bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+
+	if (noWhitePawns && noBlackPawns && noWhiteMajors && noBlackMajors) {
+		const int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
+		const int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
+		if (whiteMinors < 2 && blackMinors < 2) {
+			return 0;
+		}
+	}
+
+	const int mg = m_mgScore[WHITE_IDX] - m_mgScore[BLACK_IDX];
+	const int eg = m_egScore[WHITE_IDX] - m_egScore[BLACK_IDX];
+	return applyBonusTermsAndTaper(mg, eg, m_gamePhase, noWhitePawns, noBlackPawns);
+}
+
 int Board::evaluateSideToMove() const {
 	const int eval = evaluate();
 	return (m_sideToMove == Color::White) ? eval : -eval;
 }
 
+// Recomputes piece scores from scratch, then routes through the same bonus
+// pipeline as evaluate().  Used for drift detection and position verification.
 int Board::computeStaticEvaluation() const {
-	bool noWhitePawns = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
-	bool noBlackPawns = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
-	bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
-	bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+	const bool noWhitePawns  = (m_bitboards[WHITE_IDX][PAWN_IDX] == 0);
+	const bool noBlackPawns  = (m_bitboards[BLACK_IDX][PAWN_IDX] == 0);
+	const bool noWhiteMajors = ((m_bitboards[WHITE_IDX][ROOK_IDX] | m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)]) == 0);
+	const bool noBlackMajors = ((m_bitboards[BLACK_IDX][ROOK_IDX] | m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)]) == 0);
 
 	if (noWhitePawns && noBlackPawns && noWhiteMajors && noBlackMajors) {
-		int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
-		int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
+		const int whiteMinors = std::popcount(m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[WHITE_IDX][BISHOP_IDX]);
+		const int blackMinors = std::popcount(m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)] | m_bitboards[BLACK_IDX][BISHOP_IDX]);
 		if (whiteMinors < 2 && blackMinors < 2) {
 			return 0;
 		}
@@ -617,93 +627,7 @@ int Board::computeStaticEvaluation() const {
 		}
 	}
 
-	int mg = mgScore[WHITE_IDX] - mgScore[BLACK_IDX];
-	int eg = egScore[WHITE_IDX] - egScore[BLACK_IDX];
-
-	const int whiteBishops = std::popcount(m_bitboards[WHITE_IDX][BISHOP_IDX]);
-	const int blackBishops = std::popcount(m_bitboards[BLACK_IDX][BISHOP_IDX]);
-
-	if (whiteBishops >= 2) {
-		mg += 30;
-		eg += 40;
-	}
-	if (blackBishops >= 2) {
-		mg -= 30;
-		eg -= 40;
-	}
-
-	const uint64_t allPawns = m_bitboards[WHITE_IDX][PAWN_IDX] | m_bitboards[BLACK_IDX][PAWN_IDX];
-	mg += rookOpenFileBonus(m_bitboards[WHITE_IDX][ROOK_IDX], allPawns);
-	mg -= rookOpenFileBonus(m_bitboards[BLACK_IDX][ROOK_IDX], allPawns);
-
-	const int whiteKingSquare = lsbIndex(m_bitboards[WHITE_IDX][KING_IDX]);
-	const int blackKingSquare = lsbIndex(m_bitboards[BLACK_IDX][KING_IDX]);
-	mg += kingPawnShieldBonus(Color::White, whiteKingSquare, m_bitboards[WHITE_IDX][PAWN_IDX]);
-	mg -= kingPawnShieldBonus(Color::Black, blackKingSquare, m_bitboards[BLACK_IDX][PAWN_IDX]);
-
-	const int whitePawnPenalty = pawnStructurePenalty(m_bitboards[WHITE_IDX][PAWN_IDX]);
-	const int blackPawnPenalty = pawnStructurePenalty(m_bitboards[BLACK_IDX][PAWN_IDX]);
-	mg -= whitePawnPenalty;
-	eg -= whitePawnPenalty;
-	mg += blackPawnPenalty;
-	eg += blackPawnPenalty;
-
-	const int passedWhite = passedPawnCount(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
-	const int passedBlack = passedPawnCount(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
-	mg += 20 * (passedWhite - passedBlack);
-	eg += 40 * (passedWhite - passedBlack);
-
-	const int whitePassed = passedPawnBonus(Color::White, m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][PAWN_IDX]);
-	const int blackPassed = passedPawnBonus(Color::Black, m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][PAWN_IDX]);
-	mg += whitePassed;
-	mg -= blackPassed;
-	eg += 2 * whitePassed;
-	eg -= 2 * blackPassed;
-
-	const int whiteTrapped = trappedRookPenalty(Color::White, m_bitboards[WHITE_IDX][ROOK_IDX], m_bitboards[WHITE_IDX][KING_IDX]);
-	const int blackTrapped = trappedRookPenalty(Color::Black, m_bitboards[BLACK_IDX][ROOK_IDX], m_bitboards[BLACK_IDX][KING_IDX]);
-	mg -= whiteTrapped;
-	mg += blackTrapped;
-
-	const int whiteBadBishop = badBishopPenalty(m_bitboards[WHITE_IDX][PAWN_IDX], m_bitboards[WHITE_IDX][BISHOP_IDX], Color::White);
-	const int blackBadBishop = badBishopPenalty(m_bitboards[BLACK_IDX][PAWN_IDX], m_bitboards[BLACK_IDX][BISHOP_IDX], Color::Black);
-	const int whiteEarlyQueen = earlyQueenPenalty(
-		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Queen)],
-		m_bitboards[WHITE_IDX][static_cast<int>(PieceType::Knight)],
-		m_bitboards[WHITE_IDX][BISHOP_IDX],
-		Color::White
-	);
-	const int blackEarlyQueen = earlyQueenPenalty(
-		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Queen)],
-		m_bitboards[BLACK_IDX][static_cast<int>(PieceType::Knight)],
-		m_bitboards[BLACK_IDX][BISHOP_IDX],
-		Color::Black
-	);
-
-	mg -= (whiteBadBishop + whiteEarlyQueen);
-	mg += (blackBadBishop + blackEarlyQueen);
-	eg -= whiteBadBishop;
-	eg += blackBadBishop;
-
-	int whiteUncastled = uncastledKingPenalty(m_bitboards[WHITE_IDX][KING_IDX], m_castlingRights, Color::White);
-	int blackUncastled = uncastledKingPenalty(m_bitboards[BLACK_IDX][KING_IDX], m_castlingRights, Color::Black);
-	mg -= whiteUncastled;
-	mg += blackUncastled;
-
-	if (eg > 200) {
-		eg += mopUpEval(whiteKingSquare, blackKingSquare);
-	} else if (eg < -200) {
-		eg -= mopUpEval(blackKingSquare, whiteKingSquare);
-	}
-
-	const int clampedPhase = std::clamp(phase, 0, 24);
-	int score = (mg * clampedPhase + eg * (24 - clampedPhase)) / 24;
-
-	if (score > 0 && noWhitePawns) {
-		score /= 2;
-	} else if (score < 0 && noBlackPawns) {
-		score /= 2;
-	}
-
-	return score;
+	const int mg = mgScore[WHITE_IDX] - mgScore[BLACK_IDX];
+	const int eg = egScore[WHITE_IDX] - egScore[BLACK_IDX];
+	return applyBonusTermsAndTaper(mg, eg, phase, noWhitePawns, noBlackPawns);
 }
