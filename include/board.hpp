@@ -67,6 +67,7 @@ private:
     void resetEvalStateFromBoard();
     void addPieceEval(Color color, PieceType piece, int square);
     void removePieceEval(Color color, PieceType piece, int square);
+    [[nodiscard]] int applyBonusTermsAndTaper(int mg, int eg, int phase, bool noWhitePawns, bool noBlackPawns) const;
 
 public:
     static constexpr uint64_t FILE_A = 0x0101010101010101ULL;
