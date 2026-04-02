@@ -43,4 +43,3 @@ htmlcov/
 .coverage
 nosetests.xml
 coverage.xml
-tmp
