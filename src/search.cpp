@@ -106,18 +106,25 @@ int scoreMove(const Board& board, const Move& move) {
     return score;
 }
 
-void sortMovesByScore(const Board& board, std::vector<Move>& moves) {
+bool sameMove(const Move& lhs, const Move& rhs) {
+    return lhs.from == rhs.from &&
+           lhs.to == rhs.to &&
+           lhs.piece == rhs.piece &&
+           lhs.promotion == rhs.promotion;
+}
+
+void sortMovesByScore(const Board& board, std::vector<Move>& moves, Move ttMove) {
+    constexpr int TT_MOVE_SCORE = 1'000'000;
     std::stable_sort(moves.begin(), moves.end(), [&](const Move& lhs, const Move& rhs) {
-        return scoreMove(board, lhs) > scoreMove(board, rhs);
+        const int lhsScore = sameMove(lhs, ttMove) ? TT_MOVE_SCORE : scoreMove(board, lhs);
+        const int rhsScore = sameMove(rhs, ttMove) ? TT_MOVE_SCORE : scoreMove(board, rhs);
+        return lhsScore > rhsScore;
     });
 }
 
 void prioritizeMove(std::vector<Move>& moves, const Move& preferred) {
     auto it = std::find_if(moves.begin(), moves.end(), [&](const Move& move) {
-        return move.from == preferred.from &&
-               move.to == preferred.to &&
-               move.piece == preferred.piece &&
-               move.promotion == preferred.promotion;
+        return sameMove(move, preferred);
     });
 
     if (it != moves.end()) {
@@ -132,6 +139,9 @@ std::chrono::time_point<std::chrono::steady_clock> startTime;
 long long allocatedTimeMs = 2000;
 uint64_t qNodes = 0;
 uint64_t deltaPruneSkips = 0;
+uint64_t ttHits = 0;
+uint64_t ttCutoffs = 0;
+uint64_t ttStores = 0;
 
 void checkTime() {
     if (timeAborted.load(std::memory_order_relaxed)) {
@@ -171,7 +181,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     } else {
         moves = board.generatePseudoLegalCaptures();
     }
-    sortMovesByScore(board, moves);
+    sortMovesByScore(board, moves, Move{});
 
     for (const Move& move : moves) {
         if (!inCheck && move.isCapture) {
@@ -239,20 +249,25 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
 
     const int originalAlpha = alpha;
     const uint64_t hash = board.getHash();
-    const TTEntry& entry = g_TT[hash % TT_SIZE];
+    const size_t ttIndex = hash % TT_SIZE;
+    const TTEntry& entry = g_TT[ttIndex];
 
     Move ttBestMove{};
     if (entry.hash == hash) {
+        ++ttHits;
         ttBestMove = entry.bestMove;
 
         if (entry.depth >= depth) {
             if (entry.flag == TTFlag::Exact) {
+                ++ttCutoffs;
                 return entry.score;
             }
             if (entry.flag == TTFlag::Alpha && entry.score <= alpha) {
+                ++ttCutoffs;
                 return alpha;
             }
             if (entry.flag == TTFlag::Beta && entry.score >= beta) {
+                ++ttCutoffs;
                 return beta;
             }
         }
@@ -290,10 +305,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
         return 0;
     }
 
-    sortMovesByScore(board, legal);
-    if (ttBestMove.from >= 0) {
-        prioritizeMove(legal, ttBestMove);
-    }
+    sortMovesByScore(board, legal, ttBestMove);
     if (g_killerMoves[static_cast<size_t>(plyFromRoot)][0].from >= 0) {
         prioritizeMove(legal, g_killerMoves[static_cast<size_t>(plyFromRoot)][0]);
     }
@@ -354,7 +366,11 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
     } else if (bestScore >= beta) {
         flag = TTFlag::Beta;
     }
-    g_TT[hash % TT_SIZE] = {hash, depth, flag, bestScore, bestMoveFoundInLoop};
+    TTEntry& slot = g_TT[ttIndex];
+    if (slot.hash == 0ULL || slot.hash == hash || depth >= slot.depth) {
+        ++ttStores;
+        slot = {hash, depth, flag, bestScore, bestMoveFoundInLoop};
+    }
 
     return bestScore;
 }
@@ -362,6 +378,9 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
 Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     qNodes = 0;
     deltaPruneSkips = 0;
+    ttHits = 0;
+    ttCutoffs = 0;
+    ttStores = 0;
 
     std::vector<Move> rootMoves = board.generateLegalMoves();
     if (rootMoves.empty()) {
@@ -386,7 +405,7 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     hardTimeLimit = allocatedTimeMs;
     softTimeLimit = hardTimeLimit / 2;
 
-    sortMovesByScore(board, rootMoves);
+    sortMovesByScore(board, rootMoves, Move{});
 
     Move previousIterationBest = rootMoves.front();
     Move bestCompletedMove = rootMoves.front();
@@ -547,6 +566,9 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     std::cout << "info string nodes: " << g_nodesSearched
               << " qNodes: " << qNodes
               << " deltaSkips: " << deltaPruneSkips
+              << " ttHits: " << ttHits
+              << " ttCutoffs: " << ttCutoffs
+              << " ttStores: " << ttStores
               << " elapsedMs: " << totalElapsedMs << "\n";
 
     return bestCompletedMove;

@@ -83,8 +83,8 @@ constexpr std::array<int, 9> BACKWARD_PAWN_PENALTY_EG_BY_RANK = {
 	0, 0, 4, 6, 8, 10, 12, 0, 0
 };
 
-constexpr int PAWN_ISLAND_PENALTY_MG = 8;
-constexpr int PAWN_ISLAND_PENALTY_EG = 10;
+constexpr int PAWN_ISLAND_PENALTY_MG = 4;
+constexpr int PAWN_ISLAND_PENALTY_EG = 5;
 
 constexpr std::array<int, 9> KING_ATTACK_PRESSURE_PENALTY = {
 	0, 8, 22, 45, 80, 120, 160, 200, 240
@@ -96,25 +96,25 @@ constexpr int BISHOP_PAIR_BONUS_EG = 40;
 constexpr int KING_SHIELD_MAX_PAWNS = 3;
 constexpr int KING_SHIELD_PER_PAWN_BONUS = 15;
 
-constexpr int PAWN_STRUCTURE_DOUBLED_PENALTY = 15;
-constexpr int PAWN_STRUCTURE_ISOLATED_PENALTY = 20;
+constexpr int PAWN_STRUCTURE_DOUBLED_PENALTY = 10;
+constexpr int PAWN_STRUCTURE_ISOLATED_PENALTY = 10;
 
-constexpr int PASSED_PAWN_COUNT_BONUS_MG = 20;
-constexpr int PASSED_PAWN_COUNT_BONUS_EG = 40;
-constexpr int PASSED_PAWN_EG_MULTIPLIER = 2;
+constexpr int PASSED_PAWN_COUNT_BONUS_MG = 10;
+constexpr int PASSED_PAWN_COUNT_BONUS_EG = 20;
+constexpr int PASSED_PAWN_EG_MULTIPLIER = 1;
 
-constexpr int PASSED_PAWN_RANK_SQUARE_MULTIPLIER = 5;
+constexpr int PASSED_PAWN_RANK_SQUARE_MULTIPLIER = 2;
 constexpr int PASSED_PAWN_BLOCKED_DIVISOR = 2;
 
 constexpr int TRAPPED_ROOK_PENALTY = 50;
 
-constexpr int BAD_BISHOP_HEAVY_PENALTY = 150;
-constexpr int BAD_BISHOP_LIGHT_PENALTY = 120;
+constexpr int BAD_BISHOP_HEAVY_PENALTY = 50;
+constexpr int BAD_BISHOP_LIGHT_PENALTY = 25;
 
-constexpr int EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY = 40;
+constexpr int EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY = 20;
 
-constexpr int UNCASTLED_KING_CENTER_PENALTY = 40;
-constexpr int UNCASTLED_KING_LOST_RIGHTS_PENALTY = 120;
+constexpr int UNCASTLED_KING_CENTER_PENALTY = 20;
+constexpr int UNCASTLED_KING_LOST_RIGHTS_PENALTY = 50;
 
 constexpr int TAPER_SCALE = 128;
 constexpr int LATE_ENDGAME_PHASE_MAX = 8;

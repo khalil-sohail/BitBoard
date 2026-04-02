@@ -56,6 +56,7 @@ private:
     Color m_sideToMove = Color::White;
     uint8_t m_castlingRights = 0b1111; // WK WQ BK BQ
     int m_enPassantSquare = -1;
+    int m_savedNullEP = -1;
     std::array<int, 2> m_mgScore{};
     std::array<int, 2> m_egScore{};
     int m_gamePhase = 0;

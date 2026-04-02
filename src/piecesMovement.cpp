@@ -281,18 +281,7 @@ void Board::makeMove(const Move& move) {
 }
 
 void Board::makeNullMove() {
-    m_hashHistory.push_back(m_hash);
-
-    m_undoStack.push_back({
-        .bitboards = m_bitboards,
-        .sideToMove = m_sideToMove,
-        .castlingRights = m_castlingRights,
-        .enPassantSquare = m_enPassantSquare,
-        .mgScore = m_mgScore,
-        .egScore = m_egScore,
-        .gamePhase = m_gamePhase,
-    });
-
+    m_savedNullEP = m_enPassantSquare;
     m_hash ^= enPassantHash(m_sideToMove, m_enPassantSquare, m_bitboards);
     m_enPassantSquare = -1;
     m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
@@ -300,7 +289,10 @@ void Board::makeNullMove() {
 }
 
 void Board::undoNullMove() {
-    (void)undoMove();
+    m_sideToMove = (m_sideToMove == Color::White) ? Color::Black : Color::White;
+    m_hash ^= SIDE_TO_MOVE_HASH;
+    m_enPassantSquare = m_savedNullEP;
+    m_hash ^= enPassantHash(m_sideToMove, m_enPassantSquare, m_bitboards);
 }
 
 bool Board::undoMove() {

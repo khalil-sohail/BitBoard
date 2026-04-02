@@ -13,7 +13,9 @@ Usage:
     [--default-depth 8] \
     [--movetime-ms 20000] \
     [--engine-args "--mode=gui --book=__NO_BOOK__"] \
-    [--csv bench/phase7_results.csv]
+        [--csv bench/phase7_results.csv] \
+        [--provenance-out bench/phase7_provenance.txt] \
+        [--summary-out bench/phase7_summary.txt]
 
 Suite file format (pipe-delimited):
   name|position command|depth|expected
@@ -57,6 +59,61 @@ pct_change() {
     awk -v b="$base" -v c="$cand" 'BEGIN { if (b == 0) { print "n/a"; } else { printf "%.2f%%", ((c - b) * 100.0) / b; } }'
 }
 
+canonical_path() {
+    local p="$1"
+    if command -v realpath >/dev/null 2>&1; then
+        realpath "$p"
+    else
+        readlink -f "$p"
+    fi
+}
+
+resolve_engine_bin() {
+    local bin="$1"
+    if [[ "$bin" == */* ]]; then
+        canonical_path "$bin"
+    else
+        local resolved
+        resolved="$(command -v "$bin")"
+        canonical_path "$resolved"
+    fi
+}
+
+sha256_file() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        echo "error: unable to compute SHA256 (missing sha256sum/shasum)." >&2
+        exit 1
+    fi
+}
+
+file_size_bytes() {
+    local path="$1"
+    if stat -c '%s' "$path" >/dev/null 2>&1; then
+        stat -c '%s' "$path"
+    else
+        stat -f '%z' "$path"
+    fi
+}
+
+git_revision_for_path() {
+    local path="$1"
+    local dir
+    dir="$(dirname "$path")"
+
+    local toplevel
+    if ! toplevel="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"; then
+        printf 'n/a'
+        return
+    fi
+
+    git -C "$toplevel" rev-parse HEAD 2>/dev/null || printf 'n/a'
+}
+
 BASELINE_BIN=""
 CANDIDATE_BIN=""
 SUITE_FILE="bench/phase7_suite.txt"
@@ -64,6 +121,9 @@ DEFAULT_DEPTH=8
 MOVETIME_MS=20000
 ENGINE_ARGS="--mode=gui --book=__NO_BOOK__"
 CSV_OUT=""
+PROVENANCE_OUT=""
+SUMMARY_OUT=""
+RUN_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -95,6 +155,14 @@ while [[ $# -gt 0 ]]; do
             CSV_OUT="$2"
             shift 2
             ;;
+        --provenance-out)
+            PROVENANCE_OUT="$2"
+            shift 2
+            ;;
+        --summary-out)
+            SUMMARY_OUT="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -121,14 +189,73 @@ fi
 require_engine_bin "$BASELINE_BIN"
 require_engine_bin "$CANDIDATE_BIN"
 
+BASELINE_BIN_RESOLVED="$(resolve_engine_bin "$BASELINE_BIN")"
+CANDIDATE_BIN_RESOLVED="$(resolve_engine_bin "$CANDIDATE_BIN")"
+
+BASELINE_SHA256="$(sha256_file "$BASELINE_BIN_RESOLVED")"
+CANDIDATE_SHA256="$(sha256_file "$CANDIDATE_BIN_RESOLVED")"
+
+BASELINE_SIZE_BYTES="$(file_size_bytes "$BASELINE_BIN_RESOLVED")"
+CANDIDATE_SIZE_BYTES="$(file_size_bytes "$CANDIDATE_BIN_RESOLVED")"
+
+SUITE_FILE_RESOLVED="$(canonical_path "$SUITE_FILE")"
+SUITE_SHA256="$(sha256_file "$SUITE_FILE_RESOLVED")"
+
+BASELINE_GIT_REV="$(git_revision_for_path "$BASELINE_BIN_RESOLVED")"
+CANDIDATE_GIT_REV="$(git_revision_for_path "$CANDIDATE_BIN_RESOLVED")"
+
+PROVENANCE_BINARIES_DIFFER="PASS"
+if [[ "$BASELINE_BIN_RESOLVED" == "$CANDIDATE_BIN_RESOLVED" || "$BASELINE_SHA256" == "$CANDIDATE_SHA256" ]]; then
+    PROVENANCE_BINARIES_DIFFER="FAIL"
+fi
+
 read -r -a ENGINE_ARGS_ARR <<< "$ENGINE_ARGS"
 
 if [[ -z "$CSV_OUT" ]]; then
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    CSV_OUT="bench/phase7_results_${timestamp}.csv"
+    CSV_OUT="bench/phase7_results_${RUN_TIMESTAMP}.csv"
+fi
+
+if [[ -z "$PROVENANCE_OUT" ]]; then
+    PROVENANCE_OUT="bench/phase7_provenance_${RUN_TIMESTAMP}.txt"
+fi
+
+if [[ -z "$SUMMARY_OUT" ]]; then
+    SUMMARY_OUT="bench/phase7_summary_${RUN_TIMESTAMP}.txt"
 fi
 
 mkdir -p "$(dirname "$CSV_OUT")"
+mkdir -p "$(dirname "$PROVENANCE_OUT")"
+mkdir -p "$(dirname "$SUMMARY_OUT")"
+
+cat > "$PROVENANCE_OUT" <<EOF
+run_timestamp=${RUN_TIMESTAMP}
+run_iso_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+host=$(hostname)
+kernel=$(uname -srmo)
+cwd=$(pwd)
+suite_path=${SUITE_FILE_RESOLVED}
+suite_sha256=${SUITE_SHA256}
+engine_args=${ENGINE_ARGS}
+baseline_input=${BASELINE_BIN}
+baseline_path=${BASELINE_BIN_RESOLVED}
+baseline_sha256=${BASELINE_SHA256}
+baseline_size_bytes=${BASELINE_SIZE_BYTES}
+baseline_git_rev=${BASELINE_GIT_REV}
+candidate_input=${CANDIDATE_BIN}
+candidate_path=${CANDIDATE_BIN_RESOLVED}
+candidate_sha256=${CANDIDATE_SHA256}
+candidate_size_bytes=${CANDIDATE_SIZE_BYTES}
+candidate_git_rev=${CANDIDATE_GIT_REV}
+binaries_different=${PROVENANCE_BINARIES_DIFFER}
+EOF
+
+if [[ "$PROVENANCE_BINARIES_DIFFER" != "PASS" ]]; then
+    echo "error: baseline and candidate binaries must be distinct for true old-vs-new regression." >&2
+    echo "- baseline:  $BASELINE_BIN_RESOLVED ($BASELINE_SHA256)" >&2
+    echo "- candidate: $CANDIDATE_BIN_RESOLVED ($CANDIDATE_SHA256)" >&2
+    echo "- provenance: $PROVENANCE_OUT" >&2
+    exit 1
+fi
 
 printf '%s\n' "case,depth,expected,baseline_bestmove,candidate_bestmove,baseline_pass,candidate_pass,baseline_elapsed_ms,candidate_elapsed_ms,baseline_nodes,candidate_nodes,baseline_qnodes,candidate_qnodes,baseline_delta,candidate_delta,baseline_depth_reached,candidate_depth_reached,baseline_engine_elapsed_ms,candidate_engine_elapsed_ms" > "$CSV_OUT"
 
@@ -211,6 +338,10 @@ cand_qnodes_sum=0
 base_delta_sum=0
 cand_delta_sum=0
 
+depth_drop_cases=0
+major_depth_drop_cases=0
+delta_spike_cases=0
+
 printf '%-24s %-5s %-10s | %-44s | %-44s\n' "Case" "Depth" "Expected" "Baseline" "Candidate"
 printf '%-24s %-5s %-10s | %-44s | %-44s\n' "------------------------" "-----" "----------" "--------------------------------------------" "--------------------------------------------"
 
@@ -263,6 +394,21 @@ while IFS='|' read -r raw_name raw_position raw_depth raw_expected; do
     base_delta_sum=$((base_delta_sum + base_delta))
     cand_delta_sum=$((cand_delta_sum + cand_delta))
 
+    if (( cand_depth_reached + 1 < base_depth_reached )); then
+        depth_drop_cases=$((depth_drop_cases + 1))
+    fi
+    if (( cand_depth_reached + 2 < base_depth_reached )); then
+        major_depth_drop_cases=$((major_depth_drop_cases + 1))
+    fi
+
+    if (( base_delta > 0 )); then
+        if (( cand_delta >= base_delta * 4 )); then
+            delta_spike_cases=$((delta_spike_cases + 1))
+        fi
+    elif (( cand_delta >= 50 )); then
+        delta_spike_cases=$((delta_spike_cases + 1))
+    fi
+
     if [[ -n "$expected" ]]; then
         expected_count=$((expected_count + 1))
         if [[ "$base_result_flag" == "PASS" ]]; then
@@ -295,12 +441,41 @@ time_growth="$(pct_change "$base_elapsed_sum" "$cand_elapsed_sum")"
 
 node_growth_raw=$(awk -v b="$base_nodes_sum" -v c="$cand_nodes_sum" 'BEGIN { if (b == 0) print "nan"; else print ((c - b) * 100.0) / b; }')
 node_budget_status="N/A"
+node_budget_gate="N/A"
 if [[ "$node_growth_raw" != "nan" ]]; then
     if awk -v v="$node_growth_raw" 'BEGIN { exit !(v <= 15.0) }'; then
         node_budget_status="OK (<= 15%)"
+        node_budget_gate="PASS"
     else
         node_budget_status="HIGH (> 15%)"
+        node_budget_gate="FAIL"
     fi
+fi
+
+tactical_gate="FAIL"
+if (( expected_count > 0 )); then
+    if (( cand_pass >= base_pass )); then
+        tactical_gate="PASS"
+    else
+        tactical_gate="FAIL"
+    fi
+fi
+
+stability_gate="PASS"
+depth_drop_pct="$(awk -v drops="$depth_drop_cases" -v n="$case_count" 'BEGIN { if (n == 0) print "0.00"; else printf "%.2f", (drops * 100.0) / n; }')"
+major_depth_drop_pct="$(awk -v drops="$major_depth_drop_cases" -v n="$case_count" 'BEGIN { if (n == 0) print "0.00"; else printf "%.2f", (drops * 100.0) / n; }')"
+delta_spike_pct="$(awk -v spikes="$delta_spike_cases" -v n="$case_count" 'BEGIN { if (n == 0) print "0.00"; else printf "%.2f", (spikes * 100.0) / n; }')"
+
+if awk -v v="$major_depth_drop_pct" 'BEGIN { exit !(v > 20.0) }'; then
+    stability_gate="FAIL"
+fi
+if awk -v v="$delta_spike_pct" 'BEGIN { exit !(v > 20.0) }'; then
+    stability_gate="FAIL"
+fi
+
+overall_regression_gate="PASS"
+if [[ "$PROVENANCE_BINARIES_DIFFER" != "PASS" || "$tactical_gate" != "PASS" || "$node_budget_gate" == "FAIL" || "$stability_gate" != "PASS" ]]; then
+    overall_regression_gate="FAIL"
 fi
 
 echo
@@ -317,4 +492,46 @@ if (( node_fallback_cases > 0 )); then
 fi
 echo "- Total qNodes: baseline ${base_qnodes_sum}, candidate ${cand_qnodes_sum} (change: ${qnode_growth})"
 echo "- Total delta skips: baseline ${base_delta_sum}, candidate ${cand_delta_sum}"
+echo "- Search stability: depth-drop cases ${depth_drop_cases}/${case_count} (${depth_drop_pct}%), major depth-drop cases ${major_depth_drop_cases}/${case_count} (${major_depth_drop_pct}%), delta-spike cases ${delta_spike_cases}/${case_count} (${delta_spike_pct}%)"
+echo "- Provenance binaries-different gate: ${PROVENANCE_BINARIES_DIFFER}"
+echo "- Tactical gate (cand pass >= base pass): ${tactical_gate}"
+echo "- Node growth gate (<= 15%): ${node_budget_gate}"
+echo "- Stability gate: ${stability_gate}"
+echo "- Overall regression gate: ${overall_regression_gate}"
+echo "- Provenance report: $PROVENANCE_OUT"
+echo "- Summary report: $SUMMARY_OUT"
 echo "- CSV report: $CSV_OUT"
+
+cat > "$SUMMARY_OUT" <<EOF
+run_timestamp=${RUN_TIMESTAMP}
+suite_path=${SUITE_FILE_RESOLVED}
+suite_sha256=${SUITE_SHA256}
+baseline_path=${BASELINE_BIN_RESOLVED}
+baseline_sha256=${BASELINE_SHA256}
+candidate_path=${CANDIDATE_BIN_RESOLVED}
+candidate_sha256=${CANDIDATE_SHA256}
+cases_run=${case_count}
+expected_cases=${expected_count}
+baseline_expected_pass=${base_pass}
+candidate_expected_pass=${cand_pass}
+baseline_elapsed_ms=${base_elapsed_sum}
+candidate_elapsed_ms=${cand_elapsed_sum}
+baseline_nodes_effective=${base_nodes_sum}
+candidate_nodes_effective=${cand_nodes_sum}
+node_growth_percent=${node_growth}
+baseline_qnodes=${base_qnodes_sum}
+candidate_qnodes=${cand_qnodes_sum}
+qnode_growth_percent=${qnode_growth}
+baseline_delta_skips=${base_delta_sum}
+candidate_delta_skips=${cand_delta_sum}
+depth_drop_cases=${depth_drop_cases}
+major_depth_drop_cases=${major_depth_drop_cases}
+delta_spike_cases=${delta_spike_cases}
+binaries_different_gate=${PROVENANCE_BINARIES_DIFFER}
+tactical_gate=${tactical_gate}
+node_budget_gate=${node_budget_gate}
+stability_gate=${stability_gate}
+overall_regression_gate=${overall_regression_gate}
+csv_report=${CSV_OUT}
+provenance_report=${PROVENANCE_OUT}
+EOF

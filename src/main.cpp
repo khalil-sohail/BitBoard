@@ -430,9 +430,13 @@ void runGuiMode(Board& board, int searchDepth, const std::string& bookPath) {
             const bool whiteToMove = board.sideToMove() == Color::White;
             const long long timeLeft = whiteToMove ? wtime : btime;
             const long long increment = whiteToMove ? winc : binc;
+            const bool hasTime = (input.find("wtime") != std::string::npos ||
+                                  input.find("btime") != std::string::npos);
 
             long long timeLimitMs = 2000;
-            if (movetime > 0) {
+            if (!hasTime && movetime <= 0) {
+                timeLimitMs = 999999999LL;
+            } else if (movetime > 0) {
                 timeLimitMs = std::max(10LL, static_cast<long long>(movetime));
             } else if (timeLeft > 0) {
                 uint64_t activePieces =

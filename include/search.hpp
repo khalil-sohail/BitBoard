@@ -12,6 +12,9 @@ extern std::chrono::time_point<std::chrono::steady_clock> startTime;
 extern long long allocatedTimeMs;
 extern uint64_t qNodes;
 extern uint64_t deltaPruneSkips;
+extern uint64_t ttHits;
+extern uint64_t ttCutoffs;
+extern uint64_t ttStores;
 
 void checkTime();
 
