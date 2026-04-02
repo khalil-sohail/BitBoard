@@ -1,8 +1,8 @@
 NAME =  chess-engine
 TEST_NAME = chess-engine-tests
 
-SRCS = src/*.cpp src/eval/*.cpp
-ENGINE_SRCS = src/Board.cpp src/generateAllMoves.cpp src/piecesMovement.cpp src/printers.cpp src/search.cpp src/eval/*.cpp
+SRCS = src/*.cpp src/eval/*.cpp src/search/*.cpp
+ENGINE_SRCS = src/Board.cpp src/generateAllMoves.cpp src/piecesMovement.cpp src/printers.cpp src/eval/*.cpp src/search/*.cpp
 TEST_SRCS = $(ENGINE_SRCS) tests.cpp
 
 CC = g++
