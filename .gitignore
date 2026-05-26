@@ -43,3 +43,12 @@ htmlcov/
 .coverage
 nosetests.xml
 coverage.xml
+
+data/
+benchmarks/
+architecture.md
+chess-engine
+chess-engine-tune
+.venv/
+.github/
+.vscode/

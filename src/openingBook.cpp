@@ -9,16 +9,6 @@
 
 namespace {
 
-bool hasBinExtension(const std::filesystem::path& path) {
-    const std::string ext = path.extension().string();
-    std::string lowered;
-    lowered.reserve(ext.size());
-    for (char c : ext) {
-        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
-    return lowered == ".bin";
-}
-
 std::filesystem::path resolveBookPath(const std::filesystem::path& configuredPath) {
     std::error_code ec;
 
@@ -26,25 +16,25 @@ std::filesystem::path resolveBookPath(const std::filesystem::path& configuredPat
         return configuredPath;
     }
 
+    std::filesystem::path fallbackDir = configuredPath;
     ec.clear();
-    if (std::filesystem::is_directory(configuredPath, ec)) {
-        std::vector<std::filesystem::path> candidates;
-        for (const auto& entry : std::filesystem::directory_iterator(configuredPath, ec)) {
-            if (ec) {
-                break;
-            }
-            if (!entry.is_regular_file()) {
-                continue;
-            }
-            if (hasBinExtension(entry.path())) {
-                candidates.push_back(entry.path());
-            }
+    if (!std::filesystem::is_directory(fallbackDir, ec)) {
+        fallbackDir = fallbackDir.parent_path();
+        if (fallbackDir.empty()) {
+            fallbackDir = "./openings";
         }
+    }
 
-        if (!candidates.empty()) {
-            std::sort(candidates.begin(), candidates.end());
-            return candidates.front();
-        }
+    std::filesystem::path fallback = fallbackDir / "performance.bin";
+    ec.clear();
+    if (std::filesystem::is_regular_file(fallback, ec)) {
+        return fallback;
+    }
+
+    fallback = "./openings/performance.bin";
+    ec.clear();
+    if (std::filesystem::is_regular_file(fallback, ec)) {
+        return fallback;
     }
 
     return configuredPath;
