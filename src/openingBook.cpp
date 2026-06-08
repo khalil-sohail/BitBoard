@@ -31,7 +31,7 @@ std::filesystem::path resolveBookPath(const std::filesystem::path& configuredPat
         return fallback;
     }
 
-    fallback = "./openings/performance.bin";
+    fallback = "/home/ksohail-/Documents/chess-engine/openings/performance.bin";
     ec.clear();
     if (std::filesystem::is_regular_file(fallback, ec)) {
         return fallback;

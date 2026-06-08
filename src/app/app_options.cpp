@@ -192,6 +192,11 @@ Options parseOptions(int argc, char* argv[]) {
     Options options;
     std::string message;
 
+    if (hasFlag(argc, argv, "-h") || hasFlag(argc, argv, "--help")) {
+        options.showHelp = true;
+        return options;
+    }
+
     options.showBoard = !hasFlag(argc, argv, "--no-board");
     options.bookPath = parseBookPath(argc, argv);
 

@@ -18,6 +18,7 @@ struct Options {
     Color aiColor = Color::Black;
     int searchDepth = 4;
     bool showBoard = true;
+    bool showHelp = false;
     std::string bookPath = "./openings";
     std::string message;
 };
