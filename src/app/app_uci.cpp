@@ -167,7 +167,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 64;
 
             std::string bestMoveText = "0000";
-            if (openingBook.has_value()) {
+            if (parsedDepth <= 0 && openingBook.has_value()) {
                 std::optional<Move> bookMove = openingBook->getBookMove(board);
                 if (bookMove.has_value()) {
                     std::vector<Move> legalMoves = board.generateLegalMoves();
@@ -187,6 +187,8 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 if (bestMove.from >= 0 && bestMove.to >= 0) {
                     bestMoveText = AppText::moveToCompactString(board, bestMove);
                 }
+            } else {
+                std::cout << "info depth 1 score cp 0 pv " << bestMoveText << std::endl;
             }
 
             std::cout << "bestmove " << bestMoveText << std::endl;

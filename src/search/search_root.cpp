@@ -177,8 +177,8 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         previousIterationScore = depthBestScore;
 
         std::cout << "info depth " << currentDepth
-                  << " score cp " << depthBestScore
-                  << " pv " << moveToUci(bestCompletedMove) << "\n";
+                << " score cp " << depthBestScore
+                << " pv " << moveToUci(bestCompletedMove) << std::endl;
 
         if (elapsedMs > softTimeLimit && stableCount >= 2) {
             break;

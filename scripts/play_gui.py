@@ -12,7 +12,7 @@ import chess
 import chess.engine
 
 # Settings
-SQUARE_SIZE = 240
+SQUARE_SIZE = 120
 BOARD_SIZE = SQUARE_SIZE * 8
 WINDOW_SIZE = (BOARD_SIZE, BOARD_SIZE + 40) # Extra space for status bar
 FPS = 60
