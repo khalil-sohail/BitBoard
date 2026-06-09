@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: hsl(142 72% 45%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(217 33% 17%);
+  --color-accent: hsl(47 96% 53%);
+  --color-background: hsl(222 47% 6%);
+  --color-surface: hsl(218 39% 11%);
+  --color-surface-elevated: hsl(217 35% 15%);
+  --color-border: hsl(217 25% 20%);
+  --color-foreground: hsl(213 27% 84%);
+  --color-muted: hsl(215 16% 47%);
+}
+
+@layer base {
+  :root {
+    --primary: 142 72% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --accent: 47 96% 53%;
+
+    --background: 222 47% 6%;
+    --surface: 218 39% 11%;
+    --surface-elevated: 217 35% 15%;
+    --border: 217 25% 20%;
+
+    --foreground: 213 27% 84%;
+    --muted: 215 16% 47%;
+
+    --board-light: #EEDCC2;
+    --board-dark: #8F694F;
+    --board-highlight: #F5F682;
+
+    --eval-white: 0 0% 95%;
+    --eval-black: 0 0% 12%;
+    --eval-advantage: 142 72% 45%;
+    --eval-disadvantage: 0 72% 50%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased min-h-screen;
+  }
+}

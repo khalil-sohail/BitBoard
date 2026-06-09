@@ -52,3 +52,7 @@ chess-engine-tune
 .venv/
 .github/
 .vscode/
+# Website
+website/node_modules/
+website/.next/
+website/out/

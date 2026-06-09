@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2017",
+    "esModuleInterop": true,
+    "strict": false
+  },
+  "include": ["server.ts", "src/lib/engine-session.ts", "src/types/engine.ts"]
+}

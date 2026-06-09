@@ -5,6 +5,78 @@
 #include <iostream>
 #include <string>
 
+static std::vector<std::string> extractPV(Board& board, const Move& rootMove, int maxPVLength) {
+    auto moveToUciStr = [](const Move& move) {
+        std::string text = Board::squareToString(move.from) + Board::squareToString(move.to);
+        if (move.promotion.has_value()) {
+            char promo = 'q';
+            switch (*move.promotion) {
+                case PieceType::Knight: promo = 'n'; break;
+                case PieceType::Bishop: promo = 'b'; break;
+                case PieceType::Rook:   promo = 'r'; break;
+                case PieceType::Queen:  promo = 'q'; break;
+                default: break;
+            }
+            text.push_back(promo);
+        }
+        return text;
+    };
+
+    std::vector<std::string> pv;
+    pv.push_back(moveToUciStr(rootMove));
+
+    // Apply the root move, then walk the TT for continuation
+    board.makeMove(rootMove);
+    int movesMade = 1;
+
+    std::vector<uint64_t> seenHashes;
+    seenHashes.push_back(board.getHash());
+
+    while (static_cast<int>(pv.size()) < maxPVLength) {
+        const uint64_t hash = board.getHash();
+        const size_t ttIndex = hash % SearchConstants::TT_SIZE;
+        const SearchTypes::TTEntry& entry = SearchInternal::g_TT[ttIndex];
+
+        if (entry.hash != hash || entry.bestMove.from < 0) {
+            break;
+        }
+
+        // Verify the TT move is legal in this position
+        const std::vector<Move> legal = board.generateLegalMoves();
+        bool found = false;
+        Move legalMatch{};
+        for (const Move& m : legal) {
+            if (m.from == entry.bestMove.from && m.to == entry.bestMove.to &&
+                m.promotion == entry.bestMove.promotion) {
+                found = true;
+                legalMatch = m;
+                break;
+            }
+        }
+        if (!found) break;
+
+        pv.push_back(moveToUciStr(legalMatch));
+        board.makeMove(legalMatch);
+        ++movesMade;
+
+        // Cycle detection
+        uint64_t newHash = board.getHash();
+        for (uint64_t h : seenHashes) {
+            if (h == newHash) { goto done; }
+        }
+        seenHashes.push_back(newHash);
+    }
+done:
+
+    // Undo all moves to restore board state
+    for (int i = 0; i < movesMade; ++i) {
+        board.undoMove();
+    }
+
+    return pv;
+}
+
+
 Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     qNodes = 0;
     deltaPruneSkips = 0;
@@ -176,9 +248,16 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         previousIterationBest = depthBestMove;
         previousIterationScore = depthBestScore;
 
+        std::vector<std::string> pvLine = extractPV(board, bestCompletedMove, currentDepth);
         std::cout << "info depth " << currentDepth
-                << " score cp " << depthBestScore
-                << " pv " << moveToUci(bestCompletedMove) << std::endl;
+                  << " score cp " << depthBestScore
+                  << " nodes " << SearchInternal::g_nodesSearched
+                  << " time " << elapsedMs
+                  << " pv";
+        for (const std::string& m : pvLine) {
+            std::cout << " " << m;
+        }
+        std::cout << std::endl;
 
         if (elapsedMs > softTimeLimit && stableCount >= 2) {
             break;

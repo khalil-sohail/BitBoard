@@ -1,0 +1,16 @@
+export const COLORS = {
+  primary: "hsl(142 72% 45%)",
+  secondary: "hsl(217 33% 17%)",
+  accent: "hsl(47 96% 53%)",
+  background: "hsl(220 20% 7%)",
+  surface: "hsl(220 18% 11%)",
+  surfaceElevated: "hsl(220 16% 15%)",
+  border: "hsl(220 14% 20%)",
+  foreground: "hsl(210 20% 92%)",
+  muted: "hsl(215 14% 55%)",
+  boardLight: "hsl(37 44% 82%)",
+  boardDark: "hsl(28 38% 55%)",
+  boardHighlight: "hsl(62 56% 62%)",
+  evalWhite: "hsl(0 0% 95%)",
+  evalBlack: "hsl(0 0% 12%)",
+};

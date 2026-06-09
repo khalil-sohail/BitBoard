@@ -1,0 +1,13 @@
+engine/data/*.pgn
+engine/data/*.epd
+engine/data/7z/
+engine/benchmarks/
+engine/.venv/
+engine/chess-engine
+engine/chess-engine-tests
+engine/chess-engine-tune
+website/node_modules/
+website/.next/
+.git/
+.github/
+.vscode/
