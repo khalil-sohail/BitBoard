@@ -19,6 +19,9 @@ inline constexpr uint64_t TIME_CHECK_MASK = 2047ULL;
 inline constexpr size_t TT_SIZE = 1048576;
 inline constexpr int TT_MOVE_SCORE = 1'000'000;
 
+inline bool USE_OPENING_BOOK = true;
+inline int MAX_BOOK_DEPTH = 30;
+
 inline constexpr std::array<std::array<int, static_cast<size_t>(PieceType::Count)>, static_cast<size_t>(PieceType::Count)> MVV_LVA = {{
     {{105, 205, 305, 405, 505, 605}},
     {{104, 204, 304, 404, 504, 604}},

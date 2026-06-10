@@ -39,7 +39,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
   }
 
   return (
-    <div className="bg-surface rounded-lg border border-border p-4 mb-4">
+    <div className="bg-surface rounded-lg border border-white/10 p-4 shadow-md">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
           Engine Analysis
@@ -87,10 +87,10 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
           </div>
       </div>
 
-      <div className="bg-background rounded p-3 border border-border h-24 overflow-y-auto">
-        <span className="text-xs text-muted block mb-1 uppercase">Principal Variation</span>
-        <div className="text-sm font-mono text-foreground break-words leading-relaxed">
-          {info?.pv?.join(' ') || <span className="text-muted opacity-50">Waiting for analysis...</span>}
+      <div className="rounded-md p-3 border border-white/10 h-[5.5rem] overflow-y-auto" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
+        <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold">Principal Variation</span>
+        <div className="text-xs font-mono text-emerald-300/80 break-words leading-relaxed">
+          {info?.pv?.join(' ') || <span className="text-muted/40">Waiting for analysis...</span>}
         </div>
       </div>
     </div>

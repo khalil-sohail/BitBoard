@@ -23,15 +23,15 @@ export function EvalBar({ evalScore, mate, turn, orientation = 'w' }: { evalScor
   const displayHeight = orientation === 'w' ? fillHeight : 100 - fillHeight;
 
   return (
-    <div className={`w-8 h-full bg-[#333] rounded-sm overflow-hidden flex ${orientation === 'w' ? 'flex-col justify-end' : 'flex-col-reverse justify-end'} border border-border relative select-none`}>
+    <div className={`w-5 h-full bg-[hsl(222,30%,14%)] rounded-lg overflow-hidden flex ${orientation === 'w' ? 'flex-col justify-end' : 'flex-col-reverse justify-end'} border border-white/10 relative select-none shadow-lg`}>
       {/* Dynamic Fill (White portion) */}
       <div 
-        className={`w-full bg-[#ccc] transition-all duration-500 ease-in-out relative flex justify-center`}
+        className={`w-full bg-gradient-to-b from-[#e8e8e8] to-[#d0d0d0] transition-all duration-500 ease-in-out relative flex justify-center`}
         style={{ height: `${displayHeight}%` }}
       >
         {/* Label for white winning */}
         {fillHeight >= 50 && (
-           <span className={`text-[10px] font-mono font-bold absolute ${orientation === 'w' ? 'top-1' : 'bottom-1'} ${fillHeight > 80 ? 'text-[#333]' : 'text-transparent'}`}>
+           <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'top-1' : 'bottom-1'} ${fillHeight > 82 ? 'text-[#2a2a2a]' : 'text-transparent'} leading-none`}>
              {mate !== undefined ? (mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`) : (evalScore/100).toFixed(1)}
            </span>
         )}
@@ -39,7 +39,7 @@ export function EvalBar({ evalScore, mate, turn, orientation = 'w' }: { evalScor
       
       {/* Label for black winning */}
       {fillHeight < 50 && (
-        <span className={`text-[10px] font-mono font-bold absolute ${orientation === 'w' ? 'bottom-1' : 'top-1'} w-full text-center ${fillHeight < 20 ? 'text-[#ccc]' : 'text-transparent'}`}>
+        <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'bottom-1' : 'top-1'} w-full text-center ${fillHeight < 18 ? 'text-[#ddd]' : 'text-transparent'} leading-none`}>
           {mate !== undefined ? (mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`) : Math.abs(evalScore/100).toFixed(1)}
         </span>
       )}

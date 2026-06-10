@@ -130,6 +130,12 @@ export function useEngine() {
      connect();
   }, [connect]);
 
+  const setEngineOption = useCallback((name: string, value: string | boolean | number) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'setoption', name, value }));
+    }
+  }, []);
+
   return {
     status,
     engineInfo,
@@ -137,6 +143,7 @@ export function useEngine() {
     queuePosition,
     sendMove,
     newGame,
-    reconnect
+    reconnect,
+    setEngineOption
   };
 }

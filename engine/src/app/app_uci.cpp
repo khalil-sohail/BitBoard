@@ -3,8 +3,10 @@
 #include "app/app_text.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
+#include "search/search_internal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cctype>
 #include <iostream>
@@ -46,6 +48,8 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             (input.size() == 3 || std::isspace(static_cast<unsigned char>(input[3])))) {
             std::cout << "id name BitboardEngine" << std::endl;
             std::cout << "id author Khalil" << std::endl;
+            std::cout << "option name OwnBook type check default true" << std::endl;
+            std::cout << "option name BookDepth type spin default 30 min 0 max 100" << std::endl;
             std::cout << "uciok" << std::endl;
             ensureOpeningBookLoaded();
         }
@@ -55,6 +59,50 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         else if (input.rfind("ucinewgame", 0) == 0) {
             board.reset();
             board.clearSanHistory();
+        }
+        else if (input.rfind("stop", 0) == 0 &&
+                 (input.size() == 4 || std::isspace(static_cast<unsigned char>(input[4])))) {
+            // Immediately abort any in-progress search
+            timeAborted.store(true, std::memory_order_relaxed);
+        }
+        else if (input.rfind("setoption", 0) == 0) {
+            // Parse: setoption name <name> value <value>
+            std::istringstream optIss(input);
+            std::string tok, optName, optValue;
+            optIss >> tok; // "setoption"
+
+            // Accumulate multi-word name and value
+            bool readingName = false, readingValue = false;
+            while (optIss >> tok) {
+                if (tok == "name") { readingName = true; readingValue = false; continue; }
+                if (tok == "value") { readingValue = true; readingName = false; continue; }
+                if (readingName) { if (!optName.empty()) optName += " "; optName += tok; }
+                if (readingValue) { if (!optValue.empty()) optValue += " "; optValue += tok; }
+            }
+
+            if (optName == "Hash") {
+                // Acknowledge — TT size is currently compile-time fixed, but we don't
+                // silently drop the command anymore. Future: dynamically resize g_TT.
+                std::cout << "info string Hash option acknowledged (value=" << optValue
+                          << "), TT size is compile-time fixed at "
+                          << SearchConstants::TT_SIZE << " entries" << std::endl;
+            } else if (optName == "Clear Hash") {
+                SearchInternal::clearTT();
+                std::cout << "info string Transposition table cleared" << std::endl;
+            } else if (optName == "OwnBook") {
+                if (optValue == "true") SearchConstants::USE_OPENING_BOOK = true;
+                else if (optValue == "false") SearchConstants::USE_OPENING_BOOK = false;
+                std::cout << "info string OwnBook set to " << (SearchConstants::USE_OPENING_BOOK ? "true" : "false") << std::endl;
+            } else if (optName == "BookDepth") {
+                try {
+                    SearchConstants::MAX_BOOK_DEPTH = std::stoi(optValue);
+                    std::cout << "info string BookDepth set to " << SearchConstants::MAX_BOOK_DEPTH << std::endl;
+                } catch (...) {
+                    std::cout << "info string Invalid BookDepth value: " << optValue << std::endl;
+                }
+            } else {
+                std::cout << "info string Unknown option: " << optName << std::endl;
+            }
         }
         else if (input.rfind("position", 0) == 0) {
             std::istringstream iss(input);
@@ -167,17 +215,19 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 64;
 
             std::string bestMoveText = "0000";
-            if (parsedDepth <= 0 && openingBook.has_value()) {
-                std::optional<Move> bookMove = openingBook->getBookMove(board);
-                if (bookMove.has_value()) {
-                    std::vector<Move> legalMoves = board.generateLegalMoves();
-                    const auto it = std::find_if(legalMoves.begin(), legalMoves.end(), [&](const Move& legalMove) {
-                        return legalMove.from == bookMove->from &&
-                               legalMove.to == bookMove->to &&
-                               legalMove.promotion == bookMove->promotion;
-                    });
-                    if (it != legalMoves.end()) {
-                        bestMoveText = AppText::moveToCompactString(board, *bookMove);
+            if (parsedDepth <= 0 && openingBook.has_value() && SearchConstants::USE_OPENING_BOOK) {
+                if (board.sanHistory().size() < static_cast<size_t>(SearchConstants::MAX_BOOK_DEPTH)) {
+                    std::optional<Move> bookMove = openingBook->getBookMove(board);
+                    if (bookMove.has_value()) {
+                        std::vector<Move> legalMoves = board.generateLegalMoves();
+                        const auto it = std::find_if(legalMoves.begin(), legalMoves.end(), [&](const Move& legalMove) {
+                            return legalMove.from == bookMove->from &&
+                                   legalMove.to == bookMove->to &&
+                                   legalMove.promotion == bookMove->promotion;
+                        });
+                        if (it != legalMoves.end()) {
+                            bestMoveText = AppText::moveToCompactString(board, *bookMove);
+                        }
                     }
                 }
             }

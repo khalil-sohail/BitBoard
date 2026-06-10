@@ -88,6 +88,8 @@ class EnginePoolManager {
           if (!isReady) {
             if (trimmed === 'uciok') {
               engineProcess.stdin?.write(`setoption name Hash value ${HASH_SIZE_MB}\n`);
+              engineProcess.stdin?.write(`setoption name OwnBook value true\n`);
+              engineProcess.stdin?.write(`setoption name BookDepth value 30\n`);
               engineProcess.stdin?.write('isready\n');
             } else if (trimmed === 'readyok') {
               isReady = true;
@@ -143,7 +145,6 @@ class EnginePoolManager {
       this.terminateSession(id, 'disconnected');
     });
   }
-
   private handleClientMessage(id: string, data: any) {
     const session = this.active.get(id);
     if (!session || !session.process.stdin) return;
@@ -169,6 +170,8 @@ class EnginePoolManager {
         session.process.stdin.write(`isready\n`);
     } else if (data.type === 'stop') {
         session.process.stdin.write(`stop\n`);
+    } else if (data.type === 'setoption') {
+        session.process.stdin.write(`setoption name ${data.name} value ${data.value}\n`);
     }
   }
 
@@ -181,6 +184,10 @@ class EnginePoolManager {
             result.depth = parseInt(parts[i+1], 10);
         } else if (parts[i] === 'score' && i + 2 < parts.length && parts[i+1] === 'cp') {
             result.score = parseInt(parts[i+2], 10);
+        } else if (parts[i] === 'score' && i + 2 < parts.length && parts[i+1] === 'mate') {
+            result.mate = parseInt(parts[i+2], 10);
+            // Set a large score for sorting/display purposes
+            result.score = result.mate > 0 ? 100000 : -100000;
         } else if (parts[i] === 'nodes' && i + 1 < parts.length) {
             result.nodes = parseInt(parts[i+1], 10);
         } else if (parts[i] === 'time' && i + 1 < parts.length) {
@@ -191,8 +198,8 @@ class EnginePoolManager {
         }
     }
     
-    // Only return if we have depth and score
-    if (result.depth !== undefined && result.score !== undefined) {
+    // Only return if we have depth and score (or mate)
+    if (result.depth !== undefined && (result.score !== undefined || result.mate !== undefined)) {
         return result;
     }
     return null;

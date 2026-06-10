@@ -88,7 +88,7 @@ export function ChessBoardComponent({ fen, pv, onMove, orientation = 'white', ch
   }
 
   return (
-    <div className="w-full aspect-square relative rounded-md overflow-hidden shadow-2xl ring-1 ring-black/40">
+    <div className="w-full h-full relative rounded-xl overflow-hidden shadow-[0_25px_60px_rgba(0,0,0,0.7)] ring-1 ring-white/5">
       <Chessboard
         options={{
           position: fen,

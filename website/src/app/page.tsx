@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ChessBoardComponent } from "@/components/board/ChessBoard";
@@ -13,14 +13,19 @@ import { GameControls } from "@/components/controls/GameControls";
 import { useEngine } from "@/hooks/useEngine";
 import { useChessGame } from "@/hooks/useChessGame";
 import { useEvalHistory } from "@/hooks/useEvalHistory";
+import { useMoveReview } from "@/hooks/useMoveReview";
 import { PlayerColor, DifficultyLevel } from "@/types/engine";
 
 export default function Home() {
   const { status, engineInfo, bestMove, queuePosition, sendMove, newGame } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, turn, isGameOver } = useChessGame();
   const { evalHistory, addEvalPoint, resetEvalHistory } = useEvalHistory();
+  const { grades, recordEval, resetGrades } = useMoveReview();
   const [orientation, setOrientation] = useState<PlayerColor>('w');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('standard');
+
+  // Track the last White-normalized eval score so we can compute deltas for user moves
+  const lastNormalizedEvalRef = useRef<number | null>(null);
 
   const engineColor = orientation === 'w' ? 'b' : 'w';
 
@@ -43,18 +48,40 @@ export default function Home() {
       if (engineInfo?.score !== undefined) {
          const scoreToLog = engineColor === 'b' ? -engineInfo.score : engineInfo.score;
          addEvalPoint(moveHistory.length + 1, scoreToLog);
+
+         // Grade the engine's move (the engine just moved as engineColor)
+         // moveHistory.length is the index of the move just made (before state update)
+         recordEval(
+           scoreToLog,
+           moveHistory.length,           // 0-based index of the move just applied
+           engineColor,
+           !!(engineInfo.mate !== undefined && lastNormalizedEvalRef.current !== null),
+           !!(engineInfo.mate !== undefined),
+         );
+         lastNormalizedEvalRef.current = scoreToLog;
       }
     }
-  }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length, engineInfo?.score]);
+  }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length, engineInfo?.score, engineInfo?.mate, recordEval, engineColor]);
 
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
     if (turn === engineColor) return false; // Prevent moves while engine is thinking
-    return makeMove(move);
+    const result = makeMove(move);
+    // For user moves, the engine hasn't responded yet — we record a provisional grade
+    // using the last known eval. The grade will be refined when the engine next reports.
+    // We tag this half-move as the user's color (turn before the move)
+    if (result && lastNormalizedEvalRef.current !== null) {
+      const userColor = turn; // at time of move, turn === user's color
+      // delta will be refined on next engine eval; for now record with current known eval
+      recordEval(lastNormalizedEvalRef.current, moveHistory.length, userColor);
+    }
+    return result;
   };
 
   const handleNewGame = () => {
     resetGame();
     resetEvalHistory();
+    resetGrades();
+    lastNormalizedEvalRef.current = null;
     newGame();
   };
 
@@ -88,21 +115,21 @@ export default function Home() {
   } : null;
 
   return (
-    <div className="min-h-screen max-h-screen flex flex-col">
+    <div className="h-screen overflow-hidden flex flex-col">
       <Header />
       
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-12">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8">
+      <main className="flex-1 min-h-0 overflow-hidden">
+        <div className="h-full max-w-7xl w-full mx-auto px-4 md:px-6 py-4 grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6">
           
           {/* Left Column - Board area */}
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center h-full min-h-0 justify-center">
             <EvalBar 
               evalScore={normalizedInfo?.score ?? 0} 
               mate={normalizedInfo?.mate}
               turn={turn} 
               orientation={orientation}
             />
-            <div className="flex-1 max-w-[700px] relative">
+            <div className="h-full aspect-square relative flex-shrink-0">
                <ChessBoardComponent 
                  fen={fen} 
                  pv={normalizedInfo?.pv} 
@@ -133,27 +160,25 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right Column - Sidebar */}
-          <div className="flex flex-col h-[700px]">
+          {/* Right Column - Sidebar: scrolls internally, GameControls always pinned to bottom */}
+          <div className="flex flex-col gap-3 h-full min-h-0 overflow-hidden">
             <EngineToggle currentVersion="Texel-Tuned HCE" />
             <EnginePanel info={normalizedInfo} status={status} queuePosition={queuePosition} />
-            <MoveHistory moves={moveHistory} />
-            <GameControls 
-              onNewGame={handleNewGame} 
-              onUndo={undoMove} 
-              onFlipBoard={() => setOrientation(o => o === 'w' ? 'b' : 'w')}
-              orientation={orientation}
-              canUndo={moveHistory.length > 0 && status !== 'thinking'}
-              difficulty={difficulty}
-              onDifficultyChange={setDifficulty}
-            />
+            <MoveHistory moves={moveHistory} grades={grades} />
+            <div className="shrink-0">
+              <GameControls 
+                onNewGame={handleNewGame} 
+                onUndo={undoMove} 
+                onFlipBoard={() => setOrientation(o => o === 'w' ? 'b' : 'w')}
+                orientation={orientation}
+                canUndo={moveHistory.length > 0 && status !== 'thinking'}
+                difficulty={difficulty}
+                onDifficultyChange={setDifficulty}
+              />
+            </div>
           </div>
           
         </div>
-
-        {/* Bottom Area - Graph */}
-        {/* <EvalGraph data={evalHistory} /> */}
-        
       </main>
 
       <Footer />

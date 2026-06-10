@@ -115,6 +115,7 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
 
     SearchInternal::clearTT();
     SearchInternal::clearKillers();
+    SearchInternal::clearHistory();
 
     auto moveToUci = [&](const Move& move) {
         std::string text = Board::squareToString(move.from) + Board::squareToString(move.to);
@@ -249,9 +250,22 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         previousIterationScore = depthBestScore;
 
         std::vector<std::string> pvLine = extractPV(board, bestCompletedMove, currentDepth);
-        std::cout << "info depth " << currentDepth
-                  << " score cp " << depthBestScore
-                  << " nodes " << SearchInternal::g_nodesSearched
+        std::cout << "info depth " << currentDepth;
+
+        // Detect mate scores and emit proper UCI "score mate N"
+        if (depthBestScore > SearchConstants::MATE_SCORE - SearchConstants::MAX_PLY) {
+            // Positive mate: we are delivering checkmate
+            int movesToMate = (SearchConstants::MATE_SCORE - depthBestScore + 1) / 2;
+            std::cout << " score mate " << movesToMate;
+        } else if (depthBestScore < -SearchConstants::MATE_SCORE + SearchConstants::MAX_PLY) {
+            // Negative mate: we are getting checkmated
+            int movesToMate = (SearchConstants::MATE_SCORE + depthBestScore + 1) / 2;
+            std::cout << " score mate -" << movesToMate;
+        } else {
+            std::cout << " score cp " << depthBestScore;
+        }
+
+        std::cout << " nodes " << SearchInternal::g_nodesSearched
                   << " time " << elapsedMs
                   << " pv";
         for (const std::string& m : pvLine) {

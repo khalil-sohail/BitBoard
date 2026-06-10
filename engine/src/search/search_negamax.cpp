@@ -92,6 +92,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
     int bestScore = -SearchConstants::INF_SCORE;
     Move bestMoveFoundInLoop = legal.front();
     int moveCount = 0;
+    bool isFirstMove = true;
 
     for (const Move& move : legal) {
         ++moveCount;
@@ -102,17 +103,27 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
         const bool isQuiet = !move.isCapture && !move.promotion.has_value();
         const bool canLMR = (depth >= 3 && moveCount >= 4 && isQuiet && !givesCheck && !sideInCheck);
 
-        if (canLMR) {
-            const int reducedDepth = depth - 2;
-            score = -negamax(board, reducedDepth, -alpha - 1, -alpha, -colorMultiplier, false, plyFromRoot + 1);
+        if (isFirstMove) {
+            score = -negamax(board, depth - 1 + extension, -beta, -alpha, -colorMultiplier, false, plyFromRoot + 1);
+        } else {
+            if (canLMR) {
+                const int reducedDepth = depth - 2;
+                score = -negamax(board, reducedDepth, -alpha - 1, -alpha, -colorMultiplier, false, plyFromRoot + 1);
+
+                if (score > alpha && score < beta) {
+                    score = -negamax(board, depth - 1 + extension, -alpha - 1, -alpha, -colorMultiplier, false, plyFromRoot + 1);
+                }
+            } else {
+                score = -negamax(board, depth - 1 + extension, -alpha - 1, -alpha, -colorMultiplier, false, plyFromRoot + 1);
+            }
 
             if (score > alpha && score < beta) {
                 score = -negamax(board, depth - 1 + extension, -beta, -alpha, -colorMultiplier, false, plyFromRoot + 1);
             }
-        } else {
-            score = -negamax(board, depth - 1 + extension, -beta, -alpha, -colorMultiplier, false, plyFromRoot + 1);
         }
+        
         board.undoMove();
+        
         if (score > bestScore) {
             bestScore = score;
             bestMoveFoundInLoop = move;
@@ -121,7 +132,9 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
             alpha = score;
         }
         if (score >= beta) {
-            if (!move.isCapture && !move.promotion.has_value()) {
+            if (isQuiet) {
+                SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to] += depth * depth;
+                
                 const Move& primaryKiller = SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0];
                 const bool isSameAsPrimary =
                     primaryKiller.from == move.from &&
@@ -134,6 +147,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
             }
             break;
         }
+        isFirstMove = false;
     }
 
     SearchTypes::TTFlag flag = SearchTypes::TTFlag::Exact;

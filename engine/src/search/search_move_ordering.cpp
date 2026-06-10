@@ -17,6 +17,7 @@ int scoreMove(const Board& board, const Move& move) {
     }
 
     if (!move.isCapture) {
+        score += SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to];
         return score;
     }
 

@@ -4,6 +4,7 @@ namespace SearchInternal {
 
 std::vector<SearchTypes::TTEntry> g_TT(SearchConstants::TT_SIZE);
 std::array<std::array<Move, 2>, SearchConstants::MAX_PLY> g_killerMoves{};
+std::array<std::array<std::array<int, 64>, 64>, 2> g_historyTable{};
 uint64_t g_nodesSearched = 0;
 
 void clearTT() {
@@ -14,6 +15,16 @@ void clearKillers() {
     for (auto& arr : g_killerMoves) {
         arr[0] = Move{};
         arr[1] = Move{};
+    }
+}
+
+void clearHistory() {
+    for (int color = 0; color < 2; ++color) {
+        for (int from = 0; from < 64; ++from) {
+            for (int to = 0; to < 64; ++to) {
+                g_historyTable[color][from][to] = 0;
+            }
+        }
     }
 }
 

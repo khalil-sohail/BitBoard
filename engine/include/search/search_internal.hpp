@@ -16,10 +16,12 @@ using SearchClock = std::chrono::steady_clock;
 
 extern std::vector<SearchTypes::TTEntry> g_TT;
 extern std::array<std::array<Move, 2>, SearchConstants::MAX_PLY> g_killerMoves;
+extern std::array<std::array<std::array<int, 64>, 64>, 2> g_historyTable;
 extern uint64_t g_nodesSearched;
 
 void clearTT();
 void clearKillers();
+void clearHistory();
 
 int getPieceValue(PieceType piece);
 bool shouldAbortSearch();
