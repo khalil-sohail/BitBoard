@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
+import { parseUciInfo } from './uci-parser';
 
 interface EngineSession {
   id: string;
@@ -11,6 +12,8 @@ interface EngineSession {
   lastActivityAt: number;
   idleTimer: NodeJS.Timeout;
   sessionTimer: NodeJS.Timeout;
+  currentDepth: number;
+  pvs: any[];
 }
 
 const MAX_CONCURRENT = 10;
@@ -65,6 +68,8 @@ class EnginePoolManager {
       lastActivityAt: Date.now(),
       idleTimer: setTimeout(() => this.terminateSession(id, 'idle'), IDLE_TIMEOUT_MS),
       sessionTimer: setTimeout(() => this.terminateSession(id, 'session_expired'), SESSION_MAX_MS),
+      currentDepth: 0,
+      pvs: []
     };
 
     this.active.set(id, session);
@@ -90,6 +95,7 @@ class EnginePoolManager {
               engineProcess.stdin?.write(`setoption name Hash value ${HASH_SIZE_MB}\n`);
               engineProcess.stdin?.write(`setoption name OwnBook value true\n`);
               engineProcess.stdin?.write(`setoption name BookDepth value 30\n`);
+              engineProcess.stdin?.write(`setoption name MultiPV value 3\n`);
               engineProcess.stdin?.write('isready\n');
             } else if (trimmed === 'readyok') {
               isReady = true;
@@ -98,9 +104,38 @@ class EnginePoolManager {
           } else {
             // Parse engine output
             if (trimmed.startsWith('info ')) {
-              const parsedInfo = this.parseInfo(trimmed);
-              if (parsedInfo) {
-                ws.send(JSON.stringify({ type: 'info', ...parsedInfo }));
+              const parsedInfo = parseUciInfo(trimmed);
+              if (parsedInfo && parsedInfo.depth) {
+                // When starting a new depth, clear previous PVs
+                if (parsedInfo.depth !== session.currentDepth) {
+                    session.currentDepth = parsedInfo.depth;
+                    session.pvs = [];
+                }
+                const multipv = parsedInfo.multipv || 1;
+                const existingIdx = session.pvs.findIndex(p => p.multipv === multipv);
+                
+                const pvEntry = {
+                    multipv,
+                    score: parsedInfo.score,
+                    mate: parsedInfo.mate,
+                    pv: parsedInfo.pv
+                };
+                
+                if (existingIdx >= 0) {
+                    session.pvs[existingIdx] = pvEntry;
+                } else {
+                    session.pvs.push(pvEntry);
+                }
+                
+                session.pvs.sort((a, b) => a.multipv - b.multipv);
+
+                ws.send(JSON.stringify({ 
+                    type: 'info', 
+                    depth: session.currentDepth,
+                    nodes: parsedInfo.nodes,
+                    time: parsedInfo.time,
+                    pvs: session.pvs
+                }));
               }
             } else if (trimmed.startsWith('bestmove ')) {
               const parts = trimmed.split(' ');
@@ -153,7 +188,13 @@ class EnginePoolManager {
 
     if (data.type === 'move') {
       const movesStr = data.moves && data.moves.length > 0 ? ` moves ${data.moves.join(' ')}` : '';
-      session.process.stdin.write(`position startpos${movesStr}\n`);
+      // Use `position fen` when a custom FEN is provided (e.g. Analysis Mode);
+      // fall back to `position startpos` for normal games.
+      const isStartPos = !data.fen || data.fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      const positionCmd = isStartPos
+        ? `position startpos${movesStr}\n`
+        : `position fen ${data.fen}${movesStr}\n`;
+      session.process.stdin.write(positionCmd);
       
       let goCommand = 'go movetime 3000\n'; // default standard
       if (data.difficulty === 'blitz') {
@@ -165,6 +206,22 @@ class EnginePoolManager {
       }
 
       session.process.stdin.write(goCommand);
+    } else if (data.type === 'position') {
+      // Sync engine position without triggering a search (Analysis Mode FEN load)
+      const movesStr = data.moves && data.moves.length > 0 ? ` moves ${data.moves.join(' ')}` : '';
+      const isStartPos = !data.fen || data.fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      const positionCmd = isStartPos
+        ? `position startpos${movesStr}\n`
+        : `position fen ${data.fen}${movesStr}\n`;
+      session.process.stdin.write(positionCmd);
+    } else if (data.type === 'analyze') {
+      const movesStr = data.moves && data.moves.length > 0 ? ` moves ${data.moves.join(' ')}` : '';
+      const isStartPos = !data.fen || data.fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      const positionCmd = isStartPos
+        ? `position startpos${movesStr}\n`
+        : `position fen ${data.fen}${movesStr}\n`;
+      session.process.stdin.write(positionCmd);
+      session.process.stdin.write('go depth 30\n');
     } else if (data.type === 'newgame') {
         session.process.stdin.write(`ucinewgame\n`);
         session.process.stdin.write(`isready\n`);
@@ -173,36 +230,6 @@ class EnginePoolManager {
     } else if (data.type === 'setoption') {
         session.process.stdin.write(`setoption name ${data.name} value ${data.value}\n`);
     }
-  }
-
-  private parseInfo(line: string) {
-    const result: any = {};
-    const parts = line.split(' ');
-    
-    for (let i = 0; i < parts.length; i++) {
-        if (parts[i] === 'depth' && i + 1 < parts.length) {
-            result.depth = parseInt(parts[i+1], 10);
-        } else if (parts[i] === 'score' && i + 2 < parts.length && parts[i+1] === 'cp') {
-            result.score = parseInt(parts[i+2], 10);
-        } else if (parts[i] === 'score' && i + 2 < parts.length && parts[i+1] === 'mate') {
-            result.mate = parseInt(parts[i+2], 10);
-            // Set a large score for sorting/display purposes
-            result.score = result.mate > 0 ? 100000 : -100000;
-        } else if (parts[i] === 'nodes' && i + 1 < parts.length) {
-            result.nodes = parseInt(parts[i+1], 10);
-        } else if (parts[i] === 'time' && i + 1 < parts.length) {
-            result.time = parseInt(parts[i+1], 10);
-        } else if (parts[i] === 'pv' && i + 1 < parts.length) {
-            result.pv = parts.slice(i + 1);
-            break; // pv is usually at the end
-        }
-    }
-    
-    // Only return if we have depth and score (or mate)
-    if (result.depth !== undefined && (result.score !== undefined || result.mate !== undefined)) {
-        return result;
-    }
-    return null;
   }
 
   private updateActivity(id: string) {

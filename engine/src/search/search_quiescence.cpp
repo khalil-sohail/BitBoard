@@ -1,4 +1,5 @@
 #include "search/search_internal.hpp"
+#include "search/search_see.hpp"
 
 int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     if (SearchInternal::shouldAbortSearch()) {
@@ -42,6 +43,10 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
 
             if (standPat + capturedValue + SearchConstants::DELTA_PRUNING_MARGIN < alpha) {
                 ++deltaPruneSkips;
+                continue;
+            }
+
+            if (SearchInternal::see(board, move) < 0) {
                 continue;
             }
         }

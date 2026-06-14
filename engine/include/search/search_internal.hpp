@@ -20,6 +20,7 @@ extern std::array<std::array<std::array<int, 64>, 64>, 2> g_historyTable;
 extern uint64_t g_nodesSearched;
 
 void clearTT();
+void resizeTT(size_t mb);
 void clearKillers();
 void clearHistory();
 

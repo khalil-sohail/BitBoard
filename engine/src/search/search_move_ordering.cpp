@@ -1,4 +1,5 @@
 #include "search/search_internal.hpp"
+#include "search/search_see.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -21,20 +22,29 @@ int scoreMove(const Board& board, const Move& move) {
         return score;
     }
 
+    int seeVal = SearchInternal::see(board, move);
+    
     PieceType victim = PieceType::Pawn;
     if (move.isEnPassant) {
         victim = PieceType::Pawn;
     } else {
         const auto captured = board.pieceAt(move.to);
-        if (!captured.has_value()) {
-            return 0;
+        if (captured.has_value()) {
+            victim = captured->second;
         }
-        victim = captured->second;
     }
-
     const int victimIdx = static_cast<int>(victim);
     const int attackerIdx = static_cast<int>(move.piece);
-    score += SearchConstants::MVV_LVA[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
+    const int mvvLva = SearchConstants::MVV_LVA[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
+
+    if (seeVal >= 0) {
+        // Winning or equal capture: sort high
+        score += 800000 + seeVal * 10 + mvvLva;
+    } else {
+        // Losing capture: sort low, below quiet moves
+        score += -100000 + seeVal * 10 + mvvLva;
+    }
+
     return score;
 }
 

@@ -132,6 +132,8 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         }
         return text;
     };
+    // moveToUci is now actively used — remove the void suppression
+    // (lambda defined above at line ~120)
 
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
         if (timeAborted.load(std::memory_order_relaxed)) {
@@ -141,56 +143,55 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
         std::vector<Move> moves = rootMoves;
         SearchInternal::prioritizeMove(moves, previousIterationBest);
 
-        int alpha = (currentDepth >= 4) ? previousIterationScore - SearchConstants::ASPIRATION_WINDOW_SIZE : -SearchConstants::INF_SCORE;
-        int beta = (currentDepth >= 4) ? previousIterationScore + SearchConstants::ASPIRATION_WINDOW_SIZE : SearchConstants::INF_SCORE;
+        // ── Multi-PV: collect the top N root moves for this depth ──────────
+        const int pvCount = std::max(1, std::min(SearchConstants::MULTI_PV, static_cast<int>(moves.size())));
 
-        int depthBestScore = -SearchConstants::INF_SCORE;
-        Move depthBestMove = moves.front();
+        struct PVResult {
+            Move   move;
+            int    score;
+            std::vector<std::string> pv;
+        };
+        std::vector<PVResult> pvResults;
+        pvResults.reserve(pvCount);
+
+        // Track moves already claimed by a higher-ranked PV so we skip them
+        std::vector<Move> excludedMoves;
+
         bool completedDepth = true;
-        int localAlpha = alpha;
 
-        for (const Move& move : moves) {
-            if (SearchInternal::shouldAbortSearch()) {
-                completedDepth = false;
-                break;
-            }
-
-            board.makeMove(move);
-            const int score = -negamax(
-                board,
-                std::max(0, currentDepth - 1),
-                -beta,
-                -localAlpha,
-                -rootColorMultiplier,
-                false,
-                0
-            );
-            board.undoMove();
-
+        for (int pvIdx = 0; pvIdx < pvCount; ++pvIdx) {
             if (timeAborted.load(std::memory_order_relaxed)) {
                 completedDepth = false;
                 break;
             }
 
-            if (score > depthBestScore) {
-                depthBestScore = score;
-                depthBestMove = move;
+            // Build candidate list: all root moves minus those already assigned to a better PV
+            std::vector<Move> candidates;
+            candidates.reserve(moves.size());
+            for (const Move& m : moves) {
+                bool excluded = false;
+                for (const Move& ex : excludedMoves) {
+                    if (SearchInternal::sameMove(m, ex)) { excluded = true; break; }
+                }
+                if (!excluded) candidates.push_back(m);
+            }
+            if (candidates.empty()) break;
+
+            // Aspiration window only for the best (first) PV line
+            int alpha, beta;
+            if (pvIdx == 0 && currentDepth >= 4) {
+                alpha = previousIterationScore - SearchConstants::ASPIRATION_WINDOW_SIZE;
+                beta  = previousIterationScore + SearchConstants::ASPIRATION_WINDOW_SIZE;
+            } else {
+                alpha = -SearchConstants::INF_SCORE;
+                beta  =  SearchConstants::INF_SCORE;
             }
 
-            if (score > localAlpha) {
-                localAlpha = score;
-            }
+            int    pvBestScore = -SearchConstants::INF_SCORE;
+            Move   pvBestMove  = candidates.front();
+            int    localAlpha  = alpha;
 
-            if (localAlpha >= beta) {
-                break;
-            }
-        }
-
-        if (completedDepth && currentDepth >= 4 && (depthBestScore <= alpha || depthBestScore >= beta)) {
-            depthBestScore = -SearchConstants::INF_SCORE;
-            depthBestMove = moves.front();
-
-            for (const Move& move : moves) {
+            for (const Move& move : candidates) {
                 if (SearchInternal::shouldAbortSearch()) {
                     completedDepth = false;
                     break;
@@ -200,8 +201,8 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
                 const int score = -negamax(
                     board,
                     std::max(0, currentDepth - 1),
-                    -SearchConstants::INF_SCORE,
-                    SearchConstants::INF_SCORE,
+                    -beta,
+                    -localAlpha,
                     -rootColorMultiplier,
                     false,
                     0
@@ -213,24 +214,71 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
                     break;
                 }
 
-                if (score > depthBestScore) {
-                    depthBestScore = score;
-                    depthBestMove = move;
+                if (score > pvBestScore) {
+                    pvBestScore = score;
+                    pvBestMove  = move;
+                }
+                if (score > localAlpha) {
+                    localAlpha = score;
+                }
+                if (localAlpha >= beta) break;
+            }
+
+            // Aspiration miss: re-search with full window (only for PV 1)
+            if (completedDepth && pvIdx == 0 && currentDepth >= 4 &&
+                (pvBestScore <= alpha || pvBestScore >= beta)) {
+
+                pvBestScore = -SearchConstants::INF_SCORE;
+                pvBestMove  = candidates.front();
+
+                for (const Move& move : candidates) {
+                    if (SearchInternal::shouldAbortSearch()) {
+                        completedDepth = false;
+                        break;
+                    }
+
+                    board.makeMove(move);
+                    const int score = -negamax(
+                        board,
+                        std::max(0, currentDepth - 1),
+                        -SearchConstants::INF_SCORE,
+                        SearchConstants::INF_SCORE,
+                        -rootColorMultiplier,
+                        false,
+                        0
+                    );
+                    board.undoMove();
+
+                    if (timeAborted.load(std::memory_order_relaxed)) {
+                        completedDepth = false;
+                        break;
+                    }
+
+                    if (score > pvBestScore) {
+                        pvBestScore = score;
+                        pvBestMove  = move;
+                    }
                 }
             }
+
+            if (!completedDepth) break;
+
+            std::vector<std::string> pvLine = extractPV(board, pvBestMove, currentDepth);
+            pvResults.push_back({ pvBestMove, pvBestScore, pvLine });
+            excludedMoves.push_back(pvBestMove);
         }
 
-        if (!completedDepth) {
-            break;
-        }
+        if (!completedDepth) break;
 
-        bestCompletedMove = depthBestMove;
+        // ── Update iteration tracking (use PV-1 as the authoritative best) ─
+        const PVResult& best = pvResults.front();
+        bestCompletedMove = best.move;
 
         const bool sameAsLastIteration =
             currentDepth > 1 &&
-            bestCompletedMove.from == bestMoveLastIteration.from &&
-            bestCompletedMove.to == bestMoveLastIteration.to &&
-            bestCompletedMove.piece == bestMoveLastIteration.piece &&
+            bestCompletedMove.from      == bestMoveLastIteration.from &&
+            bestCompletedMove.to        == bestMoveLastIteration.to   &&
+            bestCompletedMove.piece     == bestMoveLastIteration.piece &&
             bestCompletedMove.promotion == bestMoveLastIteration.promotion;
 
         if (sameAsLastIteration) {
@@ -239,47 +287,41 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
             stableCount = 0;
             softTimeLimit = hardTimeLimit * 4 / 5;
         }
-
-        bestMoveLastIteration = bestCompletedMove;
+        bestMoveLastIteration  = bestCompletedMove;
+        previousIterationBest  = best.move;
+        previousIterationScore = best.score;
 
         const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             SearchInternal::SearchClock::now() - startTime
         ).count();
 
-        previousIterationBest = depthBestMove;
-        previousIterationScore = depthBestScore;
+        // ── Emit one `info` line per PV ────────────────────────────────────
+        for (int pvIdx = 0; pvIdx < static_cast<int>(pvResults.size()); ++pvIdx) {
+            const PVResult& pv = pvResults[pvIdx];
+            std::cout << "info depth " << currentDepth
+                      << " multipv " << (pvIdx + 1);
 
-        std::vector<std::string> pvLine = extractPV(board, bestCompletedMove, currentDepth);
-        std::cout << "info depth " << currentDepth;
+            if (pv.score > SearchConstants::MATE_SCORE - SearchConstants::MAX_PLY) {
+                int movesToMate = (SearchConstants::MATE_SCORE - pv.score + 1) / 2;
+                std::cout << " score mate " << movesToMate;
+            } else if (pv.score < -SearchConstants::MATE_SCORE + SearchConstants::MAX_PLY) {
+                int movesToMate = (SearchConstants::MATE_SCORE + pv.score + 1) / 2;
+                std::cout << " score mate -" << movesToMate;
+            } else {
+                std::cout << " score cp " << pv.score;
+            }
 
-        // Detect mate scores and emit proper UCI "score mate N"
-        if (depthBestScore > SearchConstants::MATE_SCORE - SearchConstants::MAX_PLY) {
-            // Positive mate: we are delivering checkmate
-            int movesToMate = (SearchConstants::MATE_SCORE - depthBestScore + 1) / 2;
-            std::cout << " score mate " << movesToMate;
-        } else if (depthBestScore < -SearchConstants::MATE_SCORE + SearchConstants::MAX_PLY) {
-            // Negative mate: we are getting checkmated
-            int movesToMate = (SearchConstants::MATE_SCORE + depthBestScore + 1) / 2;
-            std::cout << " score mate -" << movesToMate;
-        } else {
-            std::cout << " score cp " << depthBestScore;
+            std::cout << " nodes " << SearchInternal::g_nodesSearched
+                      << " time "  << elapsedMs
+                      << " pv";
+            for (const std::string& m : pv.pv) {
+                std::cout << " " << m;
+            }
+            std::cout << std::endl;
         }
 
-        std::cout << " nodes " << SearchInternal::g_nodesSearched
-                  << " time " << elapsedMs
-                  << " pv";
-        for (const std::string& m : pvLine) {
-            std::cout << " " << m;
-        }
-        std::cout << std::endl;
-
-        if (elapsedMs > softTimeLimit && stableCount >= 2) {
-            break;
-        }
-
-        if (elapsedMs > (hardTimeLimit * 3 / 4)) {
-            break;
-        }
+        if (elapsedMs > softTimeLimit && stableCount >= 2) break;
+        if (elapsedMs > (hardTimeLimit * 3 / 4)) break;
     }
 
     const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -287,12 +329,12 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     ).count();
 
     std::cout << "info string nodes: " << SearchInternal::g_nodesSearched
-              << " qNodes: " << qNodes
+              << " qNodes: "     << qNodes
               << " deltaSkips: " << deltaPruneSkips
-              << " ttHits: " << ttHits
-              << " ttCutoffs: " << ttCutoffs
-              << " ttStores: " << ttStores
-              << " elapsedMs: " << totalElapsedMs << "\n";
+              << " ttHits: "     << ttHits
+              << " ttCutoffs: "  << ttCutoffs
+              << " ttStores: "   << ttStores
+              << " elapsedMs: "  << totalElapsedMs << "\n";
 
     return bestCompletedMove;
 }

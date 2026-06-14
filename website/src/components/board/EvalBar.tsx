@@ -6,7 +6,7 @@ export function EvalBar({ evalScore, mate, turn, orientation = 'w' }: { evalScor
   const [fillHeight, setFillHeight] = useState(50);
   
   useEffect(() => {
-    if (mate !== undefined) {
+    if (mate !== undefined && mate !== 0) {
        setFillHeight(mate > 0 ? 100 : 0);
        return;
     }
@@ -29,18 +29,18 @@ export function EvalBar({ evalScore, mate, turn, orientation = 'w' }: { evalScor
         className={`w-full bg-gradient-to-b from-[#e8e8e8] to-[#d0d0d0] transition-all duration-500 ease-in-out relative flex justify-center`}
         style={{ height: `${displayHeight}%` }}
       >
-        {/* Label for white winning */}
+        {/* Label for white winning: bar is >= 50% so White has the advantage */}
         {fillHeight >= 50 && (
            <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'top-1' : 'bottom-1'} ${fillHeight > 82 ? 'text-[#2a2a2a]' : 'text-transparent'} leading-none`}>
-             {mate !== undefined ? (mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`) : (evalScore/100).toFixed(1)}
+             {mate !== undefined && mate !== 0 ? `M${Math.abs(mate)}` : (evalScore/100).toFixed(1)}
            </span>
         )}
       </div>
       
-      {/* Label for black winning */}
+      {/* Label for black winning: bar is < 50% so Black has the advantage */}
       {fillHeight < 50 && (
         <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'bottom-1' : 'top-1'} w-full text-center ${fillHeight < 18 ? 'text-[#ddd]' : 'text-transparent'} leading-none`}>
-          {mate !== undefined ? (mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`) : Math.abs(evalScore/100).toFixed(1)}
+          {mate !== undefined && mate !== 0 ? `M${Math.abs(mate)}` : Math.abs(evalScore/100).toFixed(1)}
         </span>
       )}
     </div>

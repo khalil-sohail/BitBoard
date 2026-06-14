@@ -25,7 +25,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
 
     const int originalAlpha = alpha;
     const uint64_t hash = board.getHash();
-    const size_t ttIndex = hash % SearchConstants::TT_SIZE;
+    const size_t ttIndex = hash & SearchConstants::TT_SIZE_MASK;
     const SearchTypes::TTEntry& entry = SearchInternal::g_TT[ttIndex];
 
     Move ttBestMove{};

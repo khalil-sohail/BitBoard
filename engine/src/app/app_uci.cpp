@@ -30,7 +30,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         }
         if (!openingBookStatusPrinted) {
             if (openingBook->lineCount() > 0) {
-                std::cout << "[System] Opening book loaded: " << openingBook->lineCount() << " moves found." << std::endl;
+                std::cout << "info string Opening book loaded: " << openingBook->lineCount() << " entries." << std::endl;
             } else {
                 std::cout << "info string Failed to load book: " << options.bookPath << ". Falling back to search." << std::endl;
             }
@@ -48,8 +48,11 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             (input.size() == 3 || std::isspace(static_cast<unsigned char>(input[3])))) {
             std::cout << "id name BitboardEngine" << std::endl;
             std::cout << "id author Khalil" << std::endl;
+            std::cout << "option name Hash type spin default 16 min 1 max 32768" << std::endl;
+            std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name OwnBook type check default true" << std::endl;
             std::cout << "option name BookDepth type spin default 30 min 0 max 100" << std::endl;
+            std::cout << "option name MultiPV type spin default 1 min 1 max 8" << std::endl;
             std::cout << "uciok" << std::endl;
             ensureOpeningBookLoaded();
         }
@@ -81,11 +84,13 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             }
 
             if (optName == "Hash") {
-                // Acknowledge — TT size is currently compile-time fixed, but we don't
-                // silently drop the command anymore. Future: dynamically resize g_TT.
-                std::cout << "info string Hash option acknowledged (value=" << optValue
-                          << "), TT size is compile-time fixed at "
-                          << SearchConstants::TT_SIZE << " entries" << std::endl;
+                try {
+                    size_t mb = std::stoull(optValue);
+                    SearchInternal::resizeTT(mb);
+                    std::cout << "info string Hash set to " << mb << " MB (" << SearchConstants::TT_SIZE << " entries)" << std::endl;
+                } catch (...) {
+                    std::cout << "info string Invalid Hash value: " << optValue << std::endl;
+                }
             } else if (optName == "Clear Hash") {
                 SearchInternal::clearTT();
                 std::cout << "info string Transposition table cleared" << std::endl;
@@ -99,6 +104,14 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                     std::cout << "info string BookDepth set to " << SearchConstants::MAX_BOOK_DEPTH << std::endl;
                 } catch (...) {
                     std::cout << "info string Invalid BookDepth value: " << optValue << std::endl;
+                }
+            } else if (optName == "MultiPV") {
+                try {
+                    int n = std::stoi(optValue);
+                    SearchConstants::MULTI_PV = std::max(1, std::min(n, 8));
+                    std::cout << "info string MultiPV set to " << SearchConstants::MULTI_PV << std::endl;
+                } catch (...) {
+                    std::cout << "info string Invalid MultiPV value: " << optValue << std::endl;
                 }
             } else {
                 std::cout << "info string Unknown option: " << optName << std::endl;

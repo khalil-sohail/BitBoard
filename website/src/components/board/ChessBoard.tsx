@@ -2,7 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import { Chessboard } from 'react-chessboard';
-import { generatePVArrows } from '../../lib/square-utils';
+import { convertUciToArrow } from '../../lib/square-utils';
+import { PVLine } from '../../types/engine';
 
 // Classic chess.com wood palette — hard-coded for guaranteed contrast
 // regardless of CSS variable resolution context.
@@ -13,27 +14,44 @@ const RCLICK_BG    = 'rgba(235, 97, 80, 0.8)';  // right-click annotation
 
 interface BoardProps {
   fen: string;
-  pv: string[] | undefined;
+  pvs: PVLine[] | undefined;
   onMove: (move: { from: string; to: string; promotion?: string }) => boolean;
   orientation?: 'white' | 'black';
   checkSquare?: string | null;
   lastMove?: { from: string; to: string } | null;
 }
 
-export function ChessBoardComponent({ fen, pv, onMove, orientation = 'white', checkSquare, lastMove }: BoardProps) {
+export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', checkSquare, lastMove }: BoardProps) {
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
   const [rightClickedSquares, setRightClickedSquares] = useState<any>({});
 
-  const pvArrows = useMemo(() => generatePVArrows(pv), [pv]);
-  
-  // Combine custom drawn arrows and PV arrows
+  // Draw custom arrows for top 3 PVs
   const customArrows = useMemo(() => {
-     return pvArrows.map(arrow => ({
-         startSquare: arrow[0],
-         endSquare: arrow[1],
-         color: arrow[2]
-     }));
-  }, [pvArrows]);
+     if (!pvs || pvs.length === 0) return [];
+     
+     const colors = [
+       'rgba(34, 197, 94, 0.8)',  // MultiPV 1 (Best): Green
+       'rgba(59, 130, 246, 0.8)', // MultiPV 2: Blue
+       'rgba(234, 179, 8, 0.8)'   // MultiPV 3: Yellow/Orange
+     ];
+     
+     const arrows: any[] = [];
+     for (let i = 0; i < Math.min(pvs.length, 3); i++) {
+        const pvLine = pvs[i].pv;
+        if (pvLine && pvLine.length > 0) {
+            const uciMove = pvLine[0]; // just the first move
+            const arrow = convertUciToArrow(uciMove, colors[i]);
+            if (arrow) {
+               arrows.push({
+                   startSquare: arrow[0],
+                   endSquare: arrow[1],
+                   color: arrow[2]
+               });
+            }
+        }
+     }
+     return arrows;
+  }, [pvs]);
 
   function onSquareClick({ square }: { square: string }) {
     setRightClickedSquares({});

@@ -11,6 +11,28 @@ void clearTT() {
     g_TT.assign(SearchConstants::TT_SIZE, SearchTypes::TTEntry{});
 }
 
+void resizeTT(size_t mb) {
+    // Clamp to 1MB - 32GB
+    mb = std::max(size_t{1}, std::min(size_t{32768}, mb));
+    
+    size_t targetBytes = mb * 1024 * 1024;
+    size_t targetEntries = targetBytes / sizeof(SearchTypes::TTEntry);
+    
+    // Find nearest power of two <= targetEntries
+    size_t entries = 1;
+    while ((entries << 1) <= targetEntries) {
+        entries <<= 1;
+    }
+    
+    // Safely free old memory
+    std::vector<SearchTypes::TTEntry>().swap(g_TT);
+    
+    SearchConstants::TT_SIZE = entries;
+    SearchConstants::TT_SIZE_MASK = entries - 1;
+    
+    g_TT.assign(SearchConstants::TT_SIZE, SearchTypes::TTEntry{});
+}
+
 void clearKillers() {
     for (auto& arr : g_killerMoves) {
         arr[0] = Move{};

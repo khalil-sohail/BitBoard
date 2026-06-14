@@ -55,14 +55,12 @@ export function useEngine() {
             break;
           case 'info':
             if (!stateRef.current.isWaitingForNewGameReady) {
-                setEngineInfo({
+                setEngineInfo(prev => ({
                   depth: data.depth,
-                  score: data.score,
-                  mate: data.mate,
-                  pv: data.pv,
-                  nodes: data.nodes,
-                  time: data.time
-                });
+                  pvs: data.pvs || [],
+                  nodes: data.nodes ?? prev?.nodes,
+                  time: data.time ?? prev?.time
+                }));
             }
             break;
           case 'bestmove':
@@ -136,6 +134,25 @@ export function useEngine() {
     }
   }, []);
 
+  /**
+   * Tell the engine about a position without triggering a search.
+   * Used in Analysis Mode when the user loads a custom FEN.
+   */
+  const setPosition = useCallback((fen: string, moves: string[] = []) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'position', fen, moves }));
+    }
+  }, []);
+
+  const startAnalysis = useCallback((fen: string, moves: string[] = []) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      setStatus('thinking');
+      setBestMove(null);
+      setEngineInfo(null);
+      ws.current.send(JSON.stringify({ type: 'analyze', fen, moves }));
+    }
+  }, [setStatus]);
+
   return {
     status,
     engineInfo,
@@ -144,6 +161,8 @@ export function useEngine() {
     sendMove,
     newGame,
     reconnect,
-    setEngineOption
+    setEngineOption,
+    setPosition,
+    startAnalysis,
   };
 }

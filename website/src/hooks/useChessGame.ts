@@ -82,6 +82,43 @@ export function useChessGame() {
     return true;
   }, [game]);
 
+  /**
+   * Load a custom FEN position (Analysis Mode).
+   * Returns true on success, false if the FEN is invalid.
+   */
+  const loadFen = useCallback((fen: string): boolean => {
+    try {
+      const newGame = new Chess(fen);
+      setGame(newGame);
+      setMoveHistory([]);
+      setUciHistory([]);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const exportPgn = useCallback((): string => {
+    return game.pgn();
+  }, [game]);
+
+  const loadPgn = useCallback((pgnString: string): string | false => {
+    try {
+      const newGame = new Chess();
+      newGame.loadPgn(pgnString);
+      setGame(newGame);
+      setMoveHistory(newGame.history({ verbose: true }) as Move[]);
+      
+      // Reconstruct uciHistory
+      const moves = newGame.history({ verbose: true }) as Move[];
+      setUciHistory(moves.map(m => m.from + m.to + (m.promotion || '')));
+      
+      return newGame.fen();
+    } catch {
+      return false;
+    }
+  }, []);
+
   return {
     game,
     fen: game.fen(),
@@ -90,6 +127,9 @@ export function useChessGame() {
     makeMove,
     resetGame,
     undoMove,
+    loadFen,
+    exportPgn,
+    loadPgn,
     isGameOver: game.isGameOver(),
     turn: game.turn() as PlayerColor
   };

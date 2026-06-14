@@ -1,79 +1,66 @@
-"use client";
-
-import { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { EvalPoint } from '../../types/engine';
+import React from 'react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface EvalGraphProps {
-  data: EvalPoint[];
+  data: { ply: number; score: number }[];
 }
 
 export function EvalGraph({ data }: EvalGraphProps) {
-  const [mounted, setMounted] = useState(false);
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-24 w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md flex items-center justify-center">
+        <span className="text-xs text-muted/50 uppercase tracking-widest font-mono">No Eval Data</span>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Process data to cap extreme values for better visualization
-  const processedData = data.map(point => {
-    let cappedEval = point.eval / 100; // Convert cp to pawns
-    if (cappedEval > 10) cappedEval = 10;
-    if (cappedEval < -10) cappedEval = -10;
-    
-    return {
-      move: Math.ceil(point.moveNumber / 2),
-      rawEval: point.eval,
-      displayEval: cappedEval,
-      turn: point.moveNumber % 2 !== 0 ? 'White' : 'Black'
-    };
-  });
+  const max = Math.max(...data.map(d => d.score), 0);
+  const min = Math.min(...data.map(d => d.score), 0);
+  
+  let offset = 0.5;
+  if (max > min) {
+    offset = max / (max - min);
+  }
 
   return (
-    <div className="bg-surface rounded-lg border border-border p-4 w-full h-48 mt-4">
-      <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-2">
-        Evaluation History
-      </h3>
-      <div className="w-full h-32">
-        {mounted && (
-          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-            <LineChart data={processedData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-              <XAxis 
-                dataKey="move" 
-                tick={{ fontSize: 10, fill: 'var(--muted)' }} 
-                axisLine={{ stroke: 'var(--border)' }}
-                tickLine={false}
-                minTickGap={20}
-              />
-              <YAxis 
-                domain={[-10, 10]} 
-                tick={{ fontSize: 10, fill: 'var(--muted)' }}
-                axisLine={{ stroke: 'var(--border)' }}
-                tickLine={false}
-                ticks={[-10, -5, 0, 5, 10]}
-              />
-              <Tooltip 
-                contentStyle={{ backgroundColor: 'var(--surface-elevated)', borderColor: 'var(--border)', borderRadius: '4px', fontSize: '12px' }}
-                itemStyle={{ color: 'var(--foreground)' }}
-                formatter={(value: any) => {
-                  const numValue = Number(value);
-                  return [`${numValue > 0 ? '+' : ''}${numValue.toFixed(1)}`, 'Eval'];
-                }}
-                labelFormatter={(label) => `Move ${label}`}
-              />
-              <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
-              <Line 
-                type="monotone" 
-                dataKey="displayEval" 
-                stroke="var(--accent)" 
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: 'var(--accent)', stroke: 'var(--background)' }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
+    <div className="h-24 w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md relative group mt-4">
+      <div className="absolute top-2 left-3 z-10 pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity">
+          <span className="text-[10px] text-foreground uppercase tracking-widest font-semibold">Eval History</span>
       </div>
+      
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
+              <stop offset={offset} stopColor="#e5e7eb" stopOpacity={0.9} />
+              <stop offset={offset} stopColor="#374151" stopOpacity={0.8} />
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="ply" hide />
+          <YAxis domain={[-10, 10]} hide />
+          <Tooltip 
+            contentStyle={{ backgroundColor: 'rgba(20,20,20,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', fontSize: '11px', padding: '4px 8px' }}
+            itemStyle={{ color: '#e5e7eb', fontWeight: 600 }}
+            labelStyle={{ display: 'none' }}
+            formatter={(val: any) => {
+              const numVal = Number(val);
+              if (isNaN(numVal)) return ['0.00', 'Eval'];
+              const sign = numVal > 0 ? '+' : '';
+              return [sign + numVal.toFixed(2), 'Eval'];
+            }}
+            isAnimationActive={false}
+            cursor={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+          />
+          <Area 
+            type="stepAfter" 
+            dataKey="score" 
+            stroke="none" 
+            fill="url(#splitColor)" 
+            baseValue={0}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

@@ -1,10 +1,15 @@
+export interface PVLine {
+  multipv: number;
+  score: number;
+  mate?: number;
+  pv: string[];
+}
+
 export interface EngineInfo {
   depth: number;
-  score: number; // centipawns
-  mate?: number; // mate in N moves
-  pv: string[]; // e.g. ["e2e4", "e7e5"]
   nodes?: number;
   time?: number; // ms
+  pvs: PVLine[];
 }
 
 export interface EvalPoint {
@@ -15,3 +20,11 @@ export interface EvalPoint {
 export type PlayerColor = 'w' | 'b';
 
 export type DifficultyLevel = 'blitz' | 'standard' | 'deep';
+
+/**
+ * The three operating modes for the chess platform.
+ * - fair:     Pure game vs engine. Evaluation UI hidden.
+ * - training: Game vs engine with full engine brain visible.
+ * - analysis: Free exploration — both sides controlled by user, FEN loading enabled.
+ */
+export type GameMode = 'fair' | 'training' | 'analysis';

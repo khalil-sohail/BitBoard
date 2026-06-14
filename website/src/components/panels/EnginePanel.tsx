@@ -7,17 +7,18 @@ interface EnginePanelProps {
 }
 
 export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
-  // Format score
+  // Format score based on the best PV
+  const bestPv = info?.pvs?.[0];
   let formattedScore = "0.00";
   let isMate = false;
   
-  if (info) {
-    if (info.mate !== undefined) {
+  if (bestPv) {
+    if (bestPv.mate !== undefined) {
       isMate = true;
-      formattedScore = info.mate > 0 ? `+M${info.mate}` : `-M${Math.abs(info.mate)}`;
-    } else if (info.score !== undefined) {
-      formattedScore = (info.score / 100).toFixed(2);
-      if (info.score > 0) formattedScore = "+" + formattedScore;
+      formattedScore = bestPv.mate > 0 ? `+M${bestPv.mate}` : `-M${Math.abs(bestPv.mate)}`;
+    } else if (bestPv.score !== undefined) {
+      formattedScore = (bestPv.score / 100).toFixed(2);
+      if (bestPv.score > 0) formattedScore = "+" + formattedScore;
     }
   }
 
@@ -61,37 +62,66 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
-          <span className="text-xs text-muted mb-1 uppercase">Eval</span>
-          <span className={`text-xl font-bold font-mono ${isMate ? 'text-accent' : 'text-foreground'}`}>
-            {info ? formattedScore : '-.--'}
-          </span>
-        </div>
-        <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
-          <span className="text-xs text-muted mb-1 uppercase">Depth</span>
-          <span className="text-xl font-bold font-mono text-foreground">
-            {info?.depth ?? '-'}
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-          <div className="flex justify-between border-b border-border pb-1">
-              <span className="text-muted">Nodes:</span>
-              <span className="font-mono text-foreground">{formatNodes(info?.nodes)}</span>
+      <div className="grid grid-cols-[1fr_1.5fr] gap-4">
+        
+        {/* ── LEFT COLUMN: STATS ─────────────────────────────────────────── */}
+        <div className="flex flex-col justify-between gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
+              <span className="text-xs text-muted mb-1 uppercase">Eval</span>
+              <span className={`text-xl font-bold font-mono ${isMate ? 'text-accent' : 'text-foreground'}`}>
+                {info ? formattedScore : '-.--'}
+              </span>
+            </div>
+            <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
+              <span className="text-xs text-muted mb-1 uppercase">Depth</span>
+              <span className="text-xl font-bold font-mono text-foreground">
+                {info?.depth ?? '-'}
+              </span>
+            </div>
           </div>
-          <div className="flex justify-between border-b border-border pb-1">
-              <span className="text-muted">NPS:</span>
-              <span className="font-mono text-foreground">{formatNPS(info?.nodes, info?.time)}</span>
-          </div>
-      </div>
 
-      <div className="rounded-md p-3 border border-white/10 h-[5.5rem] overflow-y-auto" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
-        <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold">Principal Variation</span>
-        <div className="text-xs font-mono text-emerald-300/80 break-words leading-relaxed">
-          {info?.pv?.join(' ') || <span className="text-muted/40">Waiting for analysis...</span>}
+          <div className="flex flex-col gap-1 text-xs sm:text-sm">
+            <div className="flex justify-between border-b border-border pb-1">
+                <span className="text-muted">Nodes:</span>
+                <span className="font-mono text-foreground">{formatNodes(info?.nodes)}</span>
+            </div>
+            <div className="flex justify-between border-b border-border pb-1">
+                <span className="text-muted">NPS:</span>
+                <span className="font-mono text-foreground">{formatNPS(info?.nodes, info?.time)}</span>
+            </div>
+          </div>
         </div>
+
+        {/* ── RIGHT COLUMN: PVs ─────────────────────────────────────────── */}
+        <div className="rounded-md p-3 border border-white/10 h-full min-h-[130px] overflow-y-auto scrollbar-thin" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
+          <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold">Principal Variations</span>
+          {info?.pvs?.length ? (
+            <div className="space-y-1.5">
+              {info.pvs.map((pv, i) => {
+                const labelColor = i === 0 ? 'text-green-400' : i === 1 ? 'text-blue-400' : 'text-yellow-400';
+                const textColor = i === 0 ? 'text-emerald-300/80' : 'text-muted/80';
+                const scoreStr = pv.mate !== undefined 
+                  ? (pv.mate > 0 ? `+M${pv.mate}` : `-M${Math.abs(pv.mate)}`) 
+                  : ((pv.score > 0 ? '+' : '') + (pv.score / 100).toFixed(2));
+                  
+                return (
+                  <div key={pv.multipv} className="text-[11px] font-mono break-words leading-relaxed">
+                    <span className={`font-bold mr-2 ${labelColor}`}>
+                      {scoreStr}
+                    </span>
+                    <span className={textColor}>
+                      {Array.isArray(pv.pv) ? pv.pv.join(' ') : (pv.pv || '')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-xs font-mono text-muted/40">Waiting for analysis...</div>
+          )}
+        </div>
+
       </div>
     </div>
   );

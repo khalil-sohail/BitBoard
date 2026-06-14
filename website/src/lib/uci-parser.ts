@@ -1,0 +1,88 @@
+/**
+ * uci-parser.ts
+ *
+ * Standalone parser for UCI `info` lines emitted by the C++ engine.
+ * Extracted from engine-session.ts for modularity and testability.
+ *
+ * Recognised tokens (in any order on the line):
+ *   depth <n>
+ *   score cp <n>
+ *   score mate <n>   (n is negative when the engine is getting mated)
+ *   nodes <n>
+ *   time <n>
+ *   pv <move> [<move> ...]   (must be last token group — consumes to EOL)
+ *
+ * Returns null if the line doesn't contain at least `depth` and either
+ * `score` or `mate`, so partial / debug `info string` lines are silently
+ * dropped by the caller.
+ */
+
+export interface ParsedInfo {
+  depth?: number;
+  multipv?: number;
+  score?: number;
+  mate?: number;
+  nodes?: number;
+  time?: number;
+  pv?: string[];
+}
+
+/**
+ * Parse a single UCI `info ...` line into a structured object.
+ *
+ * @param line - The raw `info ...` string from the engine stdout.
+ * @returns A ParsedInfo object, or null if the line lacks required fields.
+ */
+export function parseUciInfo(line: string): ParsedInfo | null {
+  const result: ParsedInfo = {};
+  const parts = line.split(' ');
+
+  for (let i = 0; i < parts.length; i++) {
+    const token = parts[i];
+
+    if (token === 'depth' && i + 1 < parts.length) {
+      result.depth = parseInt(parts[i + 1], 10);
+
+    } else if (token === 'multipv' && i + 1 < parts.length) {
+      result.multipv = parseInt(parts[i + 1], 10);
+
+    } else if (token === 'score' && i + 2 < parts.length) {
+      const scoreType = parts[i + 1];
+
+      if (scoreType === 'cp') {
+        result.score = parseInt(parts[i + 2], 10);
+
+      } else if (scoreType === 'mate') {
+        result.mate = parseInt(parts[i + 2], 10);
+        // Provide a large sentinel cp score so downstream consumers that
+        // only read `score` can still sort / display correctly:
+        //   positive mate  → White is delivering checkmate → +100 000
+        //   negative mate  → White is getting mated        → -100 000
+        result.score = result.mate > 0 ? 100_000 : -100_000;
+      }
+
+    } else if (token === 'nodes' && i + 1 < parts.length) {
+      result.nodes = parseInt(parts[i + 1], 10);
+
+    } else if (token === 'time' && i + 1 < parts.length) {
+      result.time = parseInt(parts[i + 1], 10);
+
+    } else if (token === 'pv' && i + 1 < parts.length) {
+      // PV is always the last token group — consume everything to EOL.
+      result.pv = parts.slice(i + 1);
+      break;
+    }
+  }
+
+  // Require at minimum a depth and a score/mate to be considered valid.
+  if (result.depth === undefined || (result.score === undefined && result.mate === undefined)) {
+    return null;
+  }
+
+  // Default to 1 if the engine doesn't explicitly send multipv
+  if (result.multipv === undefined) {
+      result.multipv = 1;
+  }
+
+  return result;
+}

@@ -20,6 +20,8 @@ export function useMoveReview() {
   const [gradeMap, setGradeMap] = useState<Map<number, GradedMove>>(new Map());
   // Eval history keyed by half-move index (white-normalized centipawns)
   const evalHistory = useRef<Map<number, number>>(new Map());
+  // Ordered array of eval scores for graphing
+  const [evalGraphData, setEvalGraphData] = useState<{ ply: number, score: number }[]>([]);
 
   const recordEval = useCallback((
     evalCp: number,
@@ -55,15 +57,34 @@ export function useMoveReview() {
       next.set(moveIndex, { moveIndex, grade, delta });
       return next;
     });
+
+    setEvalGraphData(prev => {
+      // Calculate float score, capping mate scores (which are +-100,000 centipawns) to +-10
+      let displayScore = evalCp / 100;
+      if (displayScore > 10) displayScore = 10;
+      if (displayScore < -10) displayScore = -10;
+      
+      const newGraph = [...prev];
+      // Keep array in sync with moveIndex (1-indexed usually based on usage)
+      // Since moveIndex corresponds to half-moves, we can just replace or push.
+      const existingIdx = newGraph.findIndex(g => g.ply === moveIndex);
+      if (existingIdx >= 0) {
+          newGraph[existingIdx] = { ply: moveIndex, score: displayScore };
+      } else {
+          newGraph.push({ ply: moveIndex, score: displayScore });
+      }
+      return newGraph.sort((a, b) => a.ply - b.ply);
+    });
   }, []);
 
   const resetGrades = useCallback(() => {
     setGradeMap(new Map());
     evalHistory.current = new Map();
+    setEvalGraphData([]);
   }, []);
 
   // Expose as a dense array (Map.values() is always contiguous)
   const grades: GradedMove[] = Array.from(gradeMap.values());
 
-  return { grades, recordEval, resetGrades };
+  return { grades, evalGraphData, recordEval, resetGrades };
 }
