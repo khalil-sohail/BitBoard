@@ -1,3 +1,4 @@
+.env
 .vscode/*
 .github/
 !.vscode/settings.json

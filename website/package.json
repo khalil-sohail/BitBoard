@@ -8,7 +8,9 @@
     "dev:server": "ENGINE_PATH=../engine/chess-engine ts-node --project tsconfig.server.json server.ts",
     "dev:all": "npm run dev:engine && npm run dev:server",
     "build": "next build",
+    "build:server": "tsc --project tsconfig.server.json",
     "start": "next start",
+    "start:server": "node dist/server.js",
     "lint": "eslint"
   },
   "dependencies": {

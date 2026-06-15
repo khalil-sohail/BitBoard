@@ -10,51 +10,74 @@ services:
       - certs:/etc/nginx/certs:ro
       - vhost:/etc/nginx/vhost.d
       - html:/usr/share/nginx/html
-      # Mount custom location block to route WebSocket traffic to the backend
-      - ./nginx-location.conf:/etc/nginx/vhost.d/engine-room.ksohail.com_location:ro
+      - ./nginx-location.conf:/etc/nginx/vhost.d/${VIRTUAL_HOST}_location:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - public-bridge
+      - private-backend
     restart: always
 
   acme-companion:
     image: nginxproxy/acme-companion
     container_name: acme-companion
+    environment:
+      - DEFAULT_EMAIL=${DEFAULT_EMAIL:-admin@ksohail.com}
+      - NGINX_PROXY_CONTAINER=nginx-proxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - acme:/etc/acme.sh
       - certs:/etc/nginx/certs
       - vhost:/etc/nginx/vhost.d
       - html:/usr/share/nginx/html
-    environment:
-      - DEFAULT_EMAIL=admin@ksohail.com
     depends_on:
       - nginx-proxy
+    networks:
+      - public-bridge
     restart: always
 
   frontend:
-    build:
-      context: ../
-      dockerfile: ./deploy/frontend.Dockerfile
+    image: ${REGISTRY}/chess-frontend:${IMAGE_TAG:-latest}
     container_name: chess-frontend
+    env_file:
+      - .env
     environment:
-      - VIRTUAL_HOST=engine-room.ksohail.com
-      - LETSENCRYPT_HOST=engine-room.ksohail.com
-      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - private-backend
     restart: always
 
   backend:
-    build:
-      context: ../
-      dockerfile: ./deploy/backend.Dockerfile
+    image: ${REGISTRY}/chess-backend:${IMAGE_TAG:-latest}
     container_name: chess-backend
     environment:
-      - ENGINE_PATH=/app/engine/chess-engine
-      - PORT=8080
-      - NODE_ENV=production
-      # Disable debug logging in production to prevent I/O bottlenecks
-      - DEBUG=false
+      - ENGINE_PATH=${ENGINE_PATH:-/app/engine/chess-engine}
+      - PORT=${PORT:-8080}
+      - NODE_ENV=${NODE_ENV:-production}
+      - BACKEND_ONLY=${BACKEND_ONLY:-true}
+      - DEBUG=${ENGINE_DEBUG:-false}
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - private-backend
     restart: always
 
 volumes:
@@ -62,3 +85,9 @@ volumes:
   vhost:
   html:
   acme:
+
+networks:
+  public-bridge:
+    driver: bridge
+  private-backend:
+    driver: bridge

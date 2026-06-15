@@ -1,25 +1,47 @@
 #!/bin/bash
 set -e
 
-# Configuration
-# Replace this with your actual DigitalOcean Droplet IP
-DROPLET_IP="<YOUR_DROPLET_IP>"
-SSH_USER="root"
-REMOTE_DIR="/opt/chess-engine"
+cd "$(dirname "$0")/.."
+source "./deploy/.env"
 
-echo "Syncing local repository to DigitalOcean Droplet ($DROPLET_IP)..."
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+REGISTRY="${REGISTRY:-ghcr.io/khalil-sohail}"
 
-# Sync files using rsync, excluding local builds and dependencies
-rsync -avz --delete \
-  --exclude='node_modules' \
-  --exclude='.git' \
-  --exclude='.next' \
-  --exclude='deploy/push.sh' \
-  ../ $SSH_USER@$DROPLET_IP:$REMOTE_DIR
+echo "--- Building images locally ---"
 
-echo "Sync complete. Building and restarting containers remotely..."
+docker build \
+  -f ./deploy/backend.Dockerfile \
+  -t $REGISTRY/chess-backend:$IMAGE_TAG \
+  .
 
-# Execute remote docker-compose deployment
-ssh $SSH_USER@$DROPLET_IP "cd $REMOTE_DIR/deploy && docker compose up -d --build"
+docker build \
+  -f ./deploy/frontend.Dockerfile \
+  --build-arg VIRTUAL_HOST=$VIRTUAL_HOST \
+  --build-arg LETSENCRYPT_HOST=$LETSENCRYPT_HOST \
+  --build-arg NODE_ENV=production \
+  -t $REGISTRY/chess-frontend:$IMAGE_TAG \
+  .
 
-echo "Deployment successful! Your app should be live at https://engine-room.ksohail.com shortly."
+echo "--- Pushing images to registry ---"
+
+docker push $REGISTRY/chess-backend:$IMAGE_TAG
+docker push $REGISTRY/chess-frontend:$IMAGE_TAG
+
+echo "--- Syncing deploy config to Droplet ($DROPLET_IP) ---"
+
+ssh $SSH_USER@$DROPLET_IP "mkdir -p $REMOTE_DIR/deploy"
+
+rsync -avz \
+  --exclude='push.sh' \
+  ./deploy/ $SSH_USER@$DROPLET_IP:$REMOTE_DIR/deploy/
+
+echo "--- Deploying on Droplet ($DROPLET_IP) ---"
+
+ssh $SSH_USER@$DROPLET_IP "
+  cd $REMOTE_DIR/deploy &&
+  echo $CR_PAT | docker login ghcr.io -u $GITHUB_USER --password-stdin &&
+  REGISTRY=$REGISTRY IMAGE_TAG=$IMAGE_TAG docker compose pull &&
+  REGISTRY=$REGISTRY IMAGE_TAG=$IMAGE_TAG docker compose up -d
+"
+
+echo "Deployment successful! Live at https://$VIRTUAL_HOST"

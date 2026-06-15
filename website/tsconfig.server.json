@@ -4,7 +4,10 @@
     "moduleResolution": "Node",
     "target": "ES2017",
     "esModuleInterop": true,
-    "strict": false
+    "strict": false,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": "./"
   },
   "include": ["server.ts", "src/lib/engine-session.ts", "src/types/engine.ts"]
 }
