@@ -12,7 +12,7 @@ type PonderPhase =
   | {
       phase: 'pondering';
       ponderMove: string;       // the move the engine predicted the opponent plays
-      baseFen: string;          // FEN of the position the engine just moved from
+      baseFen: string;          // the startFen of the current game
       baseMoves: string[];      // full moves list up to (and including) the engine's reply
       awaitingStopAck: boolean; // true after we sent 'stop', waiting for dummy bestmove
       pendingUserMove: string;  // user's actual move — buffered until stop-ack arrives
@@ -34,9 +34,10 @@ interface EngineSession {
   currentDepth: number;
   pvs: any[];
   // Position tracking (shadow of what the engine has been told)
-  currentFen: string;
-  currentMoves: string[];
+  startFen: string;
+  uciMoves: string[];
   ponderState: PonderPhase;
+  lineBuffer: string;
 }
 
 const MAX_CONCURRENT = 10;
@@ -98,25 +99,32 @@ class EnginePoolManager {
       sessionTimer: setTimeout(() => this.terminateSession(id, 'session_expired'), SESSION_MAX_MS),
       currentDepth: 0,
       pvs: [],
-      currentFen: '',
-      currentMoves: [],
+      startFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      uciMoves: [],
       ponderState: { phase: 'idle' },
+      lineBuffer: '',
     };
 
     this.active.set(id, session);
 
     if (engineProcess.stdin && engineProcess.stdout) {
+      engineProcess.stderr?.on('data', () => {});
       engineProcess.stdin.write('uci\n');
 
       let isReady = false;
 
       engineProcess.stdout.on('data', (data) => {
-        const lines = data.toString().split('\n');
+        session.lineBuffer += data.toString();
+        const lines = session.lineBuffer.split('\n');
+        session.lineBuffer = lines.pop() || '';
+
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          console.log(`[Engine ${id}] ${trimmed}`);
+          if (process.env.DEBUG === 'true') {
+            console.log(`[Engine ${id}] ${trimmed}`);
+          }
           this.updateActivity(id);
 
           if (!isReady) {
@@ -232,6 +240,10 @@ class EnginePoolManager {
     // We sent 'stop' to the ponder search; this dummy bestmove is the engine
     // confirming the ponder search is dead.  Issue the real timed search now.
     if (ps.phase === 'pondering' && ps.awaitingStopAck) {
+      if (ps.pendingUserMove === '') {
+        session.ponderState = { phase: 'idle' };
+        return;
+      }
       console.log(`[Ponder ${id}] Stop-ack received — issuing real 'go' command`);
       const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth,
               baseFen, baseMoves } = ps;
@@ -252,12 +264,11 @@ class EnginePoolManager {
 
       // Start pondering if we have a ponder move
       if (ponderMove && session.process.stdin) {
-        const ponderMoves = [...session.currentMoves, bestMove];
-        const isStartPos = !session.currentFen ||
-          session.currentFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+        const ponderMoves = [...session.uciMoves, bestMove];
+        const isStartPos = session.startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
         const posCmd = isStartPos
           ? `position startpos moves ${ponderMoves.join(' ')}\n`
-          : `position fen ${session.currentFen} moves ${bestMove}\n`;
+          : `position fen ${session.startFen} moves ${ponderMoves.join(' ')}\n`;
 
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderMove}`);
         session.process.stdin.write(posCmd);
@@ -266,7 +277,7 @@ class EnginePoolManager {
         session.ponderState = {
           phase: 'pondering',
           ponderMove,
-          baseFen: session.currentFen,
+          baseFen: session.startFen,
           baseMoves: ponderMoves,
           awaitingStopAck: false,
           pendingUserMove: '',
@@ -306,8 +317,12 @@ class EnginePoolManager {
       const hasTC = wtime > 0 || btime > 0;
 
       // Update position shadow
-      session.currentFen   = data.fen   ?? '';
-      session.currentMoves = data.moves ?? [];
+      let startFen = session.startFen;
+      if (!startFen || (data.moves && data.moves.length === 0)) {
+        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      }
+      session.startFen = startFen;
+      session.uciMoves = data.moves ?? [];
 
       const ps = session.ponderState;
 
@@ -320,7 +335,7 @@ class EnginePoolManager {
 
         if (!userMove) {
           // Can't determine user's move — fall back to stop + resync
-          this.stopPonderAndGo(session, data.fen, data.moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
           return;
         }
 
@@ -334,7 +349,7 @@ class EnginePoolManager {
           // ── Ponder MISS ────────────────────────────────────────────────
           // Opponent played a different move — stop and resync.
           console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
-          this.stopPonderAndGo(session, data.fen, data.moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
         }
         return;
       }
@@ -344,7 +359,7 @@ class EnginePoolManager {
         // Ensure MultiPV=1 for time-control games
         session.process.stdin.write(`setoption name MultiPV value ${TC_MULTIPV}\n`);
       }
-      this.sendPositionAndGo(session, data.fen, data.moves, wtime, btime, winc, binc, depth);
+      this.sendPositionAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', wtime, btime, winc, binc, depth };
       return;
     }
@@ -352,14 +367,18 @@ class EnginePoolManager {
     // ── position (Analysis Mode FEN load, no search) ───────────────────────
     if (data.type === 'position') {
       this.stopPonderSilently(session);
+      let startFen = session.startFen;
+      if (!startFen || (data.moves && data.moves.length === 0)) {
+        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      }
       const movesStr = data.moves?.length > 0 ? ` moves ${data.moves.join(' ')}` : '';
-      const isStartPos = !data.fen || data.fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
       const positionCmd = isStartPos
         ? `position startpos${movesStr}\n`
-        : `position fen ${data.fen}\n`;
+        : `position fen ${startFen}${movesStr}\n`;
       session.process.stdin.write(positionCmd);
-      session.currentFen   = data.fen   ?? '';
-      session.currentMoves = data.moves ?? [];
+      session.startFen = startFen;
+      session.uciMoves = data.moves ?? [];
       return;
     }
 
@@ -368,16 +387,20 @@ class EnginePoolManager {
       this.stopPonderSilently(session);
       // Restore MultiPV for analysis
       session.process.stdin.write(`setoption name MultiPV value ${ANALYSIS_MULTIPV}\n`);
+      let startFen = session.startFen;
+      if (!startFen || (data.moves && data.moves.length === 0)) {
+        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      }
       const movesStr = data.moves?.length > 0 ? ` moves ${data.moves.join(' ')}` : '';
-      const isStartPos = !data.fen || data.fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
       const positionCmd = isStartPos
         ? `position startpos${movesStr}\n`
-        : `position fen ${data.fen}\n`;
+        : `position fen ${startFen}${movesStr}\n`;
       session.process.stdin.write(positionCmd);
       const targetDepth = data.depth || 30;
       session.process.stdin.write(`go depth ${targetDepth}\n`);
-      session.currentFen   = data.fen   ?? '';
-      session.currentMoves = data.moves ?? [];
+      session.startFen = startFen;
+      session.uciMoves = data.moves ?? [];
       return;
     }
 
@@ -388,8 +411,8 @@ class EnginePoolManager {
       session.process.stdin.write(`setoption name MultiPV value ${ANALYSIS_MULTIPV}\n`);
       session.process.stdin.write('ucinewgame\n');
       session.process.stdin.write('isready\n');
-      session.currentFen   = '';
-      session.currentMoves = [];
+      session.startFen   = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      session.uciMoves = [];
       session.ponderState  = { phase: 'idle' };
       return;
     }
@@ -416,7 +439,7 @@ class EnginePoolManager {
    */
   private stopPonderAndGo(
     session: EngineSession,
-    fen: string,
+    startFen: string,
     moves: string[],
     wtime: number,
     btime: number,
@@ -440,13 +463,13 @@ class EnginePoolManager {
         pendingWinc: winc,
         pendingBinc: binc,
         pendingDepth: depth,
-        baseFen:   fen,
+        baseFen:   startFen,
         baseMoves: moves,
       };
       session.process.stdin.write('stop\n');
     } else {
       // Not pondering — issue immediately
-      this.sendPositionAndGo(session, fen, moves, wtime, btime, winc, binc, depth);
+      this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', wtime, btime, winc, binc, depth };
     }
 
@@ -484,7 +507,7 @@ class EnginePoolManager {
    */
   private sendPositionAndGo(
     session: EngineSession,
-    fen: string,
+    startFen: string,
     moves: string[],
     wtime: number,
     btime: number,
@@ -495,10 +518,10 @@ class EnginePoolManager {
     if (!session.process.stdin) return;
 
     const movesStr  = moves.length > 0 ? ` moves ${moves.join(' ')}` : '';
-    const isStartPos = !fen || fen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     const posCmd = isStartPos
       ? `position startpos${movesStr}\n`
-      : `position fen ${fen}\n`;
+      : `position fen ${startFen}${movesStr}\n`;
 
     session.process.stdin.write(posCmd);
 
@@ -517,8 +540,8 @@ class EnginePoolManager {
 
     session.process.stdin.write(goCmd);
     session.ponderState = { phase: 'thinking', wtime, btime, winc, binc };
-    session.currentFen   = fen;
-    session.currentMoves = moves;
+    session.startFen = startFen;
+    session.uciMoves = moves;
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────
@@ -561,7 +584,7 @@ class EnginePoolManager {
 
     session.process.kill('SIGTERM');
     setTimeout(() => {
-      if (!session.process.killed) {
+      if (session.process.exitCode === null && session.process.signalCode === null) {
         session.process.kill('SIGKILL');
       }
     }, 3000);

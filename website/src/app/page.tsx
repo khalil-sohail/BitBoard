@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ChessBoardComponent } from "@/components/board/ChessBoard";
@@ -31,7 +31,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis } = useEngine();
+  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { addEvalPoint, resetEvalHistory } = useEvalHistory();
   const { grades, evalGraphData, recordEval, resetGrades } = useMoveReview();
@@ -51,12 +51,19 @@ export default function Home() {
   const isGameActive = gameStatus === 'active';
 
   // ── Clock ─────────────────────────────────────────────────────────────────
+  const handleTimeout = useCallback((color: PlayerColor) => {
+    stopEngine();
+    setTimeoutColor(color);
+    setGameStatus('completed');
+  }, [stopEngine]);
+
   const clock = useChessClock({
     initialWhiteMs: timeControl.initialMs,
     initialBlackMs: timeControl.initialMs,
     whiteIncMs:     timeControl.incMs,
     blackIncMs:     timeControl.incMs,
-  });
+    onTimeout:      handleTimeout,
+  }, game);
 
   const lastNormalizedEvalRef = useRef<number | null>(null);
   const analysisFenRef = useRef<string | null>(null);
@@ -131,48 +138,60 @@ export default function Home() {
   useEffect(() => { latestEngineInfoRef.current = engineInfo; }, [engineInfo]);
 
   useEffect(() => {
+    if (gameStatus === 'completed') return;
+    let isMounted = true;
+
     if (!engineAutoEnabled) return;
     if (!isGameActive) return;
     if (bestMove && turn === engineColor) {
-      if (hasTC) {
-        clock.stopClock();
-        clock.applyIncrement(engineColor);
-      }
+      queueMicrotask(() => {
+        if (!isMounted) return;
 
-      const from      = bestMove.substring(0, 2);
-      const to        = bestMove.substring(2, 4);
-      const promotion = bestMove.length === 5 ? bestMove[4] : undefined;
-      const success   = makeMove({ from, to, promotion });
+        const from      = bestMove.substring(0, 2);
+        const to        = bestMove.substring(2, 4);
+        const promotion = bestMove.length === 5 ? bestMove[4] : undefined;
+        const success   = makeMove({ from, to, promotion });
 
-      const info = latestEngineInfoRef.current;
-      if (success && info?.pvs && info.pvs.length > 0) {
-        const topPv      = info.pvs[0];
-        const scoreToLog = engineColor === 'b' ? -topPv.score : topPv.score;
-        addEvalPoint(moveHistory.length + 1, scoreToLog);
-        recordEval(
-          scoreToLog,
-          moveHistory.length,
-          engineColor,
-          !!(topPv.mate !== undefined && lastNormalizedEvalRef.current !== null),
-          !!(topPv.mate !== undefined),
-        );
-        lastNormalizedEvalRef.current = scoreToLog;
-      }
+        if (success) {
+          if (hasTC) {
+            clock.stopClock();
+            clock.applyIncrement(engineColor);
+          }
 
-      if (hasTC && !effectiveGameOver) {
-        clock.startClock(orientation);
-      }
+          if (hasTC && !effectiveGameOver) {
+            clock.startClock(orientation);
+          }
+
+          const info = latestEngineInfoRef.current;
+          if (info?.pvs && info.pvs.length > 0) {
+            const topPv      = info.pvs[0];
+            const scoreToLog = engineColor === 'b' ? -topPv.score : topPv.score;
+            addEvalPoint(moveHistory.length + 1, scoreToLog);
+            recordEval(
+              scoreToLog,
+              moveHistory.length,
+              engineColor,
+              !!(topPv.mate !== undefined && lastNormalizedEvalRef.current !== null),
+              !!(topPv.mate !== undefined),
+            );
+            lastNormalizedEvalRef.current = scoreToLog;
+          }
+        }
+      });
     }
+
+    return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length,
-      recordEval, engineColor, engineAutoEnabled, isGameActive]);
+      recordEval, engineColor, engineAutoEnabled, isGameActive, gameStatus]);
 
-  // ── Stop clocks when game ends ───────────────────────────────────────────
+  // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
     if (effectiveGameOver) {
+      stopEngine();
       clock.stopClock();
     }
-  }, [effectiveGameOver]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveGameOver, stopEngine, clock]);
 
   // ── User move handler ────────────────────────────────────────────────────
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
@@ -189,6 +208,8 @@ export default function Home() {
       if (hasTC && !effectiveGameOver) {
         clock.stopClock();
         clock.applyIncrement(orientation);
+        
+        // Only start the engine clock if the move successfully applied
         clock.startClock(engineColor);
       }
     }
@@ -247,6 +268,7 @@ export default function Home() {
     setDifficulty(config.difficulty);
     setTimeControl(config.timeControl);
     setResignedBy(null);
+    setTimeoutColor(null);
     setGameStatus('active');
 
     analysisFenRef.current = null;
@@ -266,6 +288,7 @@ export default function Home() {
 
   // ── Mode change ──────────────────────────────────────────────────────────
   const handleModeChange = (newMode: GameMode) => {
+    stopEngine();
     setGameMode(newMode);
     setGameStatus('idle');
     clock.stopClock();
@@ -306,8 +329,13 @@ export default function Home() {
     to:   moveHistory[moveHistory.length - 1].to,
   } : null;
 
+  const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
+
   // ── Game over result string ───────────────────────────────────────────────
   const gameOverMessage = (() => {
+    if (timeoutColor !== null) {
+      return `${timeoutColor === 'w' ? 'Black' : 'White'} wins on Time`;
+    }
     if (resignedBy !== null) {
       return `${resignedBy === 'w' ? 'Black' : 'White'} wins by Resignation`;
     }
@@ -320,7 +348,7 @@ export default function Home() {
   })();
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col">
+    <div className="h-screen overflow-hidden flex flex-col bg-zinc-950 text-zinc-100">
       <Header />
 
       <main className="flex-1 min-h-0 overflow-hidden">

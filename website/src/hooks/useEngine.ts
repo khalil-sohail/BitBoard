@@ -183,6 +183,13 @@ export function useEngine() {
     }
   }, []);
 
+  const stopEngine = useCallback(() => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'stop' }));
+      setStatus('ready'); // Optionally transition to ready immediately
+    }
+  }, [setStatus]);
+
   const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       setStatus('thinking');
@@ -202,6 +209,7 @@ export function useEngine() {
     reconnect,
     setEngineOption,
     setPosition,
+    stopEngine,
     startAnalysis,
   };
 }

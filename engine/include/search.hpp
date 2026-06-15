@@ -11,11 +11,11 @@
 extern std::atomic<bool> timeAborted;
 extern std::chrono::time_point<std::chrono::steady_clock> startTime;
 extern long long allocatedTimeMs;
-extern uint64_t qNodes;
-extern uint64_t deltaPruneSkips;
-extern uint64_t ttHits;
-extern uint64_t ttCutoffs;
-extern uint64_t ttStores;
+extern std::atomic<uint64_t> qNodes;
+extern std::atomic<uint64_t> deltaPruneSkips;
+extern std::atomic<uint64_t> ttHits;
+extern std::atomic<uint64_t> ttCutoffs;
+extern std::atomic<uint64_t> ttStores;
 
 void checkTime();
 

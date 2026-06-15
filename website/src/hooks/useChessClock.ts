@@ -25,6 +25,7 @@ interface ClockConfig {
   initialBlackMs: number;
   whiteIncMs: number;
   blackIncMs: number;
+  onTimeout?: (color: PlayerColor) => void;
 }
 
 const TICK_MS = 100; // update interval
@@ -34,8 +35,11 @@ export function useChessClock({
   initialBlackMs,
   whiteIncMs,
   blackIncMs,
-}: ClockConfig): UseChessClockReturn {
+  onTimeout,
+}: ClockConfig, game?: any): UseChessClockReturn {
   const [whiteMs, setWhiteMs] = useState(initialWhiteMs);
+  const gameRef = useRef(game);
+  gameRef.current = game;
   const [blackMs, setBlackMs] = useState(initialBlackMs);
   const [activeSide, setActiveSide] = useState<PlayerColor | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -59,6 +63,13 @@ export function useChessClock({
     }
   }, []);
 
+  const stopClock = useCallback(() => {
+    clearTick();
+    activeSideRef.current = null;
+    setActiveSide(null);
+    setIsRunning(false);
+  }, [clearTick]);
+
   const startTick = useCallback(() => {
     clearTick();
     lastTickRef.current = Date.now();
@@ -68,26 +79,33 @@ export function useChessClock({
       lastTickRef.current = now;
 
       if (activeSideRef.current === 'w') {
-        setWhiteMs(prev => Math.max(0, prev - elapsed));
+        const newMs = Math.max(0, whiteMsRef.current - elapsed);
+        setWhiteMs(newMs);
+        if (newMs <= 0 && whiteMsRef.current > 0) {
+          stopClock();
+          onTimeout?.('w');
+        }
       } else if (activeSideRef.current === 'b') {
-        setBlackMs(prev => Math.max(0, prev - elapsed));
+        const newMs = Math.max(0, blackMsRef.current - elapsed);
+        setBlackMs(newMs);
+        if (newMs <= 0 && blackMsRef.current > 0) {
+          stopClock();
+          onTimeout?.('b');
+        }
       }
     }, TICK_MS);
-  }, [clearTick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearTick, stopClock, onTimeout]);
 
   const startClock = useCallback((side: PlayerColor) => {
+    if (gameRef.current && side !== gameRef.current.turn()) {
+      console.warn(`[Clock Sync Warning] activeSide is ${side} but turn is ${gameRef.current.turn()}`);
+    }
     activeSideRef.current = side;
     setActiveSide(side);
     setIsRunning(true);
     startTick();
   }, [startTick]);
-
-  const stopClock = useCallback(() => {
-    clearTick();
-    activeSideRef.current = null;
-    setActiveSide(null);
-    setIsRunning(false);
-  }, [clearTick]);
 
   const applyIncrement = useCallback((side: PlayerColor) => {
     if (side === 'w') {

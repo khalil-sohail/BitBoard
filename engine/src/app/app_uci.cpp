@@ -239,26 +239,27 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             timeAborted.store(false, std::memory_order_relaxed);
 
             // ── Opening book (synchronous, instantaneous) ─────────────────
-            if (!goPonder && parsedDepth <= 0 &&
-                openingBook.has_value() && SearchConstants::USE_OPENING_BOOK) {
-                if (board.sanHistory().size() <
+            // The book check is decoupled from parsedDepth so that Training
+            // Mode (which always sends a depth cap) still consults the book.
+            if (!goPonder &&
+                openingBook.has_value() && SearchConstants::USE_OPENING_BOOK &&
+                board.sanHistory().size() <
                     static_cast<size_t>(SearchConstants::MAX_BOOK_DEPTH)) {
-                    std::optional<Move> bookMove = openingBook->getBookMove(board);
-                    if (bookMove.has_value()) {
-                        std::vector<Move> legalMoves = board.generateLegalMoves();
-                        const auto it = std::find_if(
-                            legalMoves.begin(), legalMoves.end(),
-                            [&](const Move& legalMove) {
-                                return legalMove.from      == bookMove->from &&
-                                       legalMove.to        == bookMove->to   &&
-                                       legalMove.promotion == bookMove->promotion;
-                            });
-                        if (it != legalMoves.end()) {
-                            const std::string bm = AppText::moveToCompactString(board, *bookMove);
-                            std::cout << "info depth 1 score cp 0 pv " << bm << std::endl;
-                            std::cout << "bestmove " << bm << std::endl;
-                            continue; // back to getline — no thread needed
-                        }
+                std::optional<Move> bookMove = openingBook->getBookMove(board);
+                if (bookMove.has_value()) {
+                    std::vector<Move> legalMoves = board.generateLegalMoves();
+                    const auto it = std::find_if(
+                        legalMoves.begin(), legalMoves.end(),
+                        [&](const Move& legalMove) {
+                            return legalMove.from      == bookMove->from &&
+                                   legalMove.to        == bookMove->to   &&
+                                   legalMove.promotion == bookMove->promotion;
+                        });
+                    if (it != legalMoves.end()) {
+                        const std::string bm = AppText::moveToCompactString(board, *bookMove);
+                        std::cout << "info depth 1 score cp 0 pv " << bm << std::endl;
+                        std::cout << "bestmove " << bm << std::endl;
+                        continue; // back to getline — no thread needed
                     }
                 }
             }
@@ -278,15 +279,21 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             } else if (movetime > 0) {
                 timeLimitMs = std::max(10LL, static_cast<long long>(movetime));
             } else if (timeLeft > 0) {
-                long long allocated_time = (timeLeft / 40) + (increment / 2);
-                long long hard_cap = std::max(1LL, timeLeft / 4);
+                // Subtract a flat network RTT buffer upfront so that the
+                // bestmove response reaches the server before the flag falls.
+                const long long safeTimeLeft = std::max(1LL, timeLeft - 30LL);
+
+                long long allocated_time = (safeTimeLeft / 40) + (increment / 2);
+                long long hard_cap = std::max(1LL, safeTimeLeft / 4);
 
                 // Standard case: clamp between a 10ms minimum and the 25% hard cap
                 timeLimitMs = std::max(10LL, std::min(allocated_time, hard_cap));
 
-                // Critical low-time panic case: if we have less than 40ms, use exactly what we have minus a tiny lag buffer
-                if (timeLeft < 40) {
-                    timeLimitMs = std::max(1LL, timeLeft - 5);
+                // Critical low-time panic case: if we have less than 40ms
+                // (after the buffer), use exactly what remains minus a tiny
+                // internal scheduler buffer.
+                if (safeTimeLeft < 40) {
+                    timeLimitMs = std::max(1LL, safeTimeLeft - 5LL);
                 }
             }
 

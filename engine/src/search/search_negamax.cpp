@@ -50,21 +50,21 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
     bool ttHit = false;
 
     if (!inExclusionSearch && entry.hash == hash) {
-        ++ttHits;
+        ttHits.fetch_add(1, std::memory_order_relaxed);
         ttHit       = true;
         ttBestMove  = entry.bestMove;
 
         if (entry.depth >= depth) {
             if (entry.flag == SearchTypes::TTFlag::Exact) {
-                ++ttCutoffs;
+                ttCutoffs.fetch_add(1, std::memory_order_relaxed);
                 return entry.score;
             }
             if (entry.flag == SearchTypes::TTFlag::Alpha && entry.score <= alpha) {
-                ++ttCutoffs;
+                ttCutoffs.fetch_add(1, std::memory_order_relaxed);
                 return alpha;
             }
             if (entry.flag == SearchTypes::TTFlag::Beta && entry.score >= beta) {
-                ++ttCutoffs;
+                ttCutoffs.fetch_add(1, std::memory_order_relaxed);
                 return beta;
             }
         }
@@ -250,7 +250,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         }
         SearchTypes::TTEntry& slot = SearchInternal::g_TT[ttIndex];
         if (slot.hash == 0ULL || slot.hash == hash || depth >= slot.depth) {
-            ++ttStores;
+            ttStores.fetch_add(1, std::memory_order_relaxed);
             slot = {hash, depth, flag, bestScore, bestMoveFoundInLoop};
         }
     }

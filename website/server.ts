@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { enginePool } from './src/lib/engine-session';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = process.env.HOSTNAME || '0.0.0.0';
 const port = parseInt(process.env.PORT || '3000', 10);
 // when using middleware `hostname` and `port` must be provided below
 const app = next({ dev, hostname, port });

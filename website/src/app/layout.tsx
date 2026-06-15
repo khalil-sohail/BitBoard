@@ -7,8 +7,8 @@ import { ScrollProgress } from "@/components/ui/ScrollProgress";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "C++ Chess Engine",
-  description: "Showcase of a custom bitboard-based C++ UCI chess engine.",
+  title: "Engine Room",
+  description: "High-performance custom C++ UCI chess engine interface.",
 };
 
 export default function RootLayout({

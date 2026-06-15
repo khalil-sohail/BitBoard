@@ -78,11 +78,11 @@ done:
 
 
 std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, bool isPonder) {
-    qNodes = 0;
-    deltaPruneSkips = 0;
-    ttHits = 0;
-    ttCutoffs = 0;
-    ttStores = 0;
+    qNodes.store(0, std::memory_order_relaxed);
+    deltaPruneSkips.store(0, std::memory_order_relaxed);
+    ttHits.store(0, std::memory_order_relaxed);
+    ttCutoffs.store(0, std::memory_order_relaxed);
+    ttStores.store(0, std::memory_order_relaxed);
 
     std::vector<Move> rootMoves = board.generateLegalMoves();
     if (rootMoves.empty()) {
@@ -320,11 +320,11 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
     ).count();
 
     std::cout << "info string nodes: " << SearchInternal::g_nodesSearched
-              << " qNodes: "     << qNodes
-              << " deltaSkips: " << deltaPruneSkips
-              << " ttHits: "     << ttHits
-              << " ttCutoffs: "  << ttCutoffs
-              << " ttStores: "   << ttStores
+              << " qNodes: "     << qNodes.load(std::memory_order_relaxed)
+              << " deltaSkips: " << deltaPruneSkips.load(std::memory_order_relaxed)
+              << " ttHits: "     << ttHits.load(std::memory_order_relaxed)
+              << " ttCutoffs: "  << ttCutoffs.load(std::memory_order_relaxed)
+              << " ttStores: "   << ttStores.load(std::memory_order_relaxed)
               << " elapsedMs: "  << totalElapsedMs << "\n";
 
     // ── Extract ponder move from TT (PV continuation after bestCompletedMove) ──

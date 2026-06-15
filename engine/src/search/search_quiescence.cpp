@@ -6,7 +6,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
         return 0;
     }
 
-    ++qNodes;
+    qNodes.fetch_add(1, std::memory_order_relaxed);
 
     const bool inCheck = board.inCheck(board.sideToMove());
     int standPat = -SearchConstants::INF_SCORE;
@@ -42,7 +42,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
             }
 
             if (standPat + capturedValue + SearchConstants::DELTA_PRUNING_MARGIN < alpha) {
-                ++deltaPruneSkips;
+                deltaPruneSkips.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
 

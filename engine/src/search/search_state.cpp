@@ -68,11 +68,11 @@ bool shouldAbortSearch() {
 std::atomic<bool> timeAborted{false};
 std::chrono::time_point<std::chrono::steady_clock> startTime;
 long long allocatedTimeMs = 2000;
-uint64_t qNodes = 0;
-uint64_t deltaPruneSkips = 0;
-uint64_t ttHits = 0;
-uint64_t ttCutoffs = 0;
-uint64_t ttStores = 0;
+std::atomic<uint64_t> qNodes{0};
+std::atomic<uint64_t> deltaPruneSkips{0};
+std::atomic<uint64_t> ttHits{0};
+std::atomic<uint64_t> ttCutoffs{0};
+std::atomic<uint64_t> ttStores{0};
 
 void checkTime() {
     if (timeAborted.load(std::memory_order_relaxed)) {

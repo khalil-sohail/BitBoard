@@ -1,0 +1,64 @@
+services:
+  nginx-proxy:
+    image: jwilder/nginx-proxy:alpine
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - certs:/etc/nginx/certs:ro
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      # Mount custom location block to route WebSocket traffic to the backend
+      - ./nginx-location.conf:/etc/nginx/vhost.d/engine-room.ksohail.com_location:ro
+    restart: always
+
+  acme-companion:
+    image: nginxproxy/acme-companion
+    container_name: acme-companion
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - acme:/etc/acme.sh
+      - certs:/etc/nginx/certs
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+    environment:
+      - DEFAULT_EMAIL=admin@ksohail.com
+    depends_on:
+      - nginx-proxy
+    restart: always
+
+  frontend:
+    build:
+      context: ../
+      dockerfile: ./deploy/frontend.Dockerfile
+    container_name: chess-frontend
+    environment:
+      - VIRTUAL_HOST=engine-room.ksohail.com
+      - LETSENCRYPT_HOST=engine-room.ksohail.com
+      - NODE_ENV=production
+    expose:
+      - "3000"
+    restart: always
+
+  backend:
+    build:
+      context: ../
+      dockerfile: ./deploy/backend.Dockerfile
+    container_name: chess-backend
+    environment:
+      - ENGINE_PATH=/app/engine/chess-engine
+      - PORT=8080
+      - NODE_ENV=production
+      # Disable debug logging in production to prevent I/O bottlenecks
+      - DEBUG=false
+    expose:
+      - "8080"
+    restart: always
+
+volumes:
+  certs:
+  vhost:
+  html:
+  acme:
