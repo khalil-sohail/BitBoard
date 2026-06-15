@@ -27,7 +27,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     } else {
         moves = board.generatePseudoLegalCaptures();
     }
-    SearchInternal::sortMovesByScore(board, moves, Move{});
+    SearchInternal::sortMovesByScore(board, moves, Move{}, plyFromRoot);
 
     for (const Move& move : moves) {
         if (!inCheck && move.isCapture) {

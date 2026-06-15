@@ -86,6 +86,9 @@ export function useEngine() {
             setStatus('session_expired');
             addToast('Session expired due to inactivity', 'warning');
             break;
+          case 'released':
+            setStatus('disconnected');
+            break;
           case 'error':
             setStatus('error');
             addToast(data.message || 'Engine error occurred', 'error');
@@ -167,6 +170,13 @@ export function useEngine() {
     connect();
   }, [connect]);
 
+  const releaseSession = useCallback(() => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'releaseSession' }));
+      setStatus('disconnected');
+    }
+  }, [setStatus]);
+
   const setEngineOption = useCallback((name: string, value: string | boolean | number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'setoption', name, value }));
@@ -211,5 +221,6 @@ export function useEngine() {
     setPosition,
     stopEngine,
     startAnalysis,
+    releaseSession,
   };
 }

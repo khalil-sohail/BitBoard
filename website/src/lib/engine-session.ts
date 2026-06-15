@@ -42,7 +42,7 @@ interface EngineSession {
 
 const MAX_CONCURRENT = 10;
 const IDLE_TIMEOUT_MS = 2 * 60_000;
-const SESSION_MAX_MS = 30 * 60_000;
+const SESSION_MAX_MS = 2 * 60 * 60_000;
 const HASH_SIZE_MB = 32;
 
 // When a time-control game is active we force MultiPV=1 so that pondering
@@ -424,6 +424,14 @@ class EnginePoolManager {
       return;
     }
 
+    // ── releaseSession ─────────────────────────────────────────────────────
+    if (data.type === 'releaseSession') {
+      this.stopPonderSilently(session);
+      session.process.stdin.write('stop\n');
+      this.terminateSession(id, 'released');
+      return;
+    }
+
     // ── setoption ─────────────────────────────────────────────────────────
     if (data.type === 'setoption') {
       session.process.stdin.write(`setoption name ${data.name} value ${data.value}\n`);
@@ -552,6 +560,8 @@ class EnginePoolManager {
       session.lastActivityAt = Date.now();
       clearTimeout(session.idleTimer);
       session.idleTimer = setTimeout(() => this.terminateSession(id, 'idle'), IDLE_TIMEOUT_MS);
+      clearTimeout(session.sessionTimer);
+      session.sessionTimer = setTimeout(() => this.terminateSession(id, 'session_expired'), SESSION_MAX_MS);
     }
   }
 
@@ -571,9 +581,13 @@ class EnginePoolManager {
     clearTimeout(session.idleTimer);
     clearTimeout(session.sessionTimer);
 
-    if (reason === 'session_expired' || reason === 'idle') {
+    if (reason === 'session_expired' || reason === 'idle' || reason === 'released') {
       if (session.ws.readyState === WebSocket.OPEN) {
-        session.ws.send(JSON.stringify({ type: 'session_expired', reason }));
+        if (reason === 'released') {
+          session.ws.send(JSON.stringify({ type: 'released' }));
+        } else {
+          session.ws.send(JSON.stringify({ type: 'session_expired', reason }));
+        }
         session.ws.close();
       }
     }

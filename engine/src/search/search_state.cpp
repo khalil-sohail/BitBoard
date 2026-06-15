@@ -1,11 +1,31 @@
 #include "search/search_internal.hpp"
+#include <algorithm>
+#include <cmath>
 
 namespace SearchInternal {
 
 std::vector<SearchTypes::TTEntry> g_TT(SearchConstants::TT_SIZE);
 std::array<std::array<Move, 2>, SearchConstants::MAX_PLY> g_killerMoves{};
 std::array<std::array<std::array<int, 64>, 64>, 2> g_historyTable{};
+std::array<std::array<Move, 64>, 64> g_countermoveTable{};
+std::array<Move, SearchConstants::MAX_PLY> g_movesPlayed{};
 uint64_t g_nodesSearched = 0;
+
+std::array<std::array<int, 64>, 64> LMR_TABLE{};
+
+void initLMR() {
+    const double base = 0.75;
+    for (int depth = 0; depth < 64; ++depth) {
+        for (int moveCount = 0; moveCount < 64; ++moveCount) {
+            if (depth > 0 && moveCount > 0) {
+                int reduction = static_cast<int>(base + std::log(depth) * std::log(moveCount));
+                LMR_TABLE[depth][moveCount] = std::max(1, std::min(reduction, depth - 1));
+            } else {
+                LMR_TABLE[depth][moveCount] = 1;
+            }
+        }
+    }
+}
 
 void clearTT() {
     g_TT.assign(SearchConstants::TT_SIZE, SearchTypes::TTEntry{});
@@ -46,6 +66,11 @@ void clearHistory() {
             for (int to = 0; to < 64; ++to) {
                 g_historyTable[color][from][to] = 0;
             }
+        }
+    }
+    for (int from = 0; from < 64; ++from) {
+        for (int to = 0; to < 64; ++to) {
+            g_countermoveTable[from][to] = Move{};
         }
     }
 }

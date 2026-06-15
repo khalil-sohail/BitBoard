@@ -142,6 +142,23 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         }
     }
 
+    // ── Reverse Futility Pruning (Static Null Move Pruning) ───────────────
+    const bool isPvNode = (alpha != beta - 1);
+    int staticEval = 0;
+    bool staticEvalComputed = false;
+
+    if (!inExclusionSearch && !sideInCheck && !isPvNode) {
+        staticEval = colorMultiplier * board.evaluate();
+        staticEvalComputed = true;
+        
+        if (depth <= 6) {
+            const int margin = depth * SearchConstants::REVERSE_FUTILITY_MARGIN;
+            if (staticEval - margin >= beta) {
+                return staticEval - margin;
+            }
+        }
+    }
+
     // ── Move Generation & Ordering ────────────────────────────────────────
     std::vector<Move> legal = board.generateLegalMoves();
     if (legal.empty()) {
@@ -151,19 +168,14 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         return 0; // stalemate
     }
 
-    SearchInternal::sortMovesByScore(board, legal, ttBestMove);
-    if (SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0].from >= 0) {
-        SearchInternal::prioritizeMove(legal, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0]);
-    }
-    if (SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1].from >= 0) {
-        SearchInternal::prioritizeMove(legal, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1]);
-    }
+    SearchInternal::sortMovesByScore(board, legal, ttBestMove, plyFromRoot);
 
     // ── Main Move Loop ────────────────────────────────────────────────────
     int  bestScore           = -SearchConstants::INF_SCORE;
     Move bestMoveFoundInLoop = legal.front();
     int  moveCount           = 0;
     bool isFirstMove         = true;
+    std::vector<Move> quietMovesSearched;
 
     for (const Move& move : legal) {
         // Skip the move that the exclusion search is probing around.
@@ -172,6 +184,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         }
 
         ++moveCount;
+        SearchInternal::g_movesPlayed[plyFromRoot] = move;
         board.makeMove(move);
         const bool givesCheck = board.inCheck(board.sideToMove());
 
@@ -181,31 +194,53 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
             extension = std::max(extension, singularExtension);
         }
 
-        int        score   = 0;
         const bool isQuiet = !move.isCapture && !move.promotion.has_value();
+
+        // ── Forward Futility Pruning ──────────────────────────────────────────
+        if (depth <= 3 && !sideInCheck && !isPvNode && isQuiet && !givesCheck) {
+            bool isKiller = isSameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0]) ||
+                            isSameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1]);
+            if (!isKiller && staticEvalComputed) {
+                const int margin = depth * SearchConstants::FORWARD_FUTILITY_MARGIN;
+                if (staticEval + margin <= alpha) {
+                    board.undoMove();
+                    continue;
+                }
+            }
+        }
+
+        int        score   = 0;
         const bool canLMR  = (depth >= 3 && moveCount >= 4 && isQuiet && !givesCheck && !sideInCheck);
 
         if (isFirstMove) {
             score = -negamax(board, depth - 1 + extension, -beta, -alpha,
                              -colorMultiplier, false, plyFromRoot + 1);
         } else {
+            bool doFullDepthSearch = true;
+
             if (canLMR) {
-                const int reducedDepth = depth - 2;
+                int safeDepth = std::min(depth, 63);
+                int safeMoveCount = std::min(moveCount, 63);
+                int reduction = SearchInternal::LMR_TABLE[safeDepth][safeMoveCount];
+                int reducedDepth = std::max(0, depth - 1 - reduction + extension);
+                
                 score = -negamax(board, reducedDepth, -alpha - 1, -alpha,
                                  -colorMultiplier, false, plyFromRoot + 1);
 
-                if (score > alpha && score < beta) {
-                    score = -negamax(board, depth - 1 + extension, -alpha - 1, -alpha,
-                                     -colorMultiplier, false, plyFromRoot + 1);
+                // If the reduced search failed to beat alpha, we can skip the full depth search
+                if (score <= alpha) {
+                    doFullDepthSearch = false;
                 }
-            } else {
-                score = -negamax(board, depth - 1 + extension, -alpha - 1, -alpha,
-                                 -colorMultiplier, false, plyFromRoot + 1);
             }
 
-            if (score > alpha && score < beta) {
-                score = -negamax(board, depth - 1 + extension, -beta, -alpha,
+            if (doFullDepthSearch) {
+                score = -negamax(board, depth - 1 + extension, -alpha - 1, -alpha,
                                  -colorMultiplier, false, plyFromRoot + 1);
+
+                if (score > alpha && score < beta) {
+                    score = -negamax(board, depth - 1 + extension, -beta, -alpha,
+                                     -colorMultiplier, false, plyFromRoot + 1);
+                }
             }
         }
 
@@ -220,7 +255,21 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         }
         if (score >= beta) {
             if (isQuiet) {
-                SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to] += depth * depth;
+                int bonus = depth * depth;
+                int& hist = SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to];
+                hist = std::min(16384, hist + bonus);
+
+                for (const Move& qm : quietMovesSearched) {
+                    int& penaltyHist = SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][qm.from][qm.to];
+                    penaltyHist = std::max(-16384, penaltyHist - bonus);
+                }
+
+                if (plyFromRoot > 0) {
+                    Move prevMove = SearchInternal::g_movesPlayed[plyFromRoot - 1];
+                    if (prevMove.from >= 0 && prevMove.to >= 0) {
+                        SearchInternal::g_countermoveTable[prevMove.from][prevMove.to] = move;
+                    }
+                }
 
                 const Move& primaryKiller   = SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0];
                 const bool  isSameAsPrimary =
@@ -234,6 +283,11 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
             }
             break;
         }
+        
+        if (isQuiet) {
+            quietMovesSearched.push_back(move);
+        }
+        
         isFirstMove = false;
     }
 

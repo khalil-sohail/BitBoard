@@ -101,7 +101,7 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
     SearchInternal::g_nodesSearched = 0;
     timeAborted.store(false, std::memory_order_relaxed);
 
-    SearchInternal::sortMovesByScore(board, rootMoves, Move{});
+    SearchInternal::sortMovesByScore(board, rootMoves, Move{}, 0);
 
     Move previousIterationBest = rootMoves.front();
     Move bestCompletedMove = rootMoves.front();

@@ -50,6 +50,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
     int base_fullmove = 1;
 
     // Ensure a clean initial state on startup
+    SearchInternal::initLMR();
     SearchInternal::clearTT();
     SearchInternal::clearKillers();
     SearchInternal::clearHistory();

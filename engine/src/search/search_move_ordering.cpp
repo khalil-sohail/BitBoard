@@ -10,7 +10,7 @@ int getPieceValue(PieceType piece) {
     return SearchConstants::PIECE_VALUES[static_cast<size_t>(piece)];
 }
 
-int scoreMove(const Board& board, const Move& move) {
+int scoreMove(const Board& board, const Move& move, int plyFromRoot) {
     int score = 0;
 
     if (move.promotion.has_value()) {
@@ -18,6 +18,27 @@ int scoreMove(const Board& board, const Move& move) {
     }
 
     if (!move.isCapture) {
+        if (sameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0])) {
+            score += 900000;
+        } else if (sameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1])) {
+            score += 850000;
+        }
+
+        bool isCounterMove = false;
+        if (plyFromRoot > 0) {
+            Move prevMove = SearchInternal::g_movesPlayed[plyFromRoot - 1];
+            if (prevMove.from >= 0 && prevMove.to >= 0) {
+                Move counterMove = SearchInternal::g_countermoveTable[prevMove.from][prevMove.to];
+                if (sameMove(move, counterMove)) {
+                    isCounterMove = true;
+                }
+            }
+        }
+        
+        if (isCounterMove) {
+            score += 50000;
+        }
+        
         score += SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to];
         return score;
     }
@@ -55,10 +76,10 @@ bool sameMove(const Move& lhs, const Move& rhs) {
            lhs.promotion == rhs.promotion;
 }
 
-void sortMovesByScore(const Board& board, std::vector<Move>& moves, Move ttMove) {
+void sortMovesByScore(const Board& board, std::vector<Move>& moves, Move ttMove, int plyFromRoot) {
     std::stable_sort(moves.begin(), moves.end(), [&](const Move& lhs, const Move& rhs) {
-        const int lhsScore = sameMove(lhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, lhs);
-        const int rhsScore = sameMove(rhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, rhs);
+        const int lhsScore = sameMove(lhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, lhs, plyFromRoot);
+        const int rhsScore = sameMove(rhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, rhs, plyFromRoot);
         return lhsScore > rhsScore;
     });
 }

@@ -31,7 +31,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine } = useEngine();
+  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { addEvalPoint, resetEvalHistory } = useEvalHistory();
   const { grades, evalGraphData, recordEval, resetGrades } = useMoveReview();
@@ -221,8 +221,11 @@ export default function Home() {
     if (effectiveGameOver) {
       stopEngine();
       clock.stopClock();
+      if (!isAnalysis) {
+        releaseSession();
+      }
     }
-  }, [effectiveGameOver, stopEngine, clock]);
+  }, [effectiveGameOver, stopEngine, clock, isAnalysis, releaseSession]);
 
   // ── User move handler ────────────────────────────────────────────────────
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
