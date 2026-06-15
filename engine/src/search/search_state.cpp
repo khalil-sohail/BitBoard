@@ -67,12 +67,14 @@ bool shouldAbortSearch() {
 
 std::atomic<bool> timeAborted{false};
 std::chrono::time_point<std::chrono::steady_clock> startTime;
-long long allocatedTimeMs = 2000;
+std::atomic<long long> allocatedTimeMs{2000};
 std::atomic<uint64_t> qNodes{0};
 std::atomic<uint64_t> deltaPruneSkips{0};
 std::atomic<uint64_t> ttHits{0};
 std::atomic<uint64_t> ttCutoffs{0};
 std::atomic<uint64_t> ttStores{0};
+
+// Tracking for Complexity Extension (moved to app_uci.cpp)
 
 void checkTime() {
     if (timeAborted.load(std::memory_order_relaxed)) {
@@ -81,7 +83,7 @@ void checkTime() {
 
     const auto now = SearchInternal::SearchClock::now();
     const long long usedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
-    if (usedMs >= allocatedTimeMs) {
+    if (usedMs >= allocatedTimeMs.load(std::memory_order_relaxed)) {
         timeAborted.store(true, std::memory_order_relaxed);
     }
 }

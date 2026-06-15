@@ -4,14 +4,16 @@ import { useState } from 'react';
 import { Badge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 import { useEngine } from '../../hooks/useEngine';
+import { GameMode } from '../../types/engine';
 
 interface EngineToggleProps {
   currentVersion?: string;
   maxDepth: number;
   onDepthChange: (depth: number) => void;
+  gameMode: GameMode;
 }
 
-export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange }: EngineToggleProps) {
+export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange, gameMode }: EngineToggleProps) {
   const { addToast } = useToast();
   const { setEngineOption } = useEngine();
   
@@ -34,7 +36,6 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
   const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
     onDepthChange(val);
-    setEngineOption('BookDepth', val);
   };
 
   return (
@@ -84,18 +85,18 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
         </div>
       </div>
 
-      {/* ── BOOK SETTINGS ────────────────────────────────────────────────── */}
+      {/* ── SECOND COLUMN ────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-5">
-        <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
-          Book Settings
-        </h3>
         
-        {/* Row 1: Use Opening Book */}
+        {/* Book Settings */}
         <div className="flex flex-col gap-3">
-          <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-            Use Opening Book
-          </label>
-          <div>
+          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+            Book Settings
+          </h3>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+              Use Opening Book
+            </label>
             <button
               onClick={handleToggleBook}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${useBook ? 'bg-primary' : 'bg-white/10'}`}
@@ -105,27 +106,42 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
           </div>
         </div>
 
-        {/* Row 2: Max Depth */}
-        <div className={`flex flex-col gap-2 transition-opacity duration-200 ${useBook ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-          <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-            Max Depth
-          </label>
-          <div className="flex items-center gap-4 w-full justify-between">
-            <input 
-              type="range" 
-              min="2" 
-              max="60" 
-              step="1"
-              value={maxDepth}
-              onChange={handleDepthChange}
-              className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
-            />
-            <div className="flex flex-col items-end min-w-[36px]">
-              <span className="text-sm font-bold text-accent leading-none">{maxDepth}</span>
-              <span className="text-[10px] font-semibold text-accent/60 uppercase tracking-widest mt-1">ply</span>
+        {/* Search Settings */}
+        <div className={`flex flex-col gap-3 mt-1 transition-opacity duration-200 ${gameMode === 'fair' ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+            Search Settings
+          </h3>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                Max Depth
+              </label>
+              <p className="text-[10px] text-muted-foreground/70 leading-tight">
+                {gameMode === 'analysis' 
+                  ? "Engine searches until this depth is reached"
+                  : gameMode === 'training'
+                  ? "Engine will respect the clock — this depth acts as a ceiling only"
+                  : "Not applicable in this mode"}
+              </p>
+            </div>
+            <div className="flex items-center gap-4 w-full justify-between mt-1">
+              <input 
+                type="range" 
+                min="2" 
+                max="60" 
+                step="1"
+                value={maxDepth}
+                onChange={handleDepthChange}
+                className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <div className="flex flex-col items-end min-w-[36px]">
+                <span className="text-sm font-bold text-accent leading-none">{maxDepth}</span>
+                <span className="text-[10px] font-semibold text-accent/60 uppercase tracking-widest mt-1">ply</span>
+              </div>
             </div>
           </div>
         </div>
+
       </div>
 
     </div>

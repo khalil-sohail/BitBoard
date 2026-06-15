@@ -16,6 +16,8 @@
 chess-engine
 chess-engine-tests
 __pycache__/
+*.o
+*.d
 *.pyc
 *.pyo
 *.pyd

@@ -19,6 +19,14 @@
 
 namespace AppUci {
 
+std::atomic<int> g_lastSearchScore{0};
+std::atomic<int> g_prevSearchScore{0};
+std::atomic<bool> g_hasOneScore{false};
+std::atomic<bool> g_hasTwoScores{false};
+
+static long long g_ponderHitTimeLimitMs = 0;
+static std::atomic<bool> g_isPondering{false};
+
 // ── Background search thread management ──────────────────────────────────────
 // The search runs in g_searchThread so that the main UCI loop can keep reading
 // stdin (to receive 'stop', 'ponderhit', 'quit', etc.) while the engine thinks.
@@ -27,6 +35,7 @@ namespace AppUci {
 static std::thread g_searchThread;
 
 static void stopSearch() {
+    g_isPondering.store(false, std::memory_order_relaxed);
     timeAborted.store(true, std::memory_order_relaxed);
     if (g_searchThread.joinable()) {
         g_searchThread.join();
@@ -37,6 +46,13 @@ static void stopSearch() {
 void runUciMode(Board& board, const AppOptions::Options& options) {
     (void)options.searchDepth;
     std::cout.setf(std::ios::unitbuf);
+    
+    int base_fullmove = 1;
+
+    // Ensure a clean initial state on startup
+    SearchInternal::clearTT();
+    SearchInternal::clearKillers();
+    SearchInternal::clearHistory();
 
     std::optional<OpeningBook> openingBook;
     bool openingBookStatusPrinted = false;
@@ -86,6 +102,12 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             stopSearch();
             board.reset();
             board.clearSanHistory();
+            base_fullmove = 1;
+            g_hasOneScore.store(false, std::memory_order_relaxed);
+            g_hasTwoScores.store(false, std::memory_order_relaxed);
+            SearchInternal::clearTT();
+            SearchInternal::clearKillers();
+            SearchInternal::clearHistory();
         }
 
         // ── stop ─────────────────────────────────────────────────────────────
@@ -95,13 +117,11 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         }
 
         // ── ponderhit ────────────────────────────────────────────────────────
-        // Our backend always sends 'stop' + 'go wtime…' instead of a bare
-        // 'ponderhit', but we implement this for completeness / Lichess GUI
-        // compatibility.  Here we treat it identically to 'stop': terminate
-        // the infinite search; the GUI / backend will immediately issue a
-        // fresh timed 'go' command.
         else if (input.rfind("ponderhit", 0) == 0) {
-            stopSearch();
+            g_isPondering.store(false, std::memory_order_relaxed);
+            // Switch the already-running search thread from infinite ponder time
+            // to the actual calculated time limit.
+            allocatedTimeMs.store(AppUci::g_ponderHitTimeLimitMs, std::memory_order_relaxed);
         }
 
         // ── setoption ────────────────────────────────────────────────────────
@@ -148,10 +168,6 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 } catch (...) {
                     std::cout << "info string Invalid MultiPV value: " << optValue << std::endl;
                 }
-            } else if (optName == "Ponder") {
-                // Advisory option — we support pondering implicitly via 'go ponder'.
-                // No engine-side flag needs to be stored.
-                std::cout << "info string Ponder acknowledged" << std::endl;
             } else {
                 std::cout << "info string Unknown option: " << optName << std::endl;
             }
@@ -170,16 +186,27 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 if (token == "startpos") {
                     board.reset();
                     board.clearSanHistory();
+                    base_fullmove = 1;
+                    g_hasOneScore.store(false, std::memory_order_relaxed);
+                    g_hasTwoScores.store(false, std::memory_order_relaxed);
                 } else if (token == "fen") {
+                    base_fullmove = 1;
                     std::string fen;
+                    std::vector<std::string> fenTokens;
                     for (int i = 0; i < 6 && iss >> token && token != "moves"; ++i) {
                         if (i > 0) fen += " ";
                         fen += token;
+                        fenTokens.push_back(token);
+                    }
+                    if (fenTokens.size() == 6) {
+                        try { base_fullmove = std::max(1, std::stoi(fenTokens[5])); } catch(...) {}
                     }
                     if (!fen.empty() && !board.loadFEN(fen)) {
                         std::cout << "info string Invalid FEN: " << fen << std::endl;
                     } else if (!fen.empty()) {
                         board.clearSanHistory();
+                        g_hasOneScore.store(false, std::memory_order_relaxed);
+                        g_hasTwoScores.store(false, std::memory_order_relaxed);
                     }
                 }
             }
@@ -218,7 +245,8 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             int binc      = 0;
             int movetime  = 0;
             int parsedDepth = 0;
-            bool goPonder  = false;
+            int movestogo = 0;
+            bool localPonder = false;
 
             std::istringstream iss(input);
             std::string token;
@@ -229,7 +257,8 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 else if (token == "binc")     { iss >> binc; }
                 else if (token == "movetime") { iss >> movetime; }
                 else if (token == "depth")    { iss >> parsedDepth; }
-                else if (token == "ponder")   { goPonder = true; }
+                else if (token == "movestogo"){ iss >> movestogo; }
+                else if (token == "ponder")   { localPonder = true; }
             }
 
             // Stop any previous search (ponder or timed) before launching a
@@ -241,8 +270,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             // ── Opening book (synchronous, instantaneous) ─────────────────
             // The book check is decoupled from parsedDepth so that Training
             // Mode (which always sends a depth cap) still consults the book.
-            if (!goPonder &&
-                openingBook.has_value() && SearchConstants::USE_OPENING_BOOK &&
+            if (!localPonder && openingBook.has_value() && SearchConstants::USE_OPENING_BOOK &&
                 board.sanHistory().size() <
                     static_cast<size_t>(SearchConstants::MAX_BOOK_DEPTH)) {
                 std::optional<Move> bookMove = openingBook->getBookMove(board);
@@ -272,9 +300,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                                   input.find("btime") != std::string::npos);
 
             long long timeLimitMs = 2000;
-            if (goPonder) {
-                timeLimitMs = 999'999'999LL; // will be cut short by 'stop'
-            } else if (!hasTime && movetime <= 0) {
+            if (!hasTime && movetime <= 0) {
                 timeLimitMs = 999'999'999LL;
             } else if (movetime > 0) {
                 timeLimitMs = std::max(10LL, static_cast<long long>(movetime));
@@ -282,8 +308,21 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 // Subtract a flat network RTT buffer upfront so that the
                 // bestmove response reaches the server before the flag falls.
                 const long long safeTimeLeft = std::max(1LL, timeLeft - 30LL);
+                
+                int move_number = base_fullmove + (board.sanHistory().size() / 2);
+                int expected_moves_remaining = std::max(20, 40 - move_number);
+                if (movestogo > 0) {
+                    expected_moves_remaining = movestogo;
+                }
 
-                long long allocated_time = (safeTimeLeft / 40) + (increment / 2);
+                long long allocated_time = (safeTimeLeft / expected_moves_remaining) + increment;
+
+                if (g_hasTwoScores.load(std::memory_order_relaxed)) {
+                    if (std::abs(g_lastSearchScore.load(std::memory_order_relaxed) - g_prevSearchScore.load(std::memory_order_relaxed)) > 50) {
+                        allocated_time = static_cast<long long>(allocated_time * 1.3);
+                    }
+                }
+
                 long long hard_cap = std::max(1LL, safeTimeLeft / 4);
 
                 // Standard case: clamp between a 10ms minimum and the 25% hard cap
@@ -297,6 +336,14 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 }
             }
 
+            if (localPonder) {
+                AppUci::g_ponderHitTimeLimitMs = timeLimitMs; // Save the real time limit
+                timeLimitMs = 999'999'999LL;                  // Override for infinite ponder
+                g_isPondering.store(true, std::memory_order_relaxed);
+            } else {
+                g_isPondering.store(false, std::memory_order_relaxed);
+            }
+
             const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 64;
 
             // ── Launch search in background thread ─────────────────────────
@@ -306,9 +353,18 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
             g_searchThread = std::thread([boardCopy = std::move(boardCopy),
                                           maxDepthToSearch,
-                                          timeLimitMs,
-                                          goPonder]() mutable {
-                auto [bestMove, ponderMove] = findBestMove(boardCopy, maxDepthToSearch, timeLimitMs, goPonder);
+                                          timeLimitMs]() mutable {
+                int searchScore = 0;
+                auto [bestMove, ponderMove] = findBestMove(boardCopy, maxDepthToSearch, timeLimitMs, &searchScore);
+
+                if (!g_isPondering.load(std::memory_order_relaxed)) {
+                    if (g_hasOneScore.load(std::memory_order_relaxed)) {
+                        g_prevSearchScore.store(g_lastSearchScore.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                        g_hasTwoScores.store(true, std::memory_order_relaxed);
+                    }
+                    g_lastSearchScore.store(searchScore, std::memory_order_relaxed);
+                    g_hasOneScore.store(true, std::memory_order_relaxed);
+                }
 
                 std::string bestMoveText = "0000";
                 if (bestMove.from >= 0 && bestMove.to >= 0) {
@@ -319,6 +375,15 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 if (ponderMove.from >= 0) {
                     line += " ponder " + AppText::moveToCompactString(boardCopy, ponderMove);
                 }
+
+                // If findBestMove returned early (1 legal move, mate found, max depth),
+                // we must NOT print bestmove if we are still supposed to be pondering.
+                // Block here until the main thread sends ponderhit or stop.
+                while (g_isPondering.load(std::memory_order_relaxed) && 
+                       !timeAborted.load(std::memory_order_relaxed)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+
                 std::cout << line << std::endl;
             });
         }

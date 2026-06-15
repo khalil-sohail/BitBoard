@@ -45,6 +45,18 @@ export default function Home() {
   // Default to false so the user can explore the UI before starting a game.
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
   const [maxDepth, setMaxDepth] = useState(30);
+  const [isWaitingForStop, setIsWaitingForStop] = useState(false);
+  const ignoreStaleBestMoveRef = useRef(false);
+  const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (stopTimeoutRef.current) {
+        clearTimeout(stopTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Whether a real time control is active (initialMs > 0)
   const hasTC = timeControl.initialMs > 0;
@@ -90,24 +102,30 @@ export default function Home() {
     if (!engineAutoEnabled) return;
     // ONLY fire when the game is actively running
     if (!isGameActive) return;
+    if (isWaitingForStop) return;
     if (turn === engineColor && status === 'ready' && !effectiveGameOver) {
+      
+      // Fair Play mode runs purely on time, no depth ceiling.
+      // Other modes (Training, Analysis) include depth as a limit or ceiling.
+      const searchDepth = gameMode === 'fair' ? undefined : maxDepth;
+
       if (hasTC) {
         sendMove(fen, uciHistory, {
           wtime: clock.whiteMs,
           btime: clock.blackMs,
           winc:  timeControl.incMs,
           binc:  timeControl.incMs,
-          depth: gameMode === 'training' ? maxDepth : undefined,
+          depth: searchDepth,
         });
       } else {
         sendMove(fen, uciHistory, {
           difficulty,
-          depth: gameMode === 'training' ? maxDepth : undefined,
+          depth: searchDepth,
         });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, gameMode]);
+  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, gameMode, isWaitingForStop]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -144,6 +162,19 @@ export default function Home() {
     if (!engineAutoEnabled) return;
     if (!isGameActive) return;
     if (bestMove && turn === engineColor) {
+      if (ignoreStaleBestMoveRef.current) {
+        ignoreStaleBestMoveRef.current = false;
+        return;
+      }
+      if (isWaitingForStop) {
+        setIsWaitingForStop(false);
+        if (stopTimeoutRef.current) {
+          clearTimeout(stopTimeoutRef.current);
+          stopTimeoutRef.current = null;
+        }
+        return;
+      }
+
       queueMicrotask(() => {
         if (!isMounted) return;
 
@@ -198,6 +229,23 @@ export default function Home() {
     if (!isAnalysis && turn === engineColor) return false;
     // Block moves if game not started or already over
     if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
+
+    if (gameMode === 'training') {
+      if (status === 'thinking') {
+        setIsWaitingForStop(true);
+        if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+        stopTimeoutRef.current = setTimeout(() => {
+          setIsWaitingForStop((prev) => {
+            if (prev) return false;
+            return prev;
+          });
+          stopTimeoutRef.current = null;
+        }, 500);
+      } else if (bestMove) {
+        ignoreStaleBestMoveRef.current = true;
+      }
+      stopEngine();
+    }
 
     const result = makeMove(move);
 
@@ -468,6 +516,7 @@ export default function Home() {
                 currentVersion="Texel-Tuned HCE" 
                 maxDepth={maxDepth}
                 onDepthChange={setMaxDepth}
+                gameMode={gameMode}
               />
             )}
 

@@ -77,7 +77,7 @@ done:
 }
 
 
-std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, bool isPonder) {
+std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, int* outScore) {
     qNodes.store(0, std::memory_order_relaxed);
     deltaPruneSkips.store(0, std::memory_order_relaxed);
     ttHits.store(0, std::memory_order_relaxed);
@@ -92,36 +92,20 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
         return {rootMoves.front(), Move{}};
     }
 
-    // For ponder mode, use an enormous time limit — the caller will
-    // set timeAborted externally to terminate the search.
-    const long long effectiveTimeLimit = isPonder ? 999'999'999LL : std::max(1LL, timeLimitMs);
-
-    long long hardTimeLimit = effectiveTimeLimit;
-    long long softTimeLimit = hardTimeLimit / 2;
+    allocatedTimeMs.store(std::max(1LL, timeLimitMs), std::memory_order_relaxed);
     Move bestMoveLastIteration{};
     int stableCount = 0;
-
+    int softLimitFraction = 50;
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
-
-    allocatedTimeMs = effectiveTimeLimit;
     startTime = SearchInternal::SearchClock::now();
     SearchInternal::g_nodesSearched = 0;
     timeAborted.store(false, std::memory_order_relaxed);
-
-    hardTimeLimit = effectiveTimeLimit;
-    softTimeLimit = hardTimeLimit / 2;
 
     SearchInternal::sortMovesByScore(board, rootMoves, Move{});
 
     Move previousIterationBest = rootMoves.front();
     Move bestCompletedMove = rootMoves.front();
     int previousIterationScore = 0;
-
-    SearchInternal::clearTT();
-    SearchInternal::clearKillers();
-    SearchInternal::clearHistory();
-
-
 
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
         if (timeAborted.load(std::memory_order_relaxed)) {
@@ -273,7 +257,7 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             ++stableCount;
         } else {
             stableCount = 0;
-            softTimeLimit = hardTimeLimit * 4 / 5;
+            softLimitFraction = 80;
         }
         bestMoveLastIteration  = bestCompletedMove;
         previousIterationBest  = best.move;
@@ -308,11 +292,10 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             std::cout << std::endl;
         }
 
-        // In ponder mode skip time-based termination — only timeAborted matters.
-        if (!isPonder) {
-            if (elapsedMs > softTimeLimit && stableCount >= 2) break;
-            if (elapsedMs > (hardTimeLimit * 3 / 4)) break;
-        }
+        long long currentHardLimit = allocatedTimeMs.load(std::memory_order_relaxed);
+        long long currentSoftLimit = (currentHardLimit * softLimitFraction) / 100;
+        if (elapsedMs > currentSoftLimit && stableCount >= 2) break;
+        if (elapsedMs > (currentHardLimit * 3 / 4)) break;
     }
 
     const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -347,6 +330,10 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             }
         }
         board.undoMove();
+    }
+
+    if (outScore) {
+        *outScore = previousIterationScore;
     }
 
     return {bestCompletedMove, ponderMove};
