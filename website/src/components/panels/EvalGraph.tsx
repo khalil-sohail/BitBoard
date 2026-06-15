@@ -8,7 +8,7 @@ interface EvalGraphProps {
 export function EvalGraph({ data }: EvalGraphProps) {
   if (!data || data.length === 0) {
     return (
-      <div className="h-24 w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md flex items-center justify-center">
+      <div className="shrink-0 min-h-[120px] w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md flex items-center justify-center">
         <span className="text-xs text-muted/50 uppercase tracking-widest font-mono">No Eval Data</span>
       </div>
     );
@@ -23,7 +23,7 @@ export function EvalGraph({ data }: EvalGraphProps) {
   }
 
   return (
-    <div className="h-24 w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md relative group mt-4">
+    <div className="shrink-0 min-h-[120px] w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md relative group mt-4">
       <div className="absolute top-2 left-3 z-10 pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity">
           <span className="text-[10px] text-foreground uppercase tracking-widest font-semibold">Eval History</span>
       </div>

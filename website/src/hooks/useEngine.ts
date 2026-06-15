@@ -4,22 +4,36 @@ import { useToast } from '../components/ui/Toast';
 
 type ConnectionStatus = 'connecting' | 'queued' | 'ready' | 'thinking' | 'disconnected' | 'session_expired' | 'error';
 
+export interface SendMoveOptions {
+  /** Remaining white clock time in ms (0 = no time control). */
+  wtime?: number;
+  /** Remaining black clock time in ms (0 = no time control). */
+  btime?: number;
+  /** White increment per move in ms. */
+  winc?: number;
+  /** Black increment per move in ms. */
+  binc?: number;
+  /** Legacy difficulty string — only used when wtime/btime are both 0. */
+  difficulty?: string;
+  /** Optional depth limit to cap the engine's search. */
+  depth?: number;
+}
+
 export function useEngine() {
   const [status, setReactStatus] = useState<ConnectionStatus>('disconnected');
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  
+
   // Track state internally to avoid stale closures in WS message handlers
-  // isWaitingForNewGameReady prevents old 'bestmove' events from bleeding into new games
   const stateRef = useRef({
-      status: 'disconnected' as ConnectionStatus,
-      isWaitingForNewGameReady: false
+    status: 'disconnected' as ConnectionStatus,
+    isWaitingForNewGameReady: false,
   });
 
   const setStatus = useCallback((s: ConnectionStatus) => {
-      stateRef.current.status = s;
-      setReactStatus(s);
+    stateRef.current.status = s;
+    setReactStatus(s);
   }, []);
 
   const ws = useRef<WebSocket | null>(null);
@@ -33,19 +47,18 @@ export function useEngine() {
     const socket = new WebSocket(`${protocol}//${window.location.host}/api/engine`);
 
     socket.onopen = () => {
-      // Keep as connecting until we get 'ready' or 'queued' message
+      // Wait for 'ready' or 'queued' before changing status
     };
 
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         switch (data.type) {
           case 'ready':
             stateRef.current.isWaitingForNewGameReady = false;
-            // Only set to ready if we didn't already start a new search
             if (stateRef.current.status !== 'thinking') {
-                setStatus('ready');
+              setStatus('ready');
             }
             setQueuePosition(null);
             break;
@@ -55,18 +68,18 @@ export function useEngine() {
             break;
           case 'info':
             if (!stateRef.current.isWaitingForNewGameReady) {
-                setEngineInfo(prev => ({
-                  depth: data.depth,
-                  pvs: data.pvs || [],
-                  nodes: data.nodes ?? prev?.nodes,
-                  time: data.time ?? prev?.time
-                }));
+              setEngineInfo(prev => ({
+                depth: data.depth,
+                pvs: data.pvs || [],
+                nodes: data.nodes ?? prev?.nodes,
+                time: data.time ?? prev?.time,
+              }));
             }
             break;
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady) {
-                setBestMove(data.move);
-                setStatus('ready');
+              setBestMove(data.move);
+              setStatus('ready');
             }
             break;
           case 'session_expired':
@@ -100,12 +113,38 @@ export function useEngine() {
     };
   }, [connect]);
 
-  const sendMove = useCallback((fen: string, moves: string[], difficulty: string = 'standard') => {
+  /**
+   * Send a move to the engine.
+   *
+   * If wtime/btime are provided (> 0), the engine will use real time controls.
+   * Otherwise it falls back to the legacy difficulty movetime approach.
+   */
+  const sendMove = useCallback((
+    fen: string,
+    moves: string[],
+    options: SendMoveOptions | string = 'standard',
+  ) => {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'ready') {
       setStatus('thinking');
       setBestMove(null);
       setEngineInfo(null);
-      ws.current.send(JSON.stringify({ type: 'move', fen, moves, difficulty }));
+
+      // Normalise: accept either the new options object or the legacy difficulty string
+      const opts: SendMoveOptions = typeof options === 'string'
+        ? { difficulty: options }
+        : options;
+
+      ws.current.send(JSON.stringify({
+        type: 'move',
+        fen,
+        moves,
+        wtime:      opts.wtime      ?? 0,
+        btime:      opts.btime      ?? 0,
+        winc:       opts.winc       ?? 0,
+        binc:       opts.binc       ?? 0,
+        depth:      opts.depth,
+        difficulty: opts.difficulty ?? 'standard',
+      }));
     }
   }, [setStatus]);
 
@@ -117,15 +156,15 @@ export function useEngine() {
       setEngineInfo(null);
       ws.current.send(JSON.stringify({ type: 'newgame' }));
     } else {
-        connect();
+      connect();
     }
   }, [connect, setStatus]);
-  
+
   const reconnect = useCallback(() => {
-     if (ws.current) {
-         ws.current.close();
-     }
-     connect();
+    if (ws.current) {
+      ws.current.close();
+    }
+    connect();
   }, [connect]);
 
   const setEngineOption = useCallback((name: string, value: string | boolean | number) => {
@@ -144,12 +183,12 @@ export function useEngine() {
     }
   }, []);
 
-  const startAnalysis = useCallback((fen: string, moves: string[] = []) => {
+  const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       setStatus('thinking');
       setBestMove(null);
       setEngineInfo(null);
-      ws.current.send(JSON.stringify({ type: 'analyze', fen, moves }));
+      ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth }));
     }
   }, [setStatus]);
 

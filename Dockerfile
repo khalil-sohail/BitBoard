@@ -53,10 +53,10 @@ COPY --from=website-builder /build/website/public ./public
 RUN chmod +x ./engine/chess-engine
 
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=8080
 ENV ENGINE_PATH=./engine/chess-engine
 ENV ENGINE_BOOK_PATH=./engine/openings
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["node", "server.js"]

@@ -9,9 +9,9 @@ TUNE_SRCS = $(ENGINE_SRCS) src/tuning/eval_param_registry.cpp src/tuning/texel_m
 
 CC = g++
 
-CFLAGS = -Wall -Wextra -I./include -std=c++23 # -fsanitize=address -g3
-TEST_CFLAGS = -Wall -Wextra -I./include -std=c++23
-TUNE_CFLAGS = -Wall -Wextra -I./include -std=c++23 -O2 -DEVAL_TUNING_MODE -DNDEBUG
+CFLAGS = -Wall -Wextra -I./include -std=c++23 -lpthread # -fsanitize=address -g3
+TEST_CFLAGS = -Wall -Wextra -I./include -std=c++23 -lpthread
+TUNE_CFLAGS = -Wall -Wextra -I./include -std=c++23 -O2 -DEVAL_TUNING_MODE -DNDEBUG -lpthread
 
 RM = rm -rf
 

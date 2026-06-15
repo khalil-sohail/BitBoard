@@ -7,13 +7,24 @@ interface GameControlsProps {
   onNewGameClick: () => void;
   onUndo: () => void;
   onFlipBoard: () => void;
+  onResign?: () => void;
   orientation: PlayerColor;
   canUndo: boolean;
+  /** If false the Resign button is hidden (idle or completed games). */
+  canResign?: boolean;
 }
 
-export function GameControls({ onNewGameClick, onUndo, onFlipBoard, orientation, canUndo }: GameControlsProps) {
+export function GameControls({
+  onNewGameClick,
+  onUndo,
+  onFlipBoard,
+  onResign,
+  orientation,
+  canUndo,
+  canResign = false,
+}: GameControlsProps) {
   return (
-    <div className="bg-surface rounded-lg border border-white/10 p-4 flex flex-col shadow-md">
+    <div className="bg-surface rounded-lg border border-white/10 p-4 flex flex-col gap-2 shadow-md">
       <div className="flex gap-0 bg-surface-elevated rounded-md shadow-sm border border-white/10">
         <button
           onClick={onNewGameClick}
@@ -41,6 +52,18 @@ export function GameControls({ onNewGameClick, onUndo, onFlipBoard, orientation,
           Flip
         </button>
       </div>
+
+      {/* Resign button — only shown during an active game */}
+      {canResign && onResign && (
+        <button
+          onClick={onResign}
+          suppressHydrationWarning
+          className="w-full py-1.5 rounded-md border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 text-xs font-semibold transition-all duration-150 flex items-center justify-center gap-1.5"
+        >
+          <span>🏳️</span>
+          <span>Resign</span>
+        </button>
+      )}
     </div>
   );
 }

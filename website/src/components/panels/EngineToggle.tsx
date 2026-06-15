@@ -7,14 +7,15 @@ import { useEngine } from '../../hooks/useEngine';
 
 interface EngineToggleProps {
   currentVersion?: string;
+  maxDepth: number;
+  onDepthChange: (depth: number) => void;
 }
 
-export function EngineToggle({ currentVersion = "Texel-Tuned HCE" }: EngineToggleProps) {
+export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange }: EngineToggleProps) {
   const { addToast } = useToast();
   const { setEngineOption } = useEngine();
   
   const [useBook, setUseBook] = useState(true);
-  const [bookDepth, setBookDepth] = useState(30);
 
   const handleNNUEClick = () => {
     addToast('NNUE evaluation is currently under development.', 'info');
@@ -32,12 +33,12 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE" }: EngineToggl
 
   const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
-    setBookDepth(val);
+    onDepthChange(val);
     setEngineOption('BookDepth', val);
   };
 
   return (
-    <div className="grid grid-cols-[1.6fr_1fr] gap-6 bg-surface-elevated border border-white/10 rounded-xl p-5 shadow-md relative">
+    <div className="grid grid-cols-[5fr_3fr] gap-6 bg-surface-elevated border border-white/10 rounded-xl p-5 shadow-md relative">
       
       {/* Vertical Divider using border on the first column */}
       {/* ── ENGINE CONFIGURATION ─────────────────────────────────────────── */}
@@ -114,13 +115,13 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE" }: EngineToggl
               type="range" 
               min="2" 
               max="60" 
-              step="2"
-              value={bookDepth}
+              step="1"
+              value={maxDepth}
               onChange={handleDepthChange}
               className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
             />
             <div className="flex flex-col items-end min-w-[36px]">
-              <span className="text-sm font-bold text-accent leading-none">{bookDepth}</span>
+              <span className="text-sm font-bold text-accent leading-none">{maxDepth}</span>
               <span className="text-[10px] font-semibold text-accent/60 uppercase tracking-widest mt-1">ply</span>
             </div>
           </div>

@@ -9,86 +9,144 @@ import { EnginePanel } from "@/components/panels/EnginePanel";
 import { MoveHistory } from "@/components/panels/MoveHistory";
 import { EngineToggle } from "@/components/panels/EngineToggle";
 import { ModeSelector } from "@/components/panels/ModeSelector";
-import { FenInput } from "@/components/panels/FenInput";
+import { PositionSetup } from "@/components/panels/PositionSetup";
 import { EvalGraph } from "@/components/panels/EvalGraph";
-import { PgnControls } from "@/components/panels/PgnControls";
+import { ClockDisplay } from "@/components/panels/ClockDisplay";
 import { GameControls } from "@/components/controls/GameControls";
 import { NewGameModal, NewGameConfig } from "@/components/ui/NewGameModal";
 import { useEngine } from "@/hooks/useEngine";
 import { useChessGame } from "@/hooks/useChessGame";
+import { useChessClock } from "@/hooks/useChessClock";
 import { useEvalHistory } from "@/hooks/useEvalHistory";
 import { useMoveReview } from "@/hooks/useMoveReview";
-import { PlayerColor, DifficultyLevel, GameMode } from "@/types/engine";
+import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type GameStatus = 'idle' | 'active' | 'completed';
+
+// Default time control: 3+0
+const DEFAULT_TC = TIME_CONTROLS[2];
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, setEngineOption, startAnalysis } = useEngine();
+  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
-  const { evalHistory, addEvalPoint, resetEvalHistory } = useEvalHistory();
+  const { addEvalPoint, resetEvalHistory } = useEvalHistory();
   const { grades, evalGraphData, recordEval, resetGrades } = useMoveReview();
 
-  const [orientation, setOrientation] = useState<PlayerColor>('w');
-  const [difficulty, setDifficulty] = useState<DifficultyLevel>('standard');
-  const [gameMode, setGameMode] = useState<GameMode>('fair');
+  const [orientation, setOrientation]   = useState<PlayerColor>('w');
+  const [difficulty, setDifficulty]     = useState<DifficultyLevel>('standard');
+  const [gameMode, setGameMode]         = useState<GameMode>('fair');
+  const [timeControl, setTimeControl]   = useState<TimeControl>(DEFAULT_TC);
+  const [gameStatus, setGameStatus]     = useState<GameStatus>('idle');
+  const [resignedBy, setResignedBy]     = useState<PlayerColor | null>(null);
+  // Default to false so the user can explore the UI before starting a game.
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
+  const [maxDepth, setMaxDepth] = useState(30);
 
-  // Track the last White-normalized eval score so we can compute deltas for user moves
+  // Whether a real time control is active (initialMs > 0)
+  const hasTC = timeControl.initialMs > 0;
+  const isGameActive = gameStatus === 'active';
+
+  // ── Clock ─────────────────────────────────────────────────────────────────
+  const clock = useChessClock({
+    initialWhiteMs: timeControl.initialMs,
+    initialBlackMs: timeControl.initialMs,
+    whiteIncMs:     timeControl.incMs,
+    blackIncMs:     timeControl.incMs,
+  });
+
   const lastNormalizedEvalRef = useRef<number | null>(null);
-  // Track the custom FEN loaded in Analysis Mode (null = startpos)
   const analysisFenRef = useRef<string | null>(null);
 
-  const engineColor = orientation === 'w' ? 'b' : 'w';
+  const engineColor: PlayerColor = orientation === 'w' ? 'b' : 'w';
 
-  // ── Derived mode flags ────────────────────────────────────────────────────
-  const isAnalysis  = gameMode === 'analysis';
-  const isTraining  = gameMode === 'training';
-  const isFairPlay  = gameMode === 'fair';
+  // ── Derived mode flags ───────────────────────────────────────────────────
+  const isAnalysis = gameMode === 'analysis';
+  const isTraining = gameMode === 'training';
+  const isFairPlay = gameMode === 'fair';
 
-  // In analysis mode the user controls both sides — no auto engine response
   const engineAutoEnabled = !isAnalysis;
 
-  // UI visibility derived from mode
   const showEvalBar     = isTraining || isAnalysis;
   const showEnginePanel = isTraining || isAnalysis;
   const showEngineConf  = isTraining || isAnalysis;
-  const showFenInput    = isAnalysis;
+  const showClock       = !isAnalysis && hasTC;
 
-  // ── Engine auto-trigger ───────────────────────────────────────────────────
+  // ── Effective game-over (board or resign) ────────────────────────────────
+  const effectiveGameOver = (gameStatus === 'active' && isGameOver) || gameStatus === 'completed';
+
+  // ── Engine auto-trigger ──────────────────────────────────────────────────
   useEffect(() => {
     if (!engineAutoEnabled) return;
-    if (turn === engineColor && status === 'ready' && !isGameOver) {
-      sendMove(fen, uciHistory, difficulty);
+    // ONLY fire when the game is actively running
+    if (!isGameActive) return;
+    if (turn === engineColor && status === 'ready' && !effectiveGameOver) {
+      if (hasTC) {
+        sendMove(fen, uciHistory, {
+          wtime: clock.whiteMs,
+          btime: clock.blackMs,
+          winc:  timeControl.incMs,
+          binc:  timeControl.incMs,
+          depth: gameMode === 'training' ? maxDepth : undefined,
+        });
+      } else {
+        sendMove(fen, uciHistory, {
+          difficulty,
+          depth: gameMode === 'training' ? maxDepth : undefined,
+        });
+      }
     }
-  }, [turn, status, fen, uciHistory, sendMove, difficulty, isGameOver, engineColor, engineAutoEnabled]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, gameMode]);
 
-  // ── Analysis / Training Continuous Eval ───────────────────────────────────
+  // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
-    if (isGameOver) return;
-    if (isAnalysis || (isTraining && turn !== engineColor)) {
-      // Debounce slightly to avoid spamming the engine
+    if (gameStatus !== 'active' || gameMode !== 'analysis') return;
+    if (effectiveGameOver) return;
+
+    // Immediately send the current position to the engine
+    const timer = setTimeout(() => {
+      startAnalysis(fen, uciHistory, maxDepth);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [fen, uciHistory, gameMode, startAnalysis, effectiveGameOver, gameStatus, maxDepth]);
+
+  // ── Training Mode Continuous Eval ─────────────────────────────────────────
+  useEffect(() => {
+    if (gameStatus !== 'active' || gameMode !== 'training') return;
+    if (effectiveGameOver) return;
+    if (turn !== engineColor) {
       const timer = setTimeout(() => {
-        startAnalysis(fen, uciHistory);
+        startAnalysis(fen, uciHistory, maxDepth);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [fen, uciHistory, isAnalysis, isTraining, turn, engineColor, startAnalysis, isGameOver]);
+  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth]);
 
-  // ── Apply engine best move ────────────────────────────────────────────────
+  // ── Apply engine best move + clock management ────────────────────────────
   const latestEngineInfoRef = useRef(engineInfo);
-  useEffect(() => {
-    latestEngineInfoRef.current = engineInfo;
-  }, [engineInfo]);
+  useEffect(() => { latestEngineInfoRef.current = engineInfo; }, [engineInfo]);
 
   useEffect(() => {
     if (!engineAutoEnabled) return;
+    if (!isGameActive) return;
     if (bestMove && turn === engineColor) {
-      const from = bestMove.substring(0, 2);
-      const to   = bestMove.substring(2, 4);
+      if (hasTC) {
+        clock.stopClock();
+        clock.applyIncrement(engineColor);
+      }
+
+      const from      = bestMove.substring(0, 2);
+      const to        = bestMove.substring(2, 4);
       const promotion = bestMove.length === 5 ? bestMove[4] : undefined;
-      const success = makeMove({ from, to, promotion });
+      const success   = makeMove({ from, to, promotion });
 
       const info = latestEngineInfoRef.current;
       if (success && info?.pvs && info.pvs.length > 0) {
-        const topPv = info.pvs[0];
+        const topPv      = info.pvs[0];
         const scoreToLog = engineColor === 'b' ? -topPv.score : topPv.score;
         addEvalPoint(moveHistory.length + 1, scoreToLog);
         recordEval(
@@ -100,28 +158,55 @@ export default function Home() {
         );
         lastNormalizedEvalRef.current = scoreToLog;
       }
-    }
-  }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length,
-      recordEval, engineColor, engineAutoEnabled]);
 
-  // ── User move handler ─────────────────────────────────────────────────────
+      if (hasTC && !effectiveGameOver) {
+        clock.startClock(orientation);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length,
+      recordEval, engineColor, engineAutoEnabled, isGameActive]);
+
+  // ── Stop clocks when game ends ───────────────────────────────────────────
+  useEffect(() => {
+    if (effectiveGameOver) {
+      clock.stopClock();
+    }
+  }, [effectiveGameOver]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── User move handler ────────────────────────────────────────────────────
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
-    // In normal modes: block moves while it's the engine's turn
     if (!isAnalysis && turn === engineColor) return false;
+    // Block moves if game not started or already over
+    if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
+
     const result = makeMove(move);
-    if (result && lastNormalizedEvalRef.current !== null) {
-      const userColor = turn;
-      recordEval(lastNormalizedEvalRef.current, moveHistory.length, userColor);
+
+    if (result) {
+      if (lastNormalizedEvalRef.current !== null) {
+        recordEval(lastNormalizedEvalRef.current, moveHistory.length, turn);
+      }
+      if (hasTC && !effectiveGameOver) {
+        clock.stopClock();
+        clock.applyIncrement(orientation);
+        clock.startClock(engineColor);
+      }
     }
     return result;
   };
 
-  // ── FEN load (Analysis Mode) ──────────────────────────────────────────────
+  // ── Resign ───────────────────────────────────────────────────────────────
+  const handleResign = () => {
+    setResignedBy(orientation);
+    setGameStatus('completed');
+    clock.stopClock();
+  };
+
+  // ── FEN/PGN (Analysis Mode) ──────────────────────────────────────────────
   const handleLoadFen = (fenStr: string) => {
     const ok = loadFen(fenStr);
     if (ok) {
       analysisFenRef.current = fenStr;
-      // The Analysis / Training Continuous Eval effect will automatically trigger startAnalysis
       resetEvalHistory();
       resetGrades();
       lastNormalizedEvalRef.current = null;
@@ -134,14 +219,12 @@ export default function Home() {
     resetEvalHistory();
     resetGrades();
     lastNormalizedEvalRef.current = null;
-    newGame(); // sends ucinewgame + isready
+    newGame();
   };
 
-  // ── New game ──────────────────────────────────────────────────────────────
-  // Open the modal instead of immediately resetting
+  // ── New game ─────────────────────────────────────────────────────────────
   const handleNewGame = () => {
     if (isAnalysis) {
-      // In Analysis mode, skip the modal — just reset the board silently
       analysisFenRef.current = null;
       resetGame();
       resetEvalHistory();
@@ -152,46 +235,59 @@ export default function Home() {
     }
   };
 
-  /**
-   * Called when the user confirms the New Game modal.
-   * Resolves 'random' color, updates difficulty, resets all state, and
-   * triggers a fresh engine session.
-   */
   const handleStartNewGame = (config: NewGameConfig) => {
     setIsNewGameModalOpen(false);
 
-    // Resolve random color
     const resolvedColor: PlayerColor =
       config.playerColor === 'random'
         ? (Math.random() < 0.5 ? 'w' : 'b')
         : config.playerColor;
 
-    // orientation = the side the *user* plays
     setOrientation(resolvedColor);
     setDifficulty(config.difficulty);
+    setTimeControl(config.timeControl);
+    setResignedBy(null);
+    setGameStatus('active');
 
     analysisFenRef.current = null;
     resetGame();
     resetEvalHistory();
     resetGrades();
     lastNormalizedEvalRef.current = null;
+
+    clock.resetClock();
     newGame();
+
+    // If the player chose Black, the engine moves first — start the engine's clock.
+    if (resolvedColor === 'b' && config.timeControl.initialMs > 0) {
+      // The engine-auto-trigger will fire once status=ready; delay is fine.
+    }
   };
 
-  // ── Normalized eval (always White perspective) ────────────────────────────
+  // ── Mode change ──────────────────────────────────────────────────────────
+  const handleModeChange = (newMode: GameMode) => {
+    setGameMode(newMode);
+    setGameStatus('idle');
+    clock.stopClock();
+    if (gameMode === 'analysis' && newMode !== 'analysis') {
+      handleNewGame();
+    }
+  };
+
+  // ── Normalized eval ──────────────────────────────────────────────────────
   const normalizedInfo = engineInfo ? {
     ...engineInfo,
     pvs: engineInfo.pvs.map(p => {
       const p2 = { ...p };
       if (engineColor === 'b') {
         if (p2.score !== undefined) p2.score = -p2.score;
-        if (p2.mate !== undefined) p2.mate = -p2.mate;
+        if (p2.mate  !== undefined) p2.mate  = -p2.mate;
       }
       return p2;
     })
   } : null;
 
-  // ── Check square highlight ────────────────────────────────────────────────
+  // ── Check square ─────────────────────────────────────────────────────────
   let checkSquare: string | null = null;
   if (game.isCheck()) {
     const board = game.board();
@@ -210,15 +306,18 @@ export default function Home() {
     to:   moveHistory[moveHistory.length - 1].to,
   } : null;
 
-  // ── Mode change handler ───────────────────────────────────────────────────
-  const handleModeChange = (newMode: GameMode) => {
-    setGameMode(newMode);
-    // When switching into analysis, we don't reset — user keeps their position.
-    // When switching out of analysis, start fresh so engine state is clean.
-    if (gameMode === 'analysis' && newMode !== 'analysis') {
-      handleNewGame();
+  // ── Game over result string ───────────────────────────────────────────────
+  const gameOverMessage = (() => {
+    if (resignedBy !== null) {
+      return `${resignedBy === 'w' ? 'Black' : 'White'} wins by Resignation`;
     }
-  };
+    if (game.isCheckmate())             return turn === 'w' ? 'Black Wins by Checkmate' : 'White Wins by Checkmate';
+    if (game.isStalemate())             return 'Draw by Stalemate';
+    if (game.isThreefoldRepetition())   return 'Draw by Repetition';
+    if (game.isInsufficientMaterial())  return 'Draw by Insufficient Material';
+    if (game.isDraw())                  return 'Draw';
+    return 'Game Over';
+  })();
 
   return (
     <div className="h-screen overflow-hidden flex flex-col">
@@ -230,7 +329,6 @@ export default function Home() {
           {/* ── Left Column — Board ─────────────────────────────────── */}
           <div className="flex gap-4 items-center min-h-0 justify-center">
 
-            {/* Eval Bar — hidden in Fair Play */}
             {showEvalBar && (
               <EvalBar
                 evalScore={normalizedInfo?.pvs?.[0]?.score ?? 0}
@@ -250,35 +348,47 @@ export default function Home() {
                 lastMove={lastMove}
               />
 
-              {/* Mode badge overlay (top-left of board) */}
-              <div className="absolute top-2 left-2 z-10 pointer-events-none">
-                {isFairPlay  && <span className="bg-black/60 text-white text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full backdrop-blur-sm">🛡️ Fair Play</span>}
-                {isTraining  && <span className="bg-black/60 text-primary text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full backdrop-blur-sm">🧠 Training</span>}
-                {isAnalysis  && <span className="bg-black/60 text-accent text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full backdrop-blur-sm">🔍 Analysis</span>}
-              </div>
 
-              {/* Analysis mode — both-sides-enabled notice */}
-              {isAnalysis && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-                  <span className="bg-black/60 text-accent text-[9px] font-semibold px-2.5 py-1 rounded-full backdrop-blur-sm">
-                    Both sides enabled
+              {/* TC badge */}
+              {showClock && (
+                <div className="absolute top-2 right-2 z-10 pointer-events-none">
+                  <span className="bg-black/60 text-muted text-[9px] font-bold font-mono tracking-wider px-2 py-0.5 rounded-full backdrop-blur-sm">
+                    ⏱ {timeControl.label}
                   </span>
                 </div>
               )}
 
+
+              {/* Idle overlay — shown before game starts */}
+              {gameStatus === 'idle' && (
+                <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-md gap-4">
+                  <div className="text-center">
+                    <h2 className="text-2xl font-bold text-foreground mb-1">Ready to Play?</h2>
+                    <p className="text-sm text-muted">Start the engine when you are ready.</p>
+                  </div>
+                  {isAnalysis ? (
+                    <button
+                      onClick={() => setGameStatus('active')}
+                      className="px-8 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-base shadow-lg shadow-primary/30 transition-all duration-150 active:scale-[0.97]"
+                    >
+                      Start Analysis →
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setIsNewGameModalOpen(true)}
+                      className="px-8 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-base shadow-lg shadow-primary/30 transition-all duration-150 active:scale-[0.97]"
+                    >
+                      Setup Match →
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Game over overlay */}
-              {isGameOver && !isAnalysis && (
+              {effectiveGameOver && !isAnalysis && (
                 <div className="absolute inset-0 bg-background/70 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-md">
                   <h2 className="text-3xl font-bold text-foreground mb-2">Game Over</h2>
-                  <p className="text-lg text-muted-foreground mb-6 font-medium">
-                    {game.isCheckmate()
-                      ? (turn === 'w' ? 'Black Wins by Checkmate' : 'White Wins by Checkmate')
-                      : game.isStalemate()           ? 'Draw by Stalemate'
-                      : game.isThreefoldRepetition() ? 'Draw by Repetition'
-                      : game.isInsufficientMaterial()? 'Draw by Insufficient Material'
-                      : game.isDraw()                ? 'Draw'
-                      :                                'Game Over'}
-                  </p>
+                  <p className="text-lg text-muted-foreground mb-6 font-medium">{gameOverMessage}</p>
                   <button
                     onClick={handleNewGame}
                     className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-semibold transition-colors"
@@ -293,54 +403,65 @@ export default function Home() {
           {/* ── Right Column — Sidebar ──────────────────────────────── */}
           <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto scrollbar-thin overflow-auto pr-2">
 
-            {/* Mode selector — always pinned at top */}
             <ModeSelector mode={gameMode} onModeChange={handleModeChange} />
 
-            {/* FEN input — Analysis only */}
-            {showFenInput && (
-              <FenInput onLoadFen={handleLoadFen} onReset={handleFenReset} />
+            {/* Clock */}
+            {showClock && (
+              <ClockDisplay
+                whiteMs={clock.whiteMs}
+                blackMs={clock.blackMs}
+                activeSide={clock.activeSide}
+                playerColor={orientation}
+                isRunning={clock.isRunning}
+                isGameActive={isGameActive}
+                fen={fen}
+                disabled={false}
+              />
             )}
 
-            {/* Engine configuration — hidden in Fair Play */}
-            {showEngineConf && (
-              <EngineToggle currentVersion="Texel-Tuned HCE" />
-            )}
-
-            {/* Engine analysis panel — hidden in Fair Play */}
-            {showEnginePanel && (
-              <EnginePanel info={normalizedInfo} status={status} queuePosition={queuePosition} />
-            )}
-
-            {/* Move history — always visible; badges shown in Training/Analysis only */}
-            <MoveHistory moves={moveHistory} grades={grades} showGrades={showEnginePanel} />
-
-            {/* Evaluation Graph — shown in Analysis and Training */}
-            {showEnginePanel && (
-              <EvalGraph data={evalGraphData} />
-            )}
-
-            {/* PGN Controls — shown only in Analysis mode */}
+            {/* Merged FEN+PGN — Analysis only */}
             {isAnalysis && (
-              <PgnControls 
-                exportPgn={exportPgn} 
-                loadPgn={loadPgn} 
+              <PositionSetup
+                onLoadFen={handleLoadFen}
+                onReset={handleFenReset}
+                exportPgn={exportPgn}
+                loadPgn={loadPgn}
                 onImportSuccess={(finalFen) => {
                   analysisFenRef.current = finalFen;
                   resetEvalHistory();
                   resetGrades();
                   lastNormalizedEvalRef.current = null;
-                }} 
+                }}
               />
             )}
 
-            {/* Game controls — always pinned to bottom */}
+            {showEngineConf && (
+              <EngineToggle 
+                currentVersion="Texel-Tuned HCE" 
+                maxDepth={maxDepth}
+                onDepthChange={setMaxDepth}
+              />
+            )}
+
+            {showEnginePanel && (
+              <EnginePanel info={normalizedInfo} status={status} queuePosition={queuePosition} />
+            )}
+
+            <MoveHistory moves={moveHistory} grades={grades} showGrades={showEnginePanel} />
+
+            {showEnginePanel && (
+              <EvalGraph data={evalGraphData} />
+            )}
+
             <div className="shrink-0">
               <GameControls
                 onNewGameClick={handleNewGame}
                 onUndo={undoMove}
                 onFlipBoard={() => setOrientation(o => o === 'w' ? 'b' : 'w')}
+                onResign={handleResign}
                 orientation={orientation}
-                canUndo={moveHistory.length > 0 && status !== 'thinking'}
+                canUndo={moveHistory.length > 0 && status !== 'thinking' && isGameActive}
+                canResign={isGameActive && !effectiveGameOver && !isAnalysis}
               />
             </div>
           </div>
@@ -350,11 +471,11 @@ export default function Home() {
 
       <Footer />
 
-      {/* Match Settings Modal — mounted at root so it overlays the full viewport */}
       <NewGameModal
         isOpen={isNewGameModalOpen}
         defaultDifficulty={difficulty}
         defaultPlayerColor={orientation}
+        defaultTimeControl={timeControl}
         onStart={handleStartNewGame}
         onCancel={() => setIsNewGameModalOpen(false)}
       />

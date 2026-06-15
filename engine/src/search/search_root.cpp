@@ -77,7 +77,7 @@ done:
 }
 
 
-Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
+std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, bool isPonder) {
     qNodes = 0;
     deltaPruneSkips = 0;
     ttHits = 0;
@@ -86,25 +86,29 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
 
     std::vector<Move> rootMoves = board.generateLegalMoves();
     if (rootMoves.empty()) {
-        return Move{};
+        return {Move{}, Move{}};
     }
     if (rootMoves.size() == 1) {
-        return rootMoves.front();
+        return {rootMoves.front(), Move{}};
     }
 
-    long long hardTimeLimit = allocatedTimeMs;
+    // For ponder mode, use an enormous time limit — the caller will
+    // set timeAborted externally to terminate the search.
+    const long long effectiveTimeLimit = isPonder ? 999'999'999LL : std::max(1LL, timeLimitMs);
+
+    long long hardTimeLimit = effectiveTimeLimit;
     long long softTimeLimit = hardTimeLimit / 2;
     Move bestMoveLastIteration{};
     int stableCount = 0;
 
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
 
-    allocatedTimeMs = std::max(1LL, timeLimitMs);
+    allocatedTimeMs = effectiveTimeLimit;
     startTime = SearchInternal::SearchClock::now();
     SearchInternal::g_nodesSearched = 0;
     timeAborted.store(false, std::memory_order_relaxed);
 
-    hardTimeLimit = allocatedTimeMs;
+    hardTimeLimit = effectiveTimeLimit;
     softTimeLimit = hardTimeLimit / 2;
 
     SearchInternal::sortMovesByScore(board, rootMoves, Move{});
@@ -117,23 +121,7 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
     SearchInternal::clearKillers();
     SearchInternal::clearHistory();
 
-    auto moveToUci = [&](const Move& move) {
-        std::string text = Board::squareToString(move.from) + Board::squareToString(move.to);
-        if (move.promotion.has_value()) {
-            char promo = 'q';
-            switch (*move.promotion) {
-                case PieceType::Knight: promo = 'n'; break;
-                case PieceType::Bishop: promo = 'b'; break;
-                case PieceType::Rook: promo = 'r'; break;
-                case PieceType::Queen: promo = 'q'; break;
-                default: break;
-            }
-            text.push_back(promo);
-        }
-        return text;
-    };
-    // moveToUci is now actively used — remove the void suppression
-    // (lambda defined above at line ~120)
+
 
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
         if (timeAborted.load(std::memory_order_relaxed)) {
@@ -320,8 +308,11 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
             std::cout << std::endl;
         }
 
-        if (elapsedMs > softTimeLimit && stableCount >= 2) break;
-        if (elapsedMs > (hardTimeLimit * 3 / 4)) break;
+        // In ponder mode skip time-based termination — only timeAborted matters.
+        if (!isPonder) {
+            if (elapsedMs > softTimeLimit && stableCount >= 2) break;
+            if (elapsedMs > (hardTimeLimit * 3 / 4)) break;
+        }
     }
 
     const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -336,5 +327,32 @@ Move findBestMove(Board& board, int maxDepth, long long timeLimitMs) {
               << " ttStores: "   << ttStores
               << " elapsedMs: "  << totalElapsedMs << "\n";
 
-    return bestCompletedMove;
+    // ── Extract ponder move from TT (PV continuation after bestCompletedMove) ──
+    Move ponderMove{};
+    if (bestCompletedMove.from >= 0) {
+        board.makeMove(bestCompletedMove);
+        const uint64_t pHash = board.getHash();
+        const size_t   pIdx  = pHash & SearchConstants::TT_SIZE_MASK;
+        const SearchTypes::TTEntry& pEntry = SearchInternal::g_TT[pIdx];
+        if (pEntry.hash == pHash && pEntry.bestMove.from >= 0) {
+            // Validate the TT ponder move is actually legal
+            const std::vector<Move> legal = board.generateLegalMoves();
+            for (const Move& m : legal) {
+                if (m.from       == pEntry.bestMove.from &&
+                    m.to         == pEntry.bestMove.to   &&
+                    m.promotion  == pEntry.bestMove.promotion) {
+                    ponderMove = m;
+                    break;
+                }
+            }
+        }
+        board.undoMove();
+    }
+
+    return {bestCompletedMove, ponderMove};
+}
+
+// Thin compatibility wrapper used by any code that still expects a single Move return.
+Move findBestMoveCompat(Board& board, int maxDepth, long long timeLimitMs) {
+    return findBestMove(board, maxDepth, timeLimitMs).first;
 }

@@ -42,14 +42,16 @@ export function useChessGame() {
     try {
       const gameCopy = new Chess(game.fen());
       const result = gameCopy.move(move);
-      
+
       if (result) {
         setGame(gameCopy);
-        setMoveHistory(gameCopy.history({ verbose: true }) as Move[]);
-        
+        // Append the new move to the existing history — gameCopy was constructed
+        // from fen() so its internal history only contains this single move.
+        setMoveHistory(prev => [...prev, result as Move]);
+
         const uciMove = result.from + result.to + (result.promotion || '');
         setUciHistory(prev => [...prev, uciMove]);
-        
+
         if (gameCopy.isGameOver()) playSound('end');
         else if (gameCopy.isCheck()) playSound('check');
         else if (result.flags.includes('c') || result.flags.includes('e')) playSound('capture');

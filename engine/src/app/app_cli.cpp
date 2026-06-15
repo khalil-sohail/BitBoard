@@ -74,7 +74,7 @@ void runCliMode(Board& board, const AppOptions::Options& options) {
                 continue;
             }
 
-            const Move bestMove = findBestMove(board, options.searchDepth);
+            auto [bestMove, ignore_] = findBestMove(board, options.searchDepth);
             if (bestMove.from >= 0 && board.applyMove(bestMove)) {
                 const std::string moveText = AppText::moveToCompactString(board, bestMove);
                 board.recordSanMove(moveText);

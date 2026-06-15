@@ -62,7 +62,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_1.5fr] gap-4">
+      <div className="grid grid-cols-[1fr_1.5fr] gap-5">
         
         {/* ── LEFT COLUMN: STATS ─────────────────────────────────────────── */}
         <div className="flex flex-col justify-between gap-4">
@@ -94,7 +94,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
         </div>
 
         {/* ── RIGHT COLUMN: PVs ─────────────────────────────────────────── */}
-        <div className="rounded-md p-3 border border-white/10 h-full min-h-[130px] overflow-y-auto scrollbar-thin" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
+        <div className="rounded-md p-3 border border-white/10 h-full min-h-[130px] overflow-y-auto" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
           <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold">Principal Variations</span>
           {info?.pvs?.length ? (
             <div className="space-y-1.5">

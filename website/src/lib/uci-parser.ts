@@ -2,19 +2,15 @@
  * uci-parser.ts
  *
  * Standalone parser for UCI `info` lines emitted by the C++ engine.
- * Extracted from engine-session.ts for modularity and testability.
+ * Also exposes parseBestMove() for parsing `bestmove <m> [ponder <p>]` lines.
  *
- * Recognised tokens (in any order on the line):
+ * Recognised `info` tokens (in any order on the line):
  *   depth <n>
  *   score cp <n>
  *   score mate <n>   (n is negative when the engine is getting mated)
  *   nodes <n>
  *   time <n>
  *   pv <move> [<move> ...]   (must be last token group — consumes to EOL)
- *
- * Returns null if the line doesn't contain at least `depth` and either
- * `score` or `mate`, so partial / debug `info string` lines are silently
- * dropped by the caller.
  */
 
 export interface ParsedInfo {
@@ -25,6 +21,11 @@ export interface ParsedInfo {
   nodes?: number;
   time?: number;
   pv?: string[];
+}
+
+export interface ParsedBestMove {
+  bestMove: string;
+  ponderMove: string | null;
 }
 
 /**
@@ -81,8 +82,24 @@ export function parseUciInfo(line: string): ParsedInfo | null {
 
   // Default to 1 if the engine doesn't explicitly send multipv
   if (result.multipv === undefined) {
-      result.multipv = 1;
+    result.multipv = 1;
   }
 
   return result;
+}
+
+/**
+ * Parse a `bestmove <m> [ponder <p>]` line from engine stdout.
+ *
+ * Returns { bestMove, ponderMove } where ponderMove is null if absent.
+ * Returns null if the line doesn't start with "bestmove".
+ */
+export function parseBestMove(line: string): ParsedBestMove | null {
+  const parts = line.trim().split(/\s+/);
+  if (parts[0] !== 'bestmove' || !parts[1]) return null;
+
+  const bestMove   = parts[1];
+  const ponderMove = (parts[2] === 'ponder' && parts[3]) ? parts[3] : null;
+
+  return { bestMove, ponderMove };
 }

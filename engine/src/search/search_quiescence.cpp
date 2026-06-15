@@ -3,7 +3,7 @@
 
 int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     if (SearchInternal::shouldAbortSearch()) {
-        return alpha;
+        return 0;
     }
 
     ++qNodes;

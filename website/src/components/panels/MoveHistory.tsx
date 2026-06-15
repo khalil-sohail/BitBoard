@@ -46,7 +46,8 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
   const hasSummary  = showGrades && (blunders + mistakes + inaccuracies) > 0;
 
   return (
-    <div className="bg-surface rounded-lg border border-white/10 p-4 flex flex-col flex-1 min-h-0 shadow-md">
+    <div className="bg-surface rounded-lg border border-white/10 p-4 flex flex-col shrink-0 min-h-[160px] max-h-[280px] shadow-md">
+
       <div className="flex items-baseline justify-between mb-3 shrink-0">
         <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">
           Move History
@@ -67,7 +68,7 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto pr-1">
         {rows.length === 0 ? (
           <div className="h-full flex items-center justify-center text-muted text-sm italic">
             No moves yet
