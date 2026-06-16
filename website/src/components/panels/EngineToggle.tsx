@@ -61,7 +61,7 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
               onClick={handleNNUEClick}
               className="flex-1 px-2 py-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors text-xs flex items-center justify-center gap-1.5 font-semibold whitespace-nowrap"
             >
-              NNUE <Badge variant="accent" className="text-[9px] px-1 py-0 h-4">Soon</Badge>
+              NNUE <Badge variant="accent" className="text-[9px] px-1 py-0 h-4">Planned</Badge>
             </button>
           </div>
         </div>
@@ -79,7 +79,7 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
               onClick={handleWASMClick}
               className="flex-1 px-2 py-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors text-xs flex items-center justify-center gap-1.5 font-semibold whitespace-nowrap"
             >
-              Browser WASM <Badge variant="accent" className="text-[9px] px-1 py-0 h-4">Soon</Badge>
+              Browser WASM <Badge variant="accent" className="text-[9px] px-1 py-0 h-4">Planned</Badge>
             </button>
           </div>
         </div>

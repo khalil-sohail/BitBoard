@@ -23,12 +23,12 @@ export function EvalGraph({ data }: EvalGraphProps) {
   }
 
   return (
-    <div className="shrink-0 min-h-[120px] w-full bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md relative group mt-4">
+    <div className="shrink-0 h-[120px] min-h-[120px] w-full min-w-[100px] bg-surface rounded-lg border border-white/10 overflow-hidden shadow-md relative group mt-4">
       <div className="absolute top-2 left-3 z-10 pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity">
           <span className="text-[10px] text-foreground uppercase tracking-widest font-semibold">Eval History</span>
       </div>
       
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={120} minWidth={100}>
         <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">

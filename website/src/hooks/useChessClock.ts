@@ -99,7 +99,13 @@ export function useChessClock({
 
   const startClock = useCallback((side: PlayerColor) => {
     if (gameRef.current && side !== gameRef.current.turn()) {
-      console.warn(`[Clock Sync Warning] activeSide is ${side} but turn is ${gameRef.current.turn()}`);
+      if (process.env.NODE_ENV !== 'production') {
+        setTimeout(() => {
+          if (gameRef.current && side !== gameRef.current.turn()) {
+            console.warn(`[Clock Sync Warning] activeSide is ${side} but turn is ${gameRef.current.turn()}`);
+          }
+        }, 0);
+      }
     }
     activeSideRef.current = side;
     setActiveSide(side);
