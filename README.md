@@ -57,6 +57,8 @@ The custom chess AI was built for performance and accuracy:
 - **Quiescence Search:** Extended horizon search to resolve noisy tactical captures.
 - **Evaluation:** Hand-Crafted Evaluation (HCE) optimized via Texel Tuning.
 
+The engine includes a compact opening-book binary at `engine/openings/performance.bin`, which is required for opening-book support. Larger/generated books are intentionally excluded from the repository.
+
 ## Web Platform
 
 The UI is built with a dark, technical "engine room" aesthetic. It utilizes React state to smoothly display asynchronous multi-variation payloads streaming from the engine in real-time. 

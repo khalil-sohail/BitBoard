@@ -13,9 +13,9 @@
 # Built Visual Studio Code Extensions
 *.vsix
 
-# generated / large opening books
-*.bin
-!engine/openings/*.example.bin
+# unused/generated opening-book binaries
+openings/*.bin
+!engine/openings/performance.bin
 
 chess-engine
 chess-engine-tests
