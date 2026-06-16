@@ -103,7 +103,7 @@ export default function Home() {
     // ONLY fire when the game is actively running
     if (!isGameActive) return;
     if (isWaitingForStop) return;
-    if (turn === engineColor && status === 'ready' && !effectiveGameOver) {
+    if (turn === engineColor && status === 'idle' && !effectiveGameOver) {
       
       // Fair Play mode runs purely on time, no depth ceiling.
       // Other modes (Training, Analysis) include depth as a limit or ceiling.
@@ -333,7 +333,7 @@ export default function Home() {
 
     // If the player chose Black, the engine moves first — start the engine's clock.
     if (resolvedColor === 'b' && config.timeControl.initialMs > 0) {
-      // The engine-auto-trigger will fire once status=ready; delay is fine.
+      // The engine-auto-trigger will fire once status=idle; delay is fine.
     }
   };
 

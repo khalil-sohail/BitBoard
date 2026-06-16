@@ -52,13 +52,14 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
           )}
         </h3>
         
-        <div className="text-xs font-mono">
+        <div className="text-xs font-mono flex items-center gap-2">
             {status === 'connecting' && <span className="text-muted">Connecting...</span>}
             {status === 'queued' && <span className="text-amber-500">Queued #{queuePosition}</span>}
-            {status === 'ready' && <span className="text-emerald-500">Ready</span>}
+            {status === 'idle' && <span className="text-emerald-500">Idle</span>}
+            {status === 'thinking' && <span className="text-accent">Thinking</span>}
             {status === 'error' && <span className="text-red-500">Error</span>}
-            {status === 'session_expired' && <span className="text-amber-500">Expired</span>}
-            {status === 'disconnected' && <span className="text-muted">Disconnected</span>}
+            {status === 'session_expired' && (info ? <span className="text-amber-500">Expired (Last analysis)</span> : <span className="text-amber-500">Expired</span>)}
+            {status === 'disconnected' && (info ? <span className="text-muted">Last analysis</span> : <span className="text-muted">Disconnected</span>)}
         </div>
       </div>
 

@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { EngineInfo } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 
-type ConnectionStatus = 'connecting' | 'queued' | 'ready' | 'thinking' | 'disconnected' | 'session_expired' | 'error';
+type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'disconnected' | 'session_expired' | 'error';
 
 export interface SendMoveOptions {
   /** Remaining white clock time in ms (0 = no time control). */
@@ -58,7 +58,7 @@ export function useEngine() {
           case 'ready':
             stateRef.current.isWaitingForNewGameReady = false;
             if (stateRef.current.status !== 'thinking') {
-              setStatus('ready');
+              setStatus('idle');
             }
             setQueuePosition(null);
             break;
@@ -79,7 +79,7 @@ export function useEngine() {
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady) {
               setBestMove(data.move);
-              setStatus('ready');
+              setStatus('idle');
             }
             break;
           case 'session_expired':
@@ -127,7 +127,7 @@ export function useEngine() {
     moves: string[],
     options: SendMoveOptions | string = 'standard',
   ) => {
-    if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'ready') {
+    if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
       setStatus('thinking');
       setBestMove(null);
       setEngineInfo(null);
@@ -154,7 +154,7 @@ export function useEngine() {
   const newGame = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       stateRef.current.isWaitingForNewGameReady = true;
-      setStatus('ready');
+      setStatus('idle');
       setBestMove(null);
       setEngineInfo(null);
       ws.current.send(JSON.stringify({ type: 'newgame' }));
@@ -196,7 +196,7 @@ export function useEngine() {
   const stopEngine = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'stop' }));
-      setStatus('ready'); // Optionally transition to ready immediately
+      setStatus('idle'); // Transition to idle immediately
     }
   }, [setStatus]);
 
