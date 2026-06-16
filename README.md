@@ -3,15 +3,34 @@
 A highly-optimized, custom C++23 bitboard chess engine paired with a modern, real-time web analysis platform built in Next.js and Node.js. 
 
 **Live Demo:** [https://bitboard.ksohail.space/](https://bitboard.ksohail.space/)
-
 ## Screenshots
 
-Screenshots will be added manually before final public release.
+<table>
+  <tr>
+    <td width="33.33%" align="center">
+      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/challenge.png"
+          alt="Fair Play mode showing a live game against the Bitboard chess engine, featuring the interactive chessboard, move history, game clocks, captured pieces, and real-time engine interaction through the web interface."
+          width="100%" />
+    </td>
 
-Expected files:
-- `docs/media/analysis-mode.png`
-- `docs/media/training-mode.png`
-- `docs/media/architecture-overview.png`
+    <td width="33.33%" align="center">
+      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/training-mode.png"
+        alt="Bitboard training mode with chessboard, move feedback, and engine-assisted practice workflow"
+        width="100%" />
+    </td>
+
+    <td width="33.33%" align="center">
+      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/analysis-mode.png"
+        alt="Bitboard analysis mode showing real-time engine evaluation, principal variation, depth, and move history"
+        width="100%" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Fair Play Mode</strong></td>
+    <td align="center"><strong>Training Mode</strong></td>
+    <td align="center"><strong>Analysis Mode</strong></td>
+  </tr>
+</table>
 
 ## Overview
 

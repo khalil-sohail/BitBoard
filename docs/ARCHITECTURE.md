@@ -5,35 +5,55 @@ The Bitboard project is a full-stack chess analysis platform. It seamlessly inte
 ## High-Level System Design
 
 ```mermaid
-flowchart TD
-    subgraph Frontend [Next.js / React Web Client]
-        UI[User Interface]
-        State[React State & Chess.js]
-        WSC[WebSocket Client]
-        
-        UI --> State
-        State <--> WSC
+flowchart LR
+    User([User]) --> UI
+    
+    subgraph Frontend["Next.js / React Frontend"]
+        UI["Chess UI<br/>Board · Modes · Move History"]
+        Panel["Analysis Panel<br/>Eval · Depth · PV · NPS"]
+        Controls["Controls<br/>FEN · PGN · Engine Settings"]
+    end
+    
+    subgraph Bridge["Node.js Runtime Bridge"]
+        WS["WebSocket Server<br/>JSON Message API"]
+        Session["Engine Session Manager<br/>One engine process per session"]
+        Parser["UCI Parser<br/>info · bestmove · score · pv"]
+    end
+    
+    subgraph Engine["C++23 Chess Engine"]
+        UCI["UCI Command Loop<br/>position · go · stop"]
+        Board["Board Model<br/>64-bit Bitboards"]
+        Movegen["Move Generation<br/>Legal Moves · Castling · En Passant · Promotions"]
+        Search["Search<br/>Negamax · Alpha-Beta · Iterative Deepening"]
+        Optim["Search Optimizations<br/>TT · Null Move · LMR · Singular Extensions"]
+        Eval["Evaluation<br/>Material · Mobility · King Safety · Pawn Structure"]
+        Book["Opening Book<br/>performance.bin"]
+    end
+    
+    UI -->|moves / mode changes| WS
+    Controls -->|FEN / PGN / settings| WS
+    WS --> Session
+    
+    Session -->|stdin: UCI commands| UCI
+    UCI --> Board
+    Board --> Movegen
+    Movegen --> Search
+    Search --> Optim
+    Search --> Eval
+    Book --> Search
+    Search -->|stdout: UCI info| Parser
+    UCI -->|stdout: bestmove| Parser
+    Parser -->|streamed analysis updates| WS
+    
+    WS -->|eval / depth / pv / nodes| Panel
+    WS -->|best move / engine move| UI
+    
+    subgraph Monitoring["Monitoring & Debugging"]
+        Logger["Log Streamer<br/>Engine logs · errors · diagnostics"]
     end
 
-    subgraph Backend [Node.js Server]
-        WSS[WebSocket Server]
-        SessionMgr[Engine Session Manager]
-        
-        WSC <-->|JSON Protocol| WSS
-        WSS <--> SessionMgr
-    end
-
-    subgraph Engine [C++23 Chess Engine]
-        UCI[UCI Parser]
-        Search[Negamax Search Pipeline]
-        Eval[Static Evaluation]
-        Board[Bitboard Representation]
-        
-        SessionMgr <-->|UCI Protocol (stdin/stdout)| UCI
-        UCI --> Search
-        Search --> Eval
-        Search --> Board
-    end
+    Parser -->|engine logs| Logger
+    Session -->|process events| Logger
 ```
 
 ## Core Components
