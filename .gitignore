@@ -13,6 +13,10 @@
 # Built Visual Studio Code Extensions
 *.vsix
 
+# generated / large opening books
+*.bin
+!engine/openings/*.example.bin
+
 chess-engine
 chess-engine-tests
 __pycache__/
