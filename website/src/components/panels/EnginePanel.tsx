@@ -44,7 +44,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
           Engine Analysis
-          {status === 'thinking' && (
+          {(status === 'thinking' || status === 'analyzing') && (
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
@@ -57,6 +57,8 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
             {status === 'queued' && <span className="text-amber-500">Queued #{queuePosition}</span>}
             {status === 'idle' && <span className="text-emerald-500">Idle</span>}
             {status === 'thinking' && <span className="text-accent">Thinking</span>}
+            {status === 'analyzing' && !info && <span className="text-accent">Starting...</span>}
+            {status === 'analyzing' && info && <span className="text-accent">Analyzing</span>}
             {status === 'error' && <span className="text-red-500">Error</span>}
             {status === 'session_expired' && (info ? <span className="text-amber-500">Expired (Last analysis)</span> : <span className="text-amber-500">Expired</span>)}
             {status === 'disconnected' && (info ? <span className="text-muted">Last analysis</span> : <span className="text-muted">Disconnected</span>)}
@@ -69,13 +71,13 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
         <div className="flex flex-col justify-between gap-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
-              <span className="text-xs text-muted mb-1 uppercase">Eval</span>
+              <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Engine Evaluation: positive means white is better, negative means black is better. Measured in pawns.">Eval</span>
               <span className={`text-xl font-bold font-mono ${isMate ? 'text-accent' : 'text-foreground'}`}>
                 {info ? formattedScore : '-.--'}
               </span>
             </div>
             <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
-              <span className="text-xs text-muted mb-1 uppercase">Depth</span>
+              <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Search Depth: how many moves ahead the engine has fully analyzed.">Depth</span>
               <span className="text-xl font-bold font-mono text-foreground">
                 {info?.depth ?? '-'}
               </span>
@@ -84,11 +86,11 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
 
           <div className="flex flex-col gap-1 text-xs sm:text-sm">
             <div className="flex justify-between border-b border-border pb-1">
-                <span className="text-muted">Nodes:</span>
+                <span className="text-muted cursor-help" title="Nodes: total number of board positions evaluated during the current search.">Nodes:</span>
                 <span className="font-mono text-foreground">{formatNodes(info?.nodes)}</span>
             </div>
             <div className="flex justify-between border-b border-border pb-1">
-                <span className="text-muted">NPS:</span>
+                <span className="text-muted cursor-help" title="NPS: Nodes Per Second.">NPS:</span>
                 <span className="font-mono text-foreground">{formatNPS(info?.nodes, info?.time)}</span>
             </div>
           </div>
@@ -96,7 +98,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
 
         {/* ── RIGHT COLUMN: PVs ─────────────────────────────────────────── */}
         <div className="rounded-md p-3 border border-white/10 h-full min-h-[130px] overflow-y-auto" style={{background: 'rgba(0,0,0,0.4)', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)'}}>
-          <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold">Principal Variations</span>
+          <span className="text-[10px] text-muted/60 block mb-1.5 uppercase tracking-widest font-semibold cursor-help w-max" title="Principal Variations: the best sequence of moves predicted by the engine.">Principal Variations</span>
           {info?.pvs?.length ? (
             <div className="space-y-1.5">
               {info.pvs.map((pv, i) => {

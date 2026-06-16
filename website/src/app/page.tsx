@@ -219,9 +219,9 @@ export default function Home() {
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
     if (effectiveGameOver) {
-      stopEngine();
       clock.stopClock();
       if (!isAnalysis) {
+        stopEngine();
         releaseSession();
       }
     }
@@ -282,6 +282,9 @@ export default function Home() {
       resetEvalHistory();
       resetGrades();
       lastNormalizedEvalRef.current = null;
+      if (gameMode === 'analysis') {
+        startAnalysis(fenStr, [], maxDepth);
+      }
     }
   };
 
@@ -501,6 +504,7 @@ export default function Home() {
             {/* Merged FEN+PGN — Analysis only */}
             {isAnalysis && (
               <PositionSetup
+                currentFen={fen}
                 onLoadFen={handleLoadFen}
                 onReset={handleFenReset}
                 exportPgn={exportPgn}
@@ -510,6 +514,9 @@ export default function Home() {
                   resetEvalHistory();
                   resetGrades();
                   lastNormalizedEvalRef.current = null;
+                  if (gameMode === 'analysis') {
+                    startAnalysis(finalFen, [], maxDepth);
+                  }
                 }}
               />
             )}

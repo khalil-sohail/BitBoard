@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { EngineInfo } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 
-type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'disconnected' | 'session_expired' | 'error';
+type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'disconnected' | 'session_expired' | 'error';
 
 export interface SendMoveOptions {
   /** Remaining white clock time in ms (0 = no time control). */
@@ -24,6 +24,7 @@ export function useEngine() {
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const pendingAnalysisRef = useRef<{ fen: string; moves: string[]; depth?: number } | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -57,7 +58,7 @@ export function useEngine() {
         switch (data.type) {
           case 'ready':
             stateRef.current.isWaitingForNewGameReady = false;
-            if (stateRef.current.status !== 'thinking') {
+            if (stateRef.current.status !== 'thinking' && stateRef.current.status !== 'analyzing') {
               setStatus('idle');
             }
             setQueuePosition(null);
@@ -79,7 +80,15 @@ export function useEngine() {
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady) {
               setBestMove(data.move);
-              setStatus('idle');
+              if (pendingAnalysisRef.current) {
+                const pending = pendingAnalysisRef.current;
+                pendingAnalysisRef.current = null;
+                setStatus('analyzing');
+                setEngineInfo(null);
+                ws.current?.send(JSON.stringify({ type: 'analyze', fen: pending.fen, moves: pending.moves, depth: pending.depth }));
+              } else {
+                setStatus('idle');
+              }
             }
             break;
           case 'session_expired':
@@ -196,16 +205,21 @@ export function useEngine() {
   const stopEngine = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'stop' }));
-      setStatus('idle'); // Transition to idle immediately
     }
-  }, [setStatus]);
+  }, []);
 
   const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
-      setStatus('thinking');
-      setBestMove(null);
-      setEngineInfo(null);
-      ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth }));
+      const currentStatus = stateRef.current.status;
+      if (currentStatus === 'thinking' || currentStatus === 'analyzing') {
+        pendingAnalysisRef.current = { fen, moves, depth };
+        ws.current.send(JSON.stringify({ type: 'stop' }));
+      } else {
+        setStatus('analyzing');
+        setBestMove(null);
+        setEngineInfo(null);
+        ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth }));
+      }
     }
   }, [setStatus]);
 

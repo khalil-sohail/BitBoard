@@ -5,6 +5,7 @@ import { Chess } from 'chess.js';
 import { useToast } from '../ui/Toast';
 
 interface PositionSetupProps {
+  currentFen: string;
   onLoadFen: (fen: string) => void;
   onReset: () => void;
   exportPgn: () => string;
@@ -21,6 +22,7 @@ function isValidFen(fen: string): boolean {
 type Tab = 'fen' | 'pgn';
 
 export function PositionSetup({
+  currentFen,
   onLoadFen,
   onReset,
   exportPgn,
@@ -141,13 +143,23 @@ export function PositionSetup({
             <div className="flex gap-2">
               <button
                 onClick={handleFenLoad}
-                className="flex-1 text-xs font-semibold py-1.5 px-3 rounded-md bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20 transition-colors duration-150"
+                className="flex-[2] text-xs font-semibold py-1.5 px-3 rounded-md bg-primary/20 text-primary hover:bg-primary/30 border border-primary/20 transition-colors duration-150"
               >
                 Load Position
               </button>
               <button
+                onClick={() => {
+                  navigator.clipboard.writeText(currentFen)
+                    .then(() => addToast('FEN copied to clipboard!', 'info'))
+                    .catch(() => addToast('Failed to copy FEN.', 'error'));
+                }}
+                className="flex-[2] text-xs font-semibold py-1.5 px-3 rounded-md bg-surface-elevated text-muted hover:text-foreground border border-white/10 transition-colors duration-150"
+              >
+                Copy FEN
+              </button>
+              <button
                 onClick={handleFenReset}
-                className="text-xs font-semibold py-1.5 px-3 rounded-md bg-surface-elevated text-muted hover:text-foreground border border-white/10 transition-colors duration-150"
+                className="flex-1 text-xs font-semibold py-1.5 px-3 rounded-md bg-surface-elevated text-red-400/80 hover:text-red-400 border border-white/10 transition-colors duration-150"
               >
                 Reset
               </button>
