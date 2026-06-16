@@ -8,19 +8,17 @@ A highly-optimized, custom C++23 bitboard chess engine paired with a modern, rea
 <table>
   <tr>
     <td width="33.33%" align="center">
-      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/challenge.png"
+      <img src="./docs/media/challenge.png"
           alt="Fair Play mode showing a live game against the Bitboard chess engine, featuring the interactive chessboard, move history, game clocks, captured pieces, and real-time engine interaction through the web interface."
           width="100%" />
     </td>
-
     <td width="33.33%" align="center">
-      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/training-mode.png"
+      <img src="./docs/media/training-mode.png"
         alt="Bitboard training mode with chessboard, move feedback, and engine-assisted practice workflow"
         width="100%" />
     </td>
-
     <td width="33.33%" align="center">
-      <img src="https://raw.githubusercontent.com/ksohail/chess-engine/main/docs/media/analysis-mode.png"
+      <img src="./docs/media/analysis-mode.png"
         alt="Bitboard analysis mode showing real-time engine evaluation, principal variation, depth, and move history"
         width="100%" />
     </td>
