@@ -6,6 +6,7 @@ engine/.venv/
 engine/chess-engine
 engine/chess-engine-tests
 engine/chess-engine-tune
+**/*.o
 website/node_modules/
 website/.next/
 .git/
