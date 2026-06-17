@@ -8,9 +8,10 @@ import { parseUciInfo, parseBestMove } from './uci-parser';
 
 type PonderPhase =
   | { phase: 'idle' }
-  | { phase: 'thinking'; wtime: number; btime: number; winc: number; binc: number; depth?: number }
+  | { phase: 'thinking'; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number }
   | {
       phase: 'pondering';
+      ponderPly: number;        // ply count at the moment pondering starts
       ponderMove: string;       // the move the engine predicted the opponent plays
       baseFen: string;          // the startFen of the current game
       baseMoves: string[];      // full moves list up to (and including) the engine's reply
@@ -263,7 +264,7 @@ class EnginePoolManager {
       console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderMove ?? 'none'}`);
 
       // Start pondering if we have a ponder move
-      if (ponderMove && session.process.stdin) {
+      if (ponderMove && session.process.stdin && ps.searchMode === 'tc') {
         const ponderMoves = [...session.uciMoves, bestMove];
         const isStartPos = session.startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
         const posCmd = isStartPos
@@ -276,6 +277,7 @@ class EnginePoolManager {
 
         session.ponderState = {
           phase: 'pondering',
+          ponderPly: ponderMoves.length,
           ponderMove,
           baseFen: session.startFen,
           baseMoves: ponderMoves,
@@ -332,6 +334,7 @@ class EnginePoolManager {
         const userMove = data.moves?.length > 0
           ? data.moves[data.moves.length - 1]
           : null;
+        const incomingPly = data.moves?.length ?? 0;
 
         if (!userMove) {
           // Can't determine user's move — fall back to stop + resync
@@ -339,16 +342,23 @@ class EnginePoolManager {
           return;
         }
 
-        if (userMove === ps.ponderMove) {
+        if (incomingPly > ps.ponderPly && userMove === ps.ponderMove) {
           // ── Ponder HIT ─────────────────────────────────────────────────
           // The opponent played exactly the move we were pondering.
           // Stop the ponder search, then issue a timed go on the same position.
           console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
           this.stopPonderAndGo(session, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth);
-        } else {
+        } else if (incomingPly > ps.ponderPly) {
           // ── Ponder MISS ────────────────────────────────────────────────
           // Opponent played a different move — stop and resync.
           console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
+          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
+        } else {
+          // ── Ponder RESYNC ──────────────────────────────────────────────
+          // Same or fewer moves than when pondering started.
+          // Do not treat this as a HIT.
+          // Stop/resync safely.
+          console.log(`[Ponder ${id}] RESYNC — incomingPly=${incomingPly} <= ponderPly=${ps.ponderPly}`);
           this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
         }
         return;
@@ -360,7 +370,7 @@ class EnginePoolManager {
         session.process.stdin.write(`setoption name MultiPV value ${TC_MULTIPV}\n`);
       }
       this.sendPositionAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
-      session.ponderState = { phase: 'thinking', wtime, btime, winc, binc, depth };
+      session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
       return;
     }
 
@@ -401,6 +411,15 @@ class EnginePoolManager {
       session.process.stdin.write(`go depth ${targetDepth}\n`);
       session.startFen = startFen;
       session.uciMoves = data.moves ?? [];
+      session.ponderState = {
+        phase: 'thinking',
+        searchMode: 'analysis',
+        wtime: 0,
+        btime: 0,
+        winc: 0,
+        binc: 0,
+        depth: targetDepth,
+      };
       return;
     }
 
@@ -478,7 +497,7 @@ class EnginePoolManager {
     } else {
       // Not pondering — issue immediately
       this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
-      session.ponderState = { phase: 'thinking', wtime, btime, winc, binc, depth };
+      session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
     }
 
     // Update TC MultiPV
@@ -547,7 +566,7 @@ class EnginePoolManager {
     }
 
     session.process.stdin.write(goCmd);
-    session.ponderState = { phase: 'thinking', wtime, btime, winc, binc };
+    session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc };
     session.startFen = startFen;
     session.uciMoves = moves;
   }
