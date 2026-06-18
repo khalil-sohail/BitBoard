@@ -22,6 +22,7 @@ type PonderPhase =
       pendingWinc: number;
       pendingBinc: number;
       pendingDepth?: number;
+      pendingMultiPv: number;
     };
 
 interface EngineSession {
@@ -246,11 +247,12 @@ class EnginePoolManager {
         return;
       }
       console.log(`[Ponder ${id}] Stop-ack received — issuing real 'go' command`);
-      const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth,
+      const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMultiPv,
               baseFen, baseMoves } = ps;
 
       // Build the real position (opponent played pendingUserMove)
       const realMoves = [...baseMoves, pendingUserMove];
+      session.process.stdin?.write(`setoption name MultiPV value ${pendingMultiPv}\n`);
       this.sendPositionAndGo(session, baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth);
       return;
     }
@@ -287,6 +289,7 @@ class EnginePoolManager {
           pendingBtime: 0,
           pendingWinc: 0,
           pendingBinc: 0,
+          pendingMultiPv: 1,
         };
       } else {
         session.ponderState = { phase: 'idle' };
@@ -316,6 +319,7 @@ class EnginePoolManager {
       const winc:  number = data.winc  ?? 0;
       const binc:  number = data.binc  ?? 0;
       const depth: number | undefined = data.depth;
+      const targetMultiPv: number = data.multiPv ?? 1;
       const hasTC = wtime > 0 || btime > 0;
 
       // Update position shadow
@@ -347,28 +351,25 @@ class EnginePoolManager {
           // The opponent played exactly the move we were pondering.
           // Stop the ponder search, then issue a timed go on the same position.
           console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
-          this.stopPonderAndGo(session, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, targetMultiPv);
         } else if (incomingPly > ps.ponderPly) {
           // ── Ponder MISS ────────────────────────────────────────────────
           // Opponent played a different move — stop and resync.
           console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
-          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth, targetMultiPv);
         } else {
           // ── Ponder RESYNC ──────────────────────────────────────────────
           // Same or fewer moves than when pondering started.
           // Do not treat this as a HIT.
           // Stop/resync safely.
           console.log(`[Ponder ${id}] RESYNC — incomingPly=${incomingPly} <= ponderPly=${ps.ponderPly}`);
-          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth, targetMultiPv);
         }
         return;
       }
 
       // Not pondering — issue position + go directly.
-      if (hasTC) {
-        // Ensure MultiPV=1 for time-control games
-        session.process.stdin.write(`setoption name MultiPV value ${TC_MULTIPV}\n`);
-      }
+      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
       this.sendPositionAndGo(session, startFen, data.moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
       return;
@@ -394,9 +395,10 @@ class EnginePoolManager {
 
     // ── analyze (Analysis Mode deep search) ───────────────────────────────
     if (data.type === 'analyze') {
+      const targetMultiPv = data.multiPv ?? ANALYSIS_MULTIPV;
       this.stopPonderSilently(session);
       // Restore MultiPV for analysis
-      session.process.stdin.write(`setoption name MultiPV value ${ANALYSIS_MULTIPV}\n`);
+      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
       let startFen = session.startFen;
       if (!startFen || (data.moves && data.moves.length === 0)) {
         startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -473,6 +475,7 @@ class EnginePoolManager {
     winc: number,
     binc: number,
     depth?: number,
+    targetMultiPv: number = 1,
   ) {
     if (!session.process.stdin) return;
 
@@ -490,18 +493,17 @@ class EnginePoolManager {
         pendingWinc: winc,
         pendingBinc: binc,
         pendingDepth: depth,
+        pendingMultiPv: targetMultiPv,
         baseFen:   startFen,
         baseMoves: moves,
       };
       session.process.stdin.write('stop\n');
     } else {
       // Not pondering — issue immediately
+      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
       this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
     }
-
-    // Update TC MultiPV
-    session.process.stdin.write(`setoption name MultiPV value ${TC_MULTIPV}\n`);
   }
 
   /**
@@ -521,6 +523,7 @@ class EnginePoolManager {
         pendingBtime: 0,
         pendingWinc: 0,
         pendingBinc: 0,
+        pendingMultiPv: 1,
       };
       session.process.stdin.write('stop\n');
     } else if (ps.phase === 'thinking') {
@@ -554,12 +557,11 @@ class EnginePoolManager {
 
     const hasTC = wtime > 0 || btime > 0;
     let goCmd: string;
-    if (hasTC) {
-      goCmd = `go wtime ${wtime} btime ${btime} winc ${winc} binc ${binc}`;
-      if (depth !== undefined) {
-        goCmd += ` depth ${depth}`;
-      }
-      goCmd += '\n';
+    if (depth !== undefined) {
+      // Training Mode: ignore clock entirely, enforce strict depth
+      goCmd = `go depth ${depth}\n`;
+    } else if (hasTC) {
+      goCmd = `go wtime ${wtime} btime ${btime} winc ${winc} binc ${binc}\n`;
     } else {
       // Fallback: fixed movetime for difficulty-based games
       goCmd = 'go movetime 3000\n';

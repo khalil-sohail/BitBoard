@@ -17,6 +17,8 @@ export interface SendMoveOptions {
   difficulty?: string;
   /** Optional depth limit to cap the engine's search. */
   depth?: number;
+  /** Number of principal variations to calculate (1-3). */
+  multiPv?: number;
 }
 
 export function useEngine() {
@@ -24,7 +26,7 @@ export function useEngine() {
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const pendingAnalysisRef = useRef<{ fen: string; moves: string[]; depth?: number } | null>(null);
+  const pendingAnalysisRef = useRef<{ fen: string; moves: string[]; depth?: number; multiPv?: number } | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -85,7 +87,7 @@ export function useEngine() {
                 pendingAnalysisRef.current = null;
                 setStatus('analyzing');
                 setEngineInfo(null);
-                ws.current?.send(JSON.stringify({ type: 'analyze', fen: pending.fen, moves: pending.moves, depth: pending.depth }));
+                ws.current?.send(JSON.stringify({ type: 'analyze', fen: pending.fen, moves: pending.moves, depth: pending.depth, multiPv: pending.multiPv }));
               } else {
                 setStatus('idle');
               }
@@ -155,6 +157,7 @@ export function useEngine() {
         winc:       opts.winc       ?? 0,
         binc:       opts.binc       ?? 0,
         depth:      opts.depth,
+        multiPv:    opts.multiPv ?? 1,
         difficulty: opts.difficulty ?? 'standard',
       }));
     }
@@ -208,17 +211,17 @@ export function useEngine() {
     }
   }, []);
 
-  const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number) => {
+  const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number, multiPv?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const currentStatus = stateRef.current.status;
       if (currentStatus === 'thinking' || currentStatus === 'analyzing') {
-        pendingAnalysisRef.current = { fen, moves, depth };
+        pendingAnalysisRef.current = { fen, moves, depth, multiPv };
         ws.current.send(JSON.stringify({ type: 'stop' }));
       } else {
         setStatus('analyzing');
         setBestMove(null);
         setEngineInfo(null);
-        ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth }));
+        ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth, multiPv }));
       }
     }
   }, [setStatus]);

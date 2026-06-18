@@ -10,10 +10,12 @@ interface EngineToggleProps {
   currentVersion?: string;
   maxDepth: number;
   onDepthChange: (depth: number) => void;
+  multiPv: number;
+  onMultiPvChange: (lines: number) => void;
   gameMode: GameMode;
 }
 
-export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange, gameMode }: EngineToggleProps) {
+export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange, multiPv, onMultiPvChange, gameMode }: EngineToggleProps) {
   const { addToast } = useToast();
   const { setEngineOption } = useEngine();
   
@@ -91,11 +93,11 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
         {/* Book Settings */}
         <div className="flex flex-col gap-3">
           <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
-            Book Settings
+            Engine Settings
           </h3>
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-              Use Opening Book
+              Use Openings
             </label>
             <button
               onClick={handleToggleBook}
@@ -107,37 +109,53 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
         </div>
 
         {/* Search Settings */}
-        <div className={`flex flex-col gap-3 mt-1 transition-opacity duration-200 ${gameMode === 'fair' ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
-            Search Settings
-          </h3>
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-col gap-0.5">
+        <div
+          className={`flex flex-col gap-3 transition-opacity duration-200 ${
+            gameMode === 'fair' ? 'opacity-40 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <div className="flex flex-col gap-1">
+            {/* Max Depth Slider Controls */}
+            <div className="flex w-full items-center justify-between gap-3 mb-2">
               <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
                 Max Depth
               </label>
-              <p className="text-[10px] text-muted-foreground/70 leading-tight">
-                {gameMode === 'analysis' 
-                  ? "Engine searches until this depth is reached"
-                  : gameMode === 'training'
-                  ? "Engine will respect the clock — this depth acts as a ceiling only"
-                  : "Not applicable in this mode"}
-              </p>
-            </div>
-            <div className="flex items-center gap-4 w-full justify-between mt-1">
-              <input 
-                type="range" 
-                min="2" 
-                max="60" 
+              
+              <input
+                type="range"
+                min="2"
+                max="30"
                 step="1"
                 value={maxDepth}
                 onChange={handleDepthChange}
                 className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
               />
+              
               <div className="flex flex-col items-end min-w-[36px]">
-                <span className="text-sm font-bold text-accent leading-none">{maxDepth}</span>
-                <span className="text-[10px] font-semibold text-accent/60 uppercase tracking-widest mt-1">ply</span>
+                <span className="text-sm font-bold text-accent leading-none">
+                  {maxDepth}
+                </span>
+                <span className="text-[10px] font-semibold text-accent/60 uppercase tracking-widest mt-1">
+                  ply
+                </span>
               </div>
+            </div>
+
+            {/* MultiPV Line Selector Buttons */}
+            <div className="flex w-full items-center bg-background border border-white/5 rounded-lg p-1 mt-1">
+              {[1, 2, 3].map((val) => (
+                <button
+                  key={val}
+                  onClick={() => onMultiPvChange(val)}
+                  className={`flex-1 px-2 py-1.5 text-xs rounded-md shadow-sm font-semibold whitespace-nowrap transition-colors ${
+                    multiPv === val
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground'
+                  }`}
+                >
+                  {val} {val === 1 ? 'Line' : 'Lines'}
+                </button>
+              ))}
             </div>
           </div>
         </div>

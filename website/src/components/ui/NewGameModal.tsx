@@ -1,19 +1,22 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { DifficultyLevel, PlayerColor, TimeControl, TIME_CONTROLS } from '../../types/engine';
+import { DifficultyLevel, PlayerColor, TimeControl, TIME_CONTROLS, GameMode } from '../../types/engine';
 
 export interface NewGameConfig {
   playerColor: PlayerColor | 'random';
   difficulty: DifficultyLevel;
   timeControl: TimeControl;
+  maxDepth?: number;
 }
 
 interface NewGameModalProps {
   isOpen: boolean;
+  gameMode: GameMode;
   defaultDifficulty: DifficultyLevel;
   defaultPlayerColor: PlayerColor;
   defaultTimeControl?: TimeControl;
+  defaultMaxDepth?: number;
   onStart: (config: NewGameConfig) => void;
   onCancel: () => void;
 }
@@ -32,14 +35,17 @@ const DIFFICULTY_OPTIONS: { id: DifficultyLevel; label: string; sublabel: string
 
 export function NewGameModal({
   isOpen,
+  gameMode,
   defaultDifficulty,
   defaultPlayerColor,
   defaultTimeControl,
+  defaultMaxDepth,
   onStart,
   onCancel,
 }: NewGameModalProps) {
   const [playerColor, setPlayerColor] = useState<PlayerColor | 'random'>('random');
   const [difficulty, setDifficulty]   = useState<DifficultyLevel>(defaultDifficulty);
+  const [maxDepth, setMaxDepth]       = useState<number>(defaultMaxDepth ?? 30);
   const [timeControl, setTimeControl] = useState<TimeControl>(
     defaultTimeControl ?? TIME_CONTROLS[2] // default: 3+0
   );
@@ -50,11 +56,12 @@ export function NewGameModal({
       setPlayerColor(defaultPlayerColor);
       setDifficulty(defaultDifficulty);
       if (defaultTimeControl) setTimeControl(defaultTimeControl);
+      if (defaultMaxDepth !== undefined) setMaxDepth(defaultMaxDepth);
     }
-  }, [isOpen, defaultDifficulty, defaultPlayerColor, defaultTimeControl]);
+  }, [isOpen, defaultDifficulty, defaultPlayerColor, defaultTimeControl, defaultMaxDepth]);
 
   const handleStart = () => {
-    onStart({ playerColor, difficulty, timeControl });
+    onStart({ playerColor, difficulty, timeControl, maxDepth });
   };
 
   // Close on Escape / confirm on Enter
@@ -134,7 +141,29 @@ export function NewGameModal({
             </div>
           </div>
 
+          {/* Training Mode: Max Depth Slider */}
+          {gameMode === 'training' && (
+            <div>
+              <label className="text-[10px] font-semibold text-muted/70 uppercase tracking-widest block mb-2 flex justify-between">
+                <span>Max Depth</span>
+                <span className="text-primary">{maxDepth}</span>
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="30"
+                value={maxDepth}
+                onChange={(e) => setMaxDepth(Number(e.target.value))}
+                className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <p className="text-[9px] text-muted/50 mt-1.5 text-center">
+                Engine strictly evaluates to this depth and ignores the clock.
+              </p>
+            </div>
+          )}
+
           {/* Time Control */}
+          {gameMode !== 'training' && (
           <div>
             <label className="text-[10px] font-semibold text-muted/70 uppercase tracking-widest block mb-2">
               Time Control
@@ -164,9 +193,10 @@ export function NewGameModal({
               })}
             </div>
           </div>
+          )}
 
           {/* Engine Strength (only shown when no time control — avoids contradiction) */}
-          {!hasTC && (
+          {gameMode !== 'training' && !hasTC && (
             <div>
               <label className="text-[10px] font-semibold text-muted/70 uppercase tracking-widest block mb-2">
                 Engine Strength
@@ -198,7 +228,7 @@ export function NewGameModal({
               </p>
             </div>
           )}
-          {hasTC && (
+          {gameMode !== 'training' && hasTC && (
             <p className="text-[9px] text-muted/50 text-center -mt-2">
               Engine uses the full clock budget — strength is set by time.
             </p>

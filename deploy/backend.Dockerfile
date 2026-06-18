@@ -1,11 +1,16 @@
 # Builder Stage — compile the C++ engine
 FROM debian:bookworm-slim AS engine-builder
 
-RUN apt-get update && apt-get install -y build-essential make
+RUN apt-get update && apt-get install -y build-essential make g++
 
 WORKDIR /app/engine
 COPY engine/ ./
-RUN make -j$(nproc)
+
+# OVERRIDE CFLAGS: Remove -march=native and enforce -march=x86-64-v3 for safe cloud AVX2/BMI2 support
+RUN make -j$(nproc) CFLAGS="-Wall -Wextra -I./include -std=c++2b -O3 -march=x86-64-v3 -flto -DNDEBUG -funroll-loops -lpthread"
+
+# No override - use default Makefile flags
+# RUN make -j$(nproc)
 
 # Runner Stage
 FROM node:20-bookworm-slim

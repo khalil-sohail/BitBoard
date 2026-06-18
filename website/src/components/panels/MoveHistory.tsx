@@ -13,11 +13,16 @@ interface MoveHistoryProps {
 }
 
 export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHistoryProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to the latest move
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   }, [moves.length]);
 
   // Build lookup map: moveIndex → GradedMove
@@ -68,7 +73,7 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-1">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pr-1">
         {rows.length === 0 ? (
           <div className="h-full flex items-center justify-center text-muted text-sm italic">
             No moves yet
@@ -112,8 +117,6 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
             </tbody>
           </table>
         )}
-        {/* Anchor for auto-scroll */}
-        <div ref={bottomRef} />
       </div>
     </div>
   );

@@ -45,6 +45,7 @@ export default function Home() {
   // Default to false so the user can explore the UI before starting a game.
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
   const [maxDepth, setMaxDepth] = useState(30);
+  const [multiPv, setMultiPv] = useState(3);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -58,8 +59,14 @@ export default function Home() {
     };
   }, []);
 
-  // Whether a real time control is active (initialMs > 0)
-  const hasTC = timeControl.initialMs > 0;
+  // ── Derived mode flags ───────────────────────────────────────────────────
+  const isAnalysis = gameMode === 'analysis';
+  const isTraining = gameMode === 'training';
+  const isFairPlay = gameMode === 'fair';
+
+  // Whether a real time control is active
+  // Detach clock entirely from Training and Analysis modes
+  const hasTC = !isAnalysis && !isTraining && timeControl.initialMs > 0;
   const isGameActive = gameStatus === 'active';
 
   // ── Clock ─────────────────────────────────────────────────────────────────
@@ -81,11 +88,6 @@ export default function Home() {
   const analysisFenRef = useRef<string | null>(null);
 
   const engineColor: PlayerColor = orientation === 'w' ? 'b' : 'w';
-
-  // ── Derived mode flags ───────────────────────────────────────────────────
-  const isAnalysis = gameMode === 'analysis';
-  const isTraining = gameMode === 'training';
-  const isFairPlay = gameMode === 'fair';
 
   const engineAutoEnabled = !isAnalysis;
 
@@ -116,16 +118,18 @@ export default function Home() {
           winc:  timeControl.incMs,
           binc:  timeControl.incMs,
           depth: searchDepth,
+          multiPv: multiPv,
         });
       } else {
         sendMove(fen, uciHistory, {
           difficulty,
           depth: searchDepth,
+          multiPv: multiPv,
         });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, gameMode, isWaitingForStop]);
+  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -134,10 +138,10 @@ export default function Home() {
 
     // Immediately send the current position to the engine
     const timer = setTimeout(() => {
-      startAnalysis(fen, uciHistory, maxDepth);
+      startAnalysis(fen, uciHistory, maxDepth, multiPv);
     }, 100);
     return () => clearTimeout(timer);
-  }, [fen, uciHistory, gameMode, startAnalysis, effectiveGameOver, gameStatus, maxDepth]);
+  }, [fen, uciHistory, gameMode, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Training Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -145,11 +149,11 @@ export default function Home() {
     if (effectiveGameOver) return;
     if (turn !== engineColor) {
       const timer = setTimeout(() => {
-        startAnalysis(fen, uciHistory, maxDepth);
+        startAnalysis(fen, uciHistory, maxDepth, multiPv);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth]);
+  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Apply engine best move + clock management ────────────────────────────
   const latestEngineInfoRef = useRef(engineInfo);
@@ -233,22 +237,7 @@ export default function Home() {
     // Block moves if game not started or already over
     if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
 
-    if (gameMode === 'training') {
-      if (status === 'thinking') {
-        setIsWaitingForStop(true);
-        if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
-        stopTimeoutRef.current = setTimeout(() => {
-          setIsWaitingForStop((prev) => {
-            if (prev) return false;
-            return prev;
-          });
-          stopTimeoutRef.current = null;
-        }, 500);
-      } else if (bestMove) {
-        ignoreStaleBestMoveRef.current = true;
-      }
-      stopEngine();
-    }
+
 
     const result = makeMove(move);
 
@@ -283,7 +272,7 @@ export default function Home() {
       resetGrades();
       lastNormalizedEvalRef.current = null;
       if (gameMode === 'analysis') {
-        startAnalysis(fenStr, [], maxDepth);
+        startAnalysis(fenStr, [], maxDepth, multiPv);
       }
     }
   };
@@ -334,8 +323,12 @@ export default function Home() {
     clock.resetClock();
     newGame();
 
+    if (config.maxDepth !== undefined) {
+      setMaxDepth(config.maxDepth);
+    }
+
     // If the player chose Black, the engine moves first — start the engine's clock.
-    if (resolvedColor === 'b' && config.timeControl.initialMs > 0) {
+    if (resolvedColor === 'b' && config.timeControl.initialMs > 0 && hasTC) {
       // The engine-auto-trigger will fire once status=idle; delay is fine.
     }
   };
@@ -515,7 +508,7 @@ export default function Home() {
                   resetGrades();
                   lastNormalizedEvalRef.current = null;
                   if (gameMode === 'analysis') {
-                    startAnalysis(finalFen, [], maxDepth);
+                    startAnalysis(finalFen, [], maxDepth, multiPv);
                   }
                 }}
               />
@@ -526,6 +519,8 @@ export default function Home() {
                 currentVersion="Texel-Tuned HCE" 
                 maxDepth={maxDepth}
                 onDepthChange={setMaxDepth}
+                multiPv={multiPv}
+                onMultiPvChange={setMultiPv}
                 gameMode={gameMode}
               />
             )}
@@ -560,9 +555,11 @@ export default function Home() {
 
       <NewGameModal
         isOpen={isNewGameModalOpen}
+        gameMode={gameMode}
         defaultDifficulty={difficulty}
         defaultPlayerColor={orientation}
         defaultTimeControl={timeControl}
+        defaultMaxDepth={maxDepth}
         onStart={handleStartNewGame}
         onCancel={() => setIsNewGameModalOpen(false)}
       />
