@@ -7,10 +7,10 @@ WORKDIR /app/engine
 COPY engine/ ./
 
 # OVERRIDE CFLAGS: Remove -march=native and enforce -march=x86-64-v3 for safe cloud AVX2/BMI2 support
-RUN make -j$(nproc) CFLAGS="-Wall -Wextra -I./include -std=c++2b -O3 -march=x86-64-v3 -flto -DNDEBUG -funroll-loops -lpthread"
+# RUN make -j$(nproc) CFLAGS="-Wall -Wextra -I./include -std=c++2b -O3 -march=x86-64-v3 -flto -DNDEBUG -funroll-loops -lpthread"
 
 # No override - use default Makefile flags
-# RUN make -j$(nproc)
+RUN make -j$(nproc)
 
 # Runner Stage
 FROM node:20-bookworm-slim

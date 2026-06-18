@@ -44,7 +44,7 @@ export default function Home() {
   const [resignedBy, setResignedBy]     = useState<PlayerColor | null>(null);
   // Default to false so the user can explore the UI before starting a game.
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
-  const [maxDepth, setMaxDepth] = useState(30);
+  const [maxDepth, setMaxDepth] = useState(10);
   const [multiPv, setMultiPv] = useState(3);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const ignoreStaleBestMoveRef = useRef(false);
