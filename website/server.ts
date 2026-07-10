@@ -1,8 +1,11 @@
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
+import { loadEnvConfig } from '@next/env';
 import { WebSocketServer } from 'ws';
 import { enginePool } from './src/lib/engine-session';
+
+loadEnvConfig(process.cwd());
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || '0.0.0.0';
@@ -27,7 +30,7 @@ if (process.env.BACKEND_ONLY === 'true') {
     }
   });
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', (ws) => {
     const sessionId = Math.random().toString(36).substring(2, 15);
     enginePool.handleConnection(ws, sessionId);
   });
@@ -68,7 +71,7 @@ if (process.env.BACKEND_ONLY === 'true') {
       }
     });
 
-    wss.on('connection', (ws, req) => {
+    wss.on('connection', (ws) => {
       const sessionId = Math.random().toString(36).substring(2, 15);
       enginePool.handleConnection(ws, sessionId);
     });

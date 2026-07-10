@@ -11,21 +11,31 @@ OBJS = $(SRCS:.cpp=.o)
 TEST_OBJS = $(TEST_SRCS:.cpp=.o)
 TUNE_OBJS = $(TUNE_SRCS:.cpp=.o)
 
-CC = g++
+CXX ?= g++
 
-CFLAGS = -Wall -Wextra -I./include -std=c++2b -O3 -march=native -flto -DNDEBUG -funroll-loops -lpthread
-TEST_CFLAGS = -Wall -Wextra -I./include -std=c++2b -lpthread
-TUNE_CFLAGS = -Wall -Wextra -I./include -std=c++2b -O2 -DEVAL_TUNING_MODE -DNDEBUG -lpthread
+BASE_CXXFLAGS := -Wall -Wextra -I./include -std=c++2b
+OPT_FLAGS ?= -O3
+ARCH_FLAGS ?= -march=native
+RELEASE_FLAGS ?= -flto -DNDEBUG -funroll-loops
+TEST_OPT_FLAGS ?=
+TUNE_OPT_FLAGS ?= -O2
+TUNE_DEFS := -DEVAL_TUNING_MODE -DNDEBUG
+LDFLAGS ?=
+LDLIBS ?= -lpthread
+
+CXXFLAGS = $(BASE_CXXFLAGS) $(OPT_FLAGS) $(ARCH_FLAGS) $(RELEASE_FLAGS)
+TEST_CXXFLAGS = $(BASE_CXXFLAGS) $(TEST_OPT_FLAGS) $(ARCH_FLAGS)
+TUNE_CXXFLAGS = $(BASE_CXXFLAGS) $(TUNE_OPT_FLAGS) $(ARCH_FLAGS) $(TUNE_DEFS)
 
 RM = rm -rf
 
 all : $(NAME)
 
 $(NAME): $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $(NAME)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) $(LDLIBS) -o $(NAME)
 
 %.o: %.cpp
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean :
 	@$(RM) $(OBJS) $(TEST_OBJS) $(TUNE_OBJS)
@@ -39,11 +49,19 @@ test: $(TEST_NAME)
 	./$(TEST_NAME)
 
 $(TEST_NAME): $(TEST_OBJS)
-	$(CC) $(TEST_CFLAGS) $(TEST_OBJS) -o $(TEST_NAME)
+	$(CXX) $(TEST_CXXFLAGS) $(LDFLAGS) $(TEST_OBJS) $(LDLIBS) -o $(TEST_NAME)
 
 tune: $(TUNE_NAME)
 
 $(TUNE_NAME): $(TUNE_OBJS)
-	$(CC) $(TUNE_CFLAGS) $(TUNE_OBJS) -o $(TUNE_NAME)
+	$(CXX) $(TUNE_CXXFLAGS) $(LDFLAGS) $(TUNE_OBJS) $(LDLIBS) -o $(TUNE_NAME)
 
-.PHONY: all clean fclean re test tune
+print-config:
+	@echo "CXX=$(CXX)"
+	@echo "CXXFLAGS=$(CXXFLAGS)"
+	@echo "TEST_CXXFLAGS=$(TEST_CXXFLAGS)"
+	@echo "TUNE_CXXFLAGS=$(TUNE_CXXFLAGS)"
+	@echo "LDFLAGS=$(LDFLAGS)"
+	@echo "LDLIBS=$(LDLIBS)"
+
+.PHONY: all clean fclean re test tune print-config

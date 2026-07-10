@@ -1,24 +1,17 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-
-export function EvalBar({ evalScore, mate, turn, orientation = 'w' }: { evalScore: number, mate?: number, turn: 'w' | 'b', orientation?: 'w' | 'b' }) {
-  const [fillHeight, setFillHeight] = useState(50);
-  
-  useEffect(() => {
+export function EvalBar({ evalScore, mate, orientation = 'w' }: { evalScore: number, mate?: number, turn: 'w' | 'b', orientation?: 'w' | 'b' }) {
+  const fillHeight = (() => {
     if (mate !== undefined && mate !== 0) {
-       setFillHeight(mate > 0 ? 100 : 0);
-       return;
+      return mate > 0 ? 100 : 0;
     }
-    
+
     // Convert centipawns to pawns and cap at +/- 5.0
     const pawns = Math.max(-5, Math.min(5, evalScore / 100));
-    
+
     // Scale linear: 0 -> 50%, 5 -> 100%, -5 -> 0%
-    const percentage = 50 + (pawns / 5) * 50;
-    
-    setFillHeight(percentage);
-  }, [evalScore, mate]);
+    return 50 + (pawns / 5) * 50;
+  })();
 
   const displayHeight = orientation === 'w' ? fillHeight : 100 - fillHeight;
 

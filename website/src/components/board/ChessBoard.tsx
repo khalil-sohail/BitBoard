@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from 'react';
-import { Chessboard } from 'react-chessboard';
+import { useState, useMemo, type CSSProperties } from 'react';
+import { Chessboard, type Arrow, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { convertUciToArrow } from '../../lib/square-utils';
 import { PVLine } from '../../types/engine';
 
@@ -23,7 +23,7 @@ interface BoardProps {
 
 export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', checkSquare, lastMove }: BoardProps) {
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
-  const [rightClickedSquares, setRightClickedSquares] = useState<any>({});
+  const [rightClickedSquares, setRightClickedSquares] = useState<Record<string, CSSProperties>>({});
 
   // Draw custom arrows for top 3 PVs
   const customArrows = useMemo(() => {
@@ -35,7 +35,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
        'rgba(234, 179, 8, 0.8)'   // MultiPV 3: Yellow/Orange
      ];
      
-     const arrows: any[] = [];
+     const arrows: Arrow[] = [];
      for (let i = 0; i < Math.min(pvs.length, 3); i++) {
         const pvLine = pvs[i].pv;
         if (pvLine && pvLine.length > 0) {
@@ -53,7 +53,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
      return arrows;
   }, [pvs]);
 
-  function onSquareClick({ square }: { square: string }) {
+  function onSquareClick({ square }: SquareHandlerArgs) {
     setRightClickedSquares({});
 
     // From square
@@ -77,17 +77,22 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
     }
   }
 
-  function onSquareRightClick({ square }: { square: string }) {
-    setRightClickedSquares((prev: any) => ({
-      ...prev,
-      [square]:
-        prev[square]?.backgroundColor === RCLICK_BG
-          ? undefined
-          : { backgroundColor: RCLICK_BG },
-    }));
+  function onSquareRightClick({ square }: SquareHandlerArgs) {
+    setRightClickedSquares((prev) => {
+      if (prev[square]?.backgroundColor === RCLICK_BG) {
+        const rest = { ...prev };
+        delete rest[square];
+        return rest;
+      }
+
+      return {
+        ...prev,
+        [square]: { backgroundColor: RCLICK_BG },
+      };
+    });
   }
 
-  function onDrop({ sourceSquare, targetSquare, piece }: { sourceSquare: string, targetSquare: string | null, piece: any }) {
+  function onDrop({ sourceSquare, targetSquare, piece }: PieceDropHandlerArgs) {
     if (!targetSquare) return false;
     
     const move = {

@@ -35,6 +35,14 @@ const DIFFICULTY_OPTIONS: { id: DifficultyLevel; label: string; sublabel: string
 
 export function NewGameModal({
   isOpen,
+  ...props
+}: NewGameModalProps) {
+  if (!isOpen) return null;
+
+  return <NewGameModalContent {...props} />;
+}
+
+function NewGameModalContent({
   gameMode,
   defaultDifficulty,
   defaultPlayerColor,
@@ -42,42 +50,28 @@ export function NewGameModal({
   defaultMaxDepth,
   onStart,
   onCancel,
-}: NewGameModalProps) {
-  const [playerColor, setPlayerColor] = useState<PlayerColor | 'random'>('random');
+}: Omit<NewGameModalProps, 'isOpen'>) {
+  const [playerColor, setPlayerColor] = useState<PlayerColor | 'random'>(defaultPlayerColor);
   const [difficulty, setDifficulty]   = useState<DifficultyLevel>(defaultDifficulty);
   const [maxDepth, setMaxDepth]       = useState<number>(defaultMaxDepth ?? 30);
   const [timeControl, setTimeControl] = useState<TimeControl>(
     defaultTimeControl ?? TIME_CONTROLS[2] // default: 3+0
   );
 
-  // Re-sync defaults whenever the modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setPlayerColor(defaultPlayerColor);
-      setDifficulty(defaultDifficulty);
-      if (defaultTimeControl) setTimeControl(defaultTimeControl);
-      if (defaultMaxDepth !== undefined) setMaxDepth(defaultMaxDepth);
-    }
-  }, [isOpen, defaultDifficulty, defaultPlayerColor, defaultTimeControl, defaultMaxDepth]);
-
-  const handleStart = () => {
+  const handleStart = useCallback(() => {
     onStart({ playerColor, difficulty, timeControl, maxDepth });
-  };
+  }, [onStart, playerColor, difficulty, timeControl, maxDepth]);
 
   // Close on Escape / confirm on Enter
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') onCancel();
     if (e.key === 'Enter')  handleStart();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onCancel, playerColor, difficulty, timeControl]);
+  }, [onCancel, handleStart]);
 
   useEffect(() => {
-    if (!isOpen) return;
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleKeyDown]);
-
-  if (!isOpen) return null;
+  }, [handleKeyDown]);
 
   const hasTC = timeControl.initialMs > 0;
 

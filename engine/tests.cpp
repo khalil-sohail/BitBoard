@@ -44,6 +44,18 @@ std::string moveKey(const Move& move) {
     return key;
 }
 
+bool sameMove(const Move& lhs, const Move& rhs) {
+    return lhs.from == rhs.from &&
+           lhs.to == rhs.to &&
+           lhs.promotion == rhs.promotion;
+}
+
+bool containsMove(const std::vector<Move>& moves, const Move& target) {
+    return std::any_of(moves.begin(), moves.end(), [&](const Move& move) {
+        return sameMove(move, target);
+    });
+}
+
 std::string boardSignature(const Board& board) {
     std::vector<Move> legal = board.generateLegalMoves();
     std::vector<std::string> keys;
@@ -200,7 +212,7 @@ void test_search_tactics() {
         applyMustSucceed(board, "Qh5");
         applyMustSucceed(board, "Nf6");
 
-        const Move best = findBestMove(board, 3, 30000);
+        const Move best = findBestMoveCompat(board, 3, 30000);
         const int expectedFrom = Board::squareFromString("h5");
         const int expectedTo = Board::squareFromString("f7");
 
@@ -217,7 +229,7 @@ void test_search_tactics() {
         applyMustSucceed(board, "Nf3");
         applyMustSucceed(board, "Qh4");
 
-        const Move best = findBestMove(board, 3, 30000);
+        const Move best = findBestMoveCompat(board, 3, 30000);
         const int expectedFrom = Board::squareFromString("f3");
         const int expectedTo = Board::squareFromString("h4");
 
@@ -316,7 +328,7 @@ void test_mate_in_three() {
         applyMustSucceed(board, mv);
     }
 
-    const Move best = findBestMove(board, 5, 30000);
+    const Move best = findBestMoveCompat(board, 5, 30000);
     const int expectedFrom = Board::squareFromString("h5");
     const int expectedTo = Board::squareFromString("f7");
 
@@ -340,7 +352,7 @@ void test_quiescence_horizon_effect() {
         applyMustSucceed(board, mv);
     }
 
-    const Move best = findBestMove(board, 3, 30000);
+    const Move best = findBestMoveCompat(board, 3, 30000);
     require(!(best.from == Board::squareFromString("c4") && best.to == Board::squareFromString("d5")),
             "Engine failed: It fell for the c4d5 horizon-effect blunder.");
 }
@@ -358,7 +370,7 @@ void test_quiescence_horizon_effect() {
 //         applyMustSucceed(board, mv);
 //     }
 
-//     const Move best = findBestMove(board, 5);
+//     const Move best = findBestMoveCompat(board, 5);
 //     const int expectedFrom = Board::squareFromString("a1");
 //     const int expectedTo = Board::squareFromString("a1");
 
@@ -380,7 +392,7 @@ void test_nmp_zugzwang_safety() {
     }
 
     // Run a depth 4 search (deep enough to trigger NMP, shallow enough to run fast)
-    const Move best = findBestMove(board, 4, 30000);
+    const Move best = findBestMoveCompat(board, 4, 30000);
 
     // We just want to assert that the search completed and returned a valid move,
     // proving NMP didn't corrupt the search tree or return a null move.
@@ -401,13 +413,20 @@ void test_mate_distance_scoring() {
         require(board.applyMove(*parsed.move), "Expected move to apply: '" + moveText + "'");
     }
 
-    Move bestMove = findBestMove(board, 4, 2000);
+    Move bestMove = findBestMoveCompat(board, 4, 2000);
 
-    int expectedFrom = Board::squareFromString("h5");
-    int expectedTo = Board::squareFromString("f7");
+    const bool isQueenMate = bestMove.from == Board::squareFromString("h5") &&
+                             bestMove.to == Board::squareFromString("f7");
+    const bool isBishopMate = bestMove.from == Board::squareFromString("c4") &&
+                              bestMove.to == Board::squareFromString("f7");
 
-    require(bestMove.from == expectedFrom && bestMove.to == expectedTo,
-            "Engine failed to find fastest mate! Mate Distance bounds might be pruning the winning line.");
+    require(isQueenMate || isBishopMate,
+            "Engine failed to find a known fastest mate! Expected h5f7 or c4f7, got " +
+            moveKey(bestMove));
+
+    require(board.applyMove(bestMove), "Expected fastest mate move to apply: " + moveKey(bestMove));
+    require(board.inCheck(board.sideToMove()) && board.generateLegalMoves().empty(),
+            "Fastest mate move did not leave the opponent checkmated: " + moveKey(bestMove));
 }
 
 void test_quiescence_counters() {
@@ -422,6 +441,65 @@ void test_quiescence_counters() {
 
     assert(qNodes > 0 && "Quiescence search failed to evaluate any nodes!");
     assert(deltaPruneSkips > 0 && "Delta pruning failed to skip any bad captures!");
+}
+
+void test_find_best_move_pair_contract() {
+    Board board;
+    applyMustSucceed(board, "e4");
+    applyMustSucceed(board, "e5");
+    applyMustSucceed(board, "Bc4");
+    applyMustSucceed(board, "Nc6");
+    applyMustSucceed(board, "Qh5");
+    applyMustSucceed(board, "Nf6");
+
+    const auto [bestMove, ponderMove] = findBestMove(board, 3, 30000);
+    const int expectedFrom = Board::squareFromString("h5");
+    const int expectedTo = Board::squareFromString("f7");
+
+    require(bestMove.from == expectedFrom && bestMove.to == expectedTo,
+            "findBestMove pair contract failed: expected best h5f7, got " +
+            Board::squareToString(bestMove.from) + Board::squareToString(bestMove.to));
+    require(ponderMove.from == -1,
+            "Expected no ponder move after forced checkmate, got " + moveKey(ponderMove));
+}
+
+void test_find_best_move_compat_matches_pair_best() {
+    Board pairBoard;
+    applyMustSucceed(pairBoard, "e4");
+    applyMustSucceed(pairBoard, "e5");
+    applyMustSucceed(pairBoard, "Nf3");
+    applyMustSucceed(pairBoard, "Qh4");
+
+    Board compatBoard;
+    applyMustSucceed(compatBoard, "e4");
+    applyMustSucceed(compatBoard, "e5");
+    applyMustSucceed(compatBoard, "Nf3");
+    applyMustSucceed(compatBoard, "Qh4");
+
+    const auto [pairBest, ignorePonder] = findBestMove(pairBoard, 3, 30000);
+    const Move compatBest = findBestMoveCompat(compatBoard, 3, 30000);
+    (void)ignorePonder;
+
+    require(sameMove(pairBest, compatBest),
+            "findBestMoveCompat returned " + moveKey(compatBest) +
+            " but findBestMove returned " + moveKey(pairBest));
+}
+
+void test_find_best_move_ponder_is_legal_when_available() {
+    Board board;
+
+    const auto [bestMove, ponderMove] = findBestMove(board, 4, 30000);
+    require(bestMove.from >= 0, "Expected start-position search to return a best move");
+    require(ponderMove.from >= 0, "Expected start-position depth-4 search to return a ponder move");
+
+    require(containsMove(board.generateLegalMoves(), bestMove),
+            "Best move from start position is not legal: " + moveKey(bestMove));
+
+    board.makeMove(bestMove);
+    require(containsMove(board.generateLegalMoves(), ponderMove),
+            "Ponder move is not legal after best move " + moveKey(bestMove) +
+            ": " + moveKey(ponderMove));
+    require(board.undoMove(), "undoMove failed after ponder legality check");
 }
 
 } // namespace
@@ -448,6 +526,9 @@ int main() {
         {"NMP zugzwang safety", test_nmp_zugzwang_safety},
         {"Mate distance scoring", test_mate_distance_scoring},
         {"Quiescence counters", test_quiescence_counters},
+        {"findBestMove pair contract", test_find_best_move_pair_contract},
+        {"findBestMoveCompat matches pair best", test_find_best_move_compat_matches_pair_best},
+        {"findBestMove ponder legality", test_find_best_move_ponder_is_legal_when_available},
     };
 
     int passed = 0;

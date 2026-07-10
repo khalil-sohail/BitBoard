@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import type { Chess } from 'chess.js';
 import { PlayerColor } from '../types/engine';
 
 export interface ClockState {
@@ -17,7 +18,7 @@ export interface UseChessClockReturn extends ClockState {
   /** Add the increment to the given side's remaining time. */
   applyIncrement: (side: PlayerColor) => void;
   /** Reset both clocks to initial values and stop. */
-  resetClock: () => void;
+  resetClock: (config?: ResetClockConfig) => void;
 }
 
 interface ClockConfig {
@@ -28,6 +29,11 @@ interface ClockConfig {
   onTimeout?: (color: PlayerColor) => void;
 }
 
+interface ResetClockConfig {
+  initialWhiteMs: number;
+  initialBlackMs: number;
+}
+
 const TICK_MS = 100; // update interval
 
 export function useChessClock({
@@ -36,10 +42,9 @@ export function useChessClock({
   whiteIncMs,
   blackIncMs,
   onTimeout,
-}: ClockConfig, game?: any): UseChessClockReturn {
+}: ClockConfig, game?: Pick<Chess, 'turn'>): UseChessClockReturn {
   const [whiteMs, setWhiteMs] = useState(initialWhiteMs);
   const gameRef = useRef(game);
-  gameRef.current = game;
   const [blackMs, setBlackMs] = useState(initialBlackMs);
   const [activeSide, setActiveSide] = useState<PlayerColor | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -50,11 +55,20 @@ export function useChessClock({
   const whiteMsRef     = useRef(initialWhiteMs);
   const blackMsRef     = useRef(initialBlackMs);
   const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastTickRef    = useRef<number>(Date.now());
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTickRef    = useRef<number>(0);
 
-  // Keep refs in sync with state
-  whiteMsRef.current = whiteMs;
-  blackMsRef.current = blackMs;
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
+  useEffect(() => {
+    whiteMsRef.current = whiteMs;
+  }, [whiteMs]);
+
+  useEffect(() => {
+    blackMsRef.current = blackMs;
+  }, [blackMs]);
 
   const clearTick = useCallback(() => {
     if (intervalRef.current !== null) {
@@ -79,28 +93,41 @@ export function useChessClock({
       lastTickRef.current = now;
 
       if (activeSideRef.current === 'w') {
-        const newMs = Math.max(0, whiteMsRef.current - elapsed);
+        const previousMs = whiteMsRef.current;
+        const newMs = Math.max(0, previousMs - elapsed);
+        whiteMsRef.current = newMs;
         setWhiteMs(newMs);
-        if (newMs <= 0 && whiteMsRef.current > 0) {
-          stopClock();
+        if (newMs <= 0 && previousMs > 0) {
+          clearTick();
+          activeSideRef.current = null;
+          setActiveSide(null);
+          setIsRunning(false);
           onTimeout?.('w');
         }
       } else if (activeSideRef.current === 'b') {
-        const newMs = Math.max(0, blackMsRef.current - elapsed);
+        const previousMs = blackMsRef.current;
+        const newMs = Math.max(0, previousMs - elapsed);
+        blackMsRef.current = newMs;
         setBlackMs(newMs);
-        if (newMs <= 0 && blackMsRef.current > 0) {
-          stopClock();
+        if (newMs <= 0 && previousMs > 0) {
+          clearTick();
+          activeSideRef.current = null;
+          setActiveSide(null);
+          setIsRunning(false);
           onTimeout?.('b');
         }
       }
     }, TICK_MS);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearTick, stopClock, onTimeout]);
+  }, [clearTick, onTimeout]);
 
   const startClock = useCallback((side: PlayerColor) => {
     if (gameRef.current && side !== gameRef.current.turn()) {
       if (process.env.NODE_ENV !== 'production') {
-        setTimeout(() => {
+        if (warningTimeoutRef.current !== null) {
+          clearTimeout(warningTimeoutRef.current);
+        }
+        warningTimeoutRef.current = setTimeout(() => {
+          warningTimeoutRef.current = null;
           if (gameRef.current && side !== gameRef.current.turn()) {
             console.warn(`[Clock Sync Warning] activeSide is ${side} but turn is ${gameRef.current.turn()}`);
           }
@@ -116,32 +143,43 @@ export function useChessClock({
   const applyIncrement = useCallback((side: PlayerColor) => {
     if (side === 'w') {
       const inc = whiteIncMs;
-      setWhiteMs(prev => prev + inc);
+      setWhiteMs(prev => {
+        const next = prev + inc;
+        whiteMsRef.current = next;
+        return next;
+      });
     } else {
       const inc = blackIncMs;
-      setBlackMs(prev => prev + inc);
+      setBlackMs(prev => {
+        const next = prev + inc;
+        blackMsRef.current = next;
+        return next;
+      });
     }
   }, [whiteIncMs, blackIncMs]);
 
-  const resetClock = useCallback(() => {
+  const resetClock = useCallback((config?: ResetClockConfig) => {
+    const nextWhiteMs = config?.initialWhiteMs ?? initialWhiteMs;
+    const nextBlackMs = config?.initialBlackMs ?? initialBlackMs;
+
     clearTick();
     activeSideRef.current = null;
     setActiveSide(null);
     setIsRunning(false);
-    setWhiteMs(initialWhiteMs);
-    setBlackMs(initialBlackMs);
-    whiteMsRef.current = initialWhiteMs;
-    blackMsRef.current = initialBlackMs;
+    setWhiteMs(nextWhiteMs);
+    setBlackMs(nextBlackMs);
+    whiteMsRef.current = nextWhiteMs;
+    blackMsRef.current = nextBlackMs;
   }, [clearTick, initialWhiteMs, initialBlackMs]);
 
-  // Reinitialise when the time control config changes (new game with different TC)
-  useEffect(() => {
-    resetClock();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialWhiteMs, initialBlackMs, whiteIncMs, blackIncMs]);
-
   // Cleanup on unmount
-  useEffect(() => () => clearTick(), [clearTick]);
+  useEffect(() => () => {
+    clearTick();
+    if (warningTimeoutRef.current !== null) {
+      clearTimeout(warningTimeoutRef.current);
+      warningTimeoutRef.current = null;
+    }
+  }, [clearTick]);
 
   return {
     whiteMs,

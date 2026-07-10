@@ -1,4 +1,3 @@
-import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface EvalGraphProps {
@@ -42,7 +41,7 @@ export function EvalGraph({ data }: EvalGraphProps) {
             contentStyle={{ backgroundColor: 'rgba(20,20,20,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', fontSize: '11px', padding: '4px 8px' }}
             itemStyle={{ color: '#e5e7eb', fontWeight: 600 }}
             labelStyle={{ display: 'none' }}
-            formatter={(val: any) => {
+            formatter={(val: number | string | readonly (number | string)[] | undefined) => {
               const numVal = Number(val);
               if (isNaN(numVal)) return ['0.00', 'Eval'];
               const sign = numVal > 0 ? '+' : '';

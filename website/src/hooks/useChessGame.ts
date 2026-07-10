@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Chess, Move } from 'chess.js';
 import { PlayerColor } from '../types/engine';
 
@@ -13,17 +13,34 @@ export function useChessGame() {
   const checkAudioRef = useRef<HTMLAudioElement | null>(null);
   const endAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Initialize audio
-  if (typeof window !== 'undefined' && !moveAudioRef.current) {
-    try {
-        moveAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3');
-        captureAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/capture.mp3');
-        checkAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-check.mp3');
-        endAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/game-end.mp3');
-    } catch(e) {}
-  }
+  useEffect(() => {
+    const audioRefs = [
+      moveAudioRef,
+      captureAudioRef,
+      checkAudioRef,
+      endAudioRef,
+    ];
 
-  const playSound = (type: 'move' | 'capture' | 'check' | 'end') => {
+    try {
+      moveAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3');
+      captureAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/capture.mp3');
+      checkAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-check.mp3');
+      endAudioRef.current = new Audio('https://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/game-end.mp3');
+    } catch {
+      audioRefs.forEach(ref => {
+        ref.current = null;
+      });
+    }
+
+    return () => {
+      audioRefs.forEach(ref => {
+        ref.current?.pause();
+        ref.current = null;
+      });
+    };
+  }, []);
+
+  const playSound = useCallback((type: 'move' | 'capture' | 'check' | 'end') => {
     try {
         let audio: HTMLAudioElement | null = null;
         if (type === 'end') audio = endAudioRef.current;
@@ -33,10 +50,10 @@ export function useChessGame() {
 
         if (audio) {
             audio.currentTime = 0;
-            audio.play().catch(e=>e);
+            void audio.play().catch(() => {});
         }
-    } catch(e) {}
-  };
+    } catch {}
+  }, []);
 
   const makeMove = useCallback((move: { from: string; to: string; promotion?: string }) => {
     try {
@@ -59,11 +76,11 @@ export function useChessGame() {
 
         return true;
       }
-    } catch (e) {
+    } catch {
       return false;
     }
     return false;
-  }, [game]);
+  }, [game, playSound]);
 
   const resetGame = useCallback(() => {
     setGame(new Chess());

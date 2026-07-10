@@ -47,6 +47,7 @@ export default function Home() {
   const [maxDepth, setMaxDepth] = useState(10);
   const [multiPv, setMultiPv] = useState(3);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
+  const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -62,7 +63,6 @@ export default function Home() {
   // ── Derived mode flags ───────────────────────────────────────────────────
   const isAnalysis = gameMode === 'analysis';
   const isTraining = gameMode === 'training';
-  const isFairPlay = gameMode === 'fair';
 
   // Whether a real time control is active
   // Detach clock entirely from Training and Analysis modes
@@ -171,12 +171,16 @@ export default function Home() {
         return;
       }
       if (isWaitingForStop) {
-        setIsWaitingForStop(false);
         if (stopTimeoutRef.current) {
           clearTimeout(stopTimeoutRef.current);
           stopTimeoutRef.current = null;
         }
-        return;
+        queueMicrotask(() => {
+          if (isMounted) {
+            setIsWaitingForStop(false);
+          }
+        });
+        return () => { isMounted = false; };
       }
 
       queueMicrotask(() => {
@@ -320,7 +324,10 @@ export default function Home() {
     resetGrades();
     lastNormalizedEvalRef.current = null;
 
-    clock.resetClock();
+    clock.resetClock({
+      initialWhiteMs: config.timeControl.initialMs,
+      initialBlackMs: config.timeControl.initialMs,
+    });
     newGame();
 
     if (config.maxDepth !== undefined) {
@@ -375,8 +382,6 @@ export default function Home() {
     from: moveHistory[moveHistory.length - 1].from,
     to:   moveHistory[moveHistory.length - 1].to,
   } : null;
-
-  const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
 
   // ── Game over result string ───────────────────────────────────────────────
   const gameOverMessage = (() => {
