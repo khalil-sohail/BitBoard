@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Chess } from "chess.js";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ChessBoardComponent } from "@/components/board/ChessBoard";
@@ -17,13 +18,23 @@ import { NewGameModal, NewGameConfig } from "@/components/ui/NewGameModal";
 import { useEngine } from "@/hooks/useEngine";
 import { useChessGame } from "@/hooks/useChessGame";
 import { useChessClock } from "@/hooks/useChessClock";
-import { useEvalHistory } from "@/hooks/useEvalHistory";
 import { useMoveReview } from "@/hooks/useMoveReview";
 import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
+import { NormalizedEvaluation, gradeMove, normalizeEngineInfo } from "@/lib/engine-evaluation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type GameStatus = 'idle' | 'active' | 'completed';
+
+interface PendingMoveReview {
+  reviewId: number;
+  moveIndex: number;
+  resultFen: string;
+  playerColor: PlayerColor;
+  legalMoveCount: number;
+  bestEvaluation: NormalizedEvaluation | null;
+  isBook: boolean;
+}
 
 // Default time control: 3+0
 const DEFAULT_TC = TIME_CONTROLS[2];
@@ -33,8 +44,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 export default function Home() {
   const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
-  const { addEvalPoint, resetEvalHistory } = useEvalHistory();
-  const { grades, evalGraphData, recordEval, resetGrades } = useMoveReview();
+  const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
   const [orientation, setOrientation]   = useState<PlayerColor>('w');
   const [difficulty, setDifficulty]     = useState<DifficultyLevel>('standard');
@@ -84,8 +94,9 @@ export default function Home() {
     onTimeout:      handleTimeout,
   }, game);
 
-  const lastNormalizedEvalRef = useRef<number | null>(null);
   const analysisFenRef = useRef<string | null>(null);
+  const nextReviewIdRef = useRef(1);
+  const pendingMoveReviewRef = useRef<PendingMoveReview | null>(null);
 
   const engineColor: PlayerColor = orientation === 'w' ? 'b' : 'w';
 
@@ -156,8 +167,16 @@ export default function Home() {
   }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Apply engine best move + clock management ────────────────────────────
-  const latestEngineInfoRef = useRef(engineInfo);
-  useEffect(() => { latestEngineInfoRef.current = engineInfo; }, [engineInfo]);
+  const normalizedInfo = useMemo(() => normalizeEngineInfo(engineInfo), [engineInfo]);
+  const latestEngineInfoRef = useRef(normalizedInfo);
+  useEffect(() => { latestEngineInfoRef.current = normalizedInfo; }, [normalizedInfo]);
+
+  useEffect(() => {
+    const evaluation = normalizedInfo?.pvs?.[0]?.evaluation ?? null;
+    if (evaluation && normalizedInfo?.rootFen === fen) {
+      recordPositionEval(evaluation, moveHistory.length);
+    }
+  }, [fen, moveHistory.length, normalizedInfo, recordPositionEval]);
 
   useEffect(() => {
     if (gameStatus === 'completed') return;
@@ -202,18 +221,27 @@ export default function Home() {
           }
 
           const info = latestEngineInfoRef.current;
-          if (info?.pvs && info.pvs.length > 0) {
-            const topPv      = info.pvs[0];
-            const scoreToLog = engineColor === 'b' ? -topPv.score : topPv.score;
-            addEvalPoint(moveHistory.length + 1, scoreToLog);
-            recordEval(
-              scoreToLog,
-              moveHistory.length,
-              engineColor,
-              !!(topPv.mate !== undefined && lastNormalizedEvalRef.current !== null),
-              !!(topPv.mate !== undefined),
-            );
-            lastNormalizedEvalRef.current = scoreToLog;
+          const pendingReview = pendingMoveReviewRef.current;
+          const rawResultEvaluation = info?.pvs?.[0]?.evaluation ?? null;
+          if (pendingReview && info?.rootFen === pendingReview.resultFen) {
+            const resultLooksSyntheticBook =
+              pendingReview.moveIndex < 10 &&
+              info.depth === 1 &&
+              rawResultEvaluation?.kind === 'centipawn' &&
+              rawResultEvaluation.value === 0;
+            const resultEvaluation = resultLooksSyntheticBook ? null : rawResultEvaluation;
+            const review = gradeMove({
+              best: pendingReview.bestEvaluation,
+              played: resultEvaluation,
+              playerColor: pendingReview.playerColor,
+              legalMoveCount: pendingReview.legalMoveCount,
+              isBook: pendingReview.isBook,
+            });
+            if (review) {
+              setMoveGrade(pendingReview.moveIndex, review.grade, review.loss);
+            }
+            recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
+            pendingMoveReviewRef.current = null;
           }
         }
       });
@@ -221,8 +249,8 @@ export default function Home() {
 
     return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bestMove, turn, makeMove, addEvalPoint, moveHistory.length,
-      recordEval, engineColor, engineAutoEnabled, isGameActive, gameStatus]);
+  }, [bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
+      setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
@@ -241,13 +269,44 @@ export default function Home() {
     // Block moves if game not started or already over
     if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
 
-
+    const moveIndex = moveHistory.length;
+    const playerColor = turn;
+    const rootInfo = latestEngineInfoRef.current?.rootFen === fen
+      ? latestEngineInfoRef.current
+      : null;
+    const bestPv = rootInfo?.pvs?.[0];
+    const rootBestMove = bestPv?.pv?.[0];
+    const rootEvaluation = bestPv?.evaluation ?? null;
+    const legalMoveCount = game.moves({ verbose: true }).length;
+    let resultFen: string | null = null;
+    try {
+      const preview = new Chess(fen);
+      const applied = preview.move(move);
+      if (applied) resultFen = preview.fen();
+    } catch {
+      resultFen = null;
+    }
 
     const result = makeMove(move);
 
     if (result) {
-      if (lastNormalizedEvalRef.current !== null) {
-        recordEval(lastNormalizedEvalRef.current, moveHistory.length, turn);
+      if (gameMode === 'training' && resultFen) {
+        const uciMove = `${move.from}${move.to}${move.promotion ?? ''}`;
+        const isLikelyBook =
+          moveIndex < 10 &&
+          rootInfo?.depth === 1 &&
+          rootEvaluation?.kind === 'centipawn' &&
+          rootEvaluation.value === 0 &&
+          rootBestMove === uciMove;
+        pendingMoveReviewRef.current = {
+          reviewId: nextReviewIdRef.current++,
+          moveIndex,
+          resultFen,
+          playerColor,
+          legalMoveCount,
+          bestEvaluation: rootEvaluation,
+          isBook: isLikelyBook,
+        };
       }
       if (hasTC && !effectiveGameOver) {
         clock.stopClock();
@@ -272,9 +331,8 @@ export default function Home() {
     const ok = loadFen(fenStr);
     if (ok) {
       analysisFenRef.current = fenStr;
-      resetEvalHistory();
       resetGrades();
-      lastNormalizedEvalRef.current = null;
+      pendingMoveReviewRef.current = null;
       if (gameMode === 'analysis') {
         startAnalysis(fenStr, [], maxDepth, multiPv);
       }
@@ -284,9 +342,8 @@ export default function Home() {
   const handleFenReset = () => {
     analysisFenRef.current = null;
     resetGame();
-    resetEvalHistory();
     resetGrades();
-    lastNormalizedEvalRef.current = null;
+    pendingMoveReviewRef.current = null;
     newGame();
   };
 
@@ -295,9 +352,8 @@ export default function Home() {
     if (isAnalysis) {
       analysisFenRef.current = null;
       resetGame();
-      resetEvalHistory();
       resetGrades();
-      lastNormalizedEvalRef.current = null;
+      pendingMoveReviewRef.current = null;
     } else {
       setIsNewGameModalOpen(true);
     }
@@ -320,9 +376,8 @@ export default function Home() {
 
     analysisFenRef.current = null;
     resetGame();
-    resetEvalHistory();
     resetGrades();
-    lastNormalizedEvalRef.current = null;
+    pendingMoveReviewRef.current = null;
 
     clock.resetClock({
       initialWhiteMs: config.timeControl.initialMs,
@@ -343,6 +398,8 @@ export default function Home() {
   // ── Mode change ──────────────────────────────────────────────────────────
   const handleModeChange = (newMode: GameMode) => {
     stopEngine();
+    pendingMoveReviewRef.current = null;
+    resetGrades();
     setGameMode(newMode);
     setGameStatus('idle');
     clock.stopClock();
@@ -350,19 +407,6 @@ export default function Home() {
       handleNewGame();
     }
   };
-
-  // ── Normalized eval ──────────────────────────────────────────────────────
-  const normalizedInfo = engineInfo ? {
-    ...engineInfo,
-    pvs: engineInfo.pvs.map(p => {
-      const p2 = { ...p };
-      if (engineColor === 'b') {
-        if (p2.score !== undefined) p2.score = -p2.score;
-        if (p2.mate  !== undefined) p2.mate  = -p2.mate;
-      }
-      return p2;
-    })
-  } : null;
 
   // ── Check square ─────────────────────────────────────────────────────────
   let checkSquare: string | null = null;
@@ -411,9 +455,7 @@ export default function Home() {
 
             {showEvalBar && (
               <EvalBar
-                evalScore={normalizedInfo?.pvs?.[0]?.score ?? 0}
-                mate={normalizedInfo?.pvs?.[0]?.mate}
-                turn={turn}
+                evaluation={normalizedInfo?.pvs?.[0]?.evaluation ?? null}
                 orientation={orientation}
               />
             )}
@@ -509,9 +551,8 @@ export default function Home() {
                 loadPgn={loadPgn}
                 onImportSuccess={(finalFen) => {
                   analysisFenRef.current = finalFen;
-                  resetEvalHistory();
                   resetGrades();
-                  lastNormalizedEvalRef.current = null;
+                  pendingMoveReviewRef.current = null;
                   if (gameMode === 'analysis') {
                     startAnalysis(finalFen, [], maxDepth, multiPv);
                   }

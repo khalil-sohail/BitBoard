@@ -1,4 +1,4 @@
-import { MoveGrade } from '../../types/grades';
+import type { MoveGrade } from '../../types/grades';
 
 interface MoveBadgeProps {
   grade: MoveGrade;
@@ -12,10 +12,10 @@ const GRADE_CONFIG: Record<MoveGrade, { label: string; icon: string; className: 
     icon: '📖',
     className: 'bg-sky-500/10 text-sky-400 border border-sky-500/20',
   },
-  Brilliant: {
-    label: '!!',
-    icon: '✨',
-    className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20',
+  Forced: {
+    label: 'Forced',
+    icon: '!',
+    className: 'bg-zinc-500/10 text-zinc-300 border border-zinc-500/20',
   },
   Best: {
     label: 'Best',

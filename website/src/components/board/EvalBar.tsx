@@ -1,9 +1,14 @@
 "use client";
 
-export function EvalBar({ evalScore, mate, orientation = 'w' }: { evalScore: number, mate?: number, turn: 'w' | 'b', orientation?: 'w' | 'b' }) {
+import type { NormalizedEvaluation } from '../../lib/engine-evaluation';
+import { displayScore, evalBarCentipawns } from '../../lib/engine-evaluation';
+
+export function EvalBar({ evaluation, orientation = 'w' }: { evaluation: NormalizedEvaluation | null, orientation?: 'w' | 'b' }) {
+  const evalScore = evalBarCentipawns(evaluation);
+
   const fillHeight = (() => {
-    if (mate !== undefined && mate !== 0) {
-      return mate > 0 ? 100 : 0;
+    if (evaluation?.kind === 'mate') {
+      return evaluation.winner === 'white' ? 100 : 0;
     }
 
     // Convert centipawns to pawns and cap at +/- 5.0
@@ -14,6 +19,9 @@ export function EvalBar({ evalScore, mate, orientation = 'w' }: { evalScore: num
   })();
 
   const displayHeight = orientation === 'w' ? fillHeight : 100 - fillHeight;
+  const label = evaluation?.kind === 'mate'
+    ? displayScore(evaluation).replace(/[+-]/, '')
+    : Math.abs(evalScore / 100).toFixed(1);
 
   return (
     <div className={`w-5 h-full bg-[hsl(222,30%,14%)] rounded-lg overflow-hidden flex ${orientation === 'w' ? 'flex-col justify-end' : 'flex-col-reverse justify-end'} border border-white/10 relative select-none shadow-lg`}>
@@ -25,7 +33,7 @@ export function EvalBar({ evalScore, mate, orientation = 'w' }: { evalScore: num
         {/* Label for white winning: bar is >= 50% so White has the advantage */}
         {fillHeight >= 50 && (
            <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'top-1' : 'bottom-1'} ${fillHeight > 82 ? 'text-[#2a2a2a]' : 'text-transparent'} leading-none`}>
-             {mate !== undefined && mate !== 0 ? `M${Math.abs(mate)}` : (evalScore/100).toFixed(1)}
+             {label}
            </span>
         )}
       </div>
@@ -33,7 +41,7 @@ export function EvalBar({ evalScore, mate, orientation = 'w' }: { evalScore: num
       {/* Label for black winning: bar is < 50% so Black has the advantage */}
       {fillHeight < 50 && (
         <span className={`text-[9px] font-mono font-bold absolute ${orientation === 'w' ? 'bottom-1' : 'top-1'} w-full text-center ${fillHeight < 18 ? 'text-[#ddd]' : 'text-transparent'} leading-none`}>
-          {mate !== undefined && mate !== 0 ? `M${Math.abs(mate)}` : Math.abs(evalScore/100).toFixed(1)}
+          {label}
         </span>
       )}
     </div>

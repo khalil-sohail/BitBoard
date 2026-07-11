@@ -23,8 +23,9 @@
     "test:queue": "ts-node --project tsconfig.server.json src/lib/engine-session.queue.test.ts",
     "test:protocol": "ts-node --project tsconfig.server.json src/lib/engine-session.protocol.test.ts",
     "test:engine-filter": "ts-node --project tsconfig.server.json src/lib/engine-response-filter.test.ts",
+    "test:evaluation": "ts-node --project tsconfig.server.json src/lib/engine-evaluation.test.ts",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

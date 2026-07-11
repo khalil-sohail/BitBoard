@@ -1,4 +1,5 @@
-import { EngineInfo } from '../../types/engine';
+import type { EngineInfo } from '../../types/engine';
+import { displayScore } from '../../lib/engine-evaluation';
 
 interface EnginePanelProps {
   info: EngineInfo | null;
@@ -7,20 +8,9 @@ interface EnginePanelProps {
 }
 
 export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
-  // Format score based on the best PV
   const bestPv = info?.pvs?.[0];
-  let formattedScore = "0.00";
-  let isMate = false;
-  
-  if (bestPv) {
-    if (bestPv.mate !== undefined) {
-      isMate = true;
-      formattedScore = bestPv.mate > 0 ? `+M${bestPv.mate}` : `-M${Math.abs(bestPv.mate)}`;
-    } else if (bestPv.score !== undefined) {
-      formattedScore = (bestPv.score / 100).toFixed(2);
-      if (bestPv.score > 0) formattedScore = "+" + formattedScore;
-    }
-  }
+  const formattedScore = displayScore(bestPv?.evaluation ?? null);
+  const isMate = bestPv?.evaluation?.kind === 'mate';
 
   // Format nodes
   const formatNodes = (n: number | undefined) => {
@@ -104,9 +94,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
               {info.pvs.map((pv, i) => {
                 const labelColor = i === 0 ? 'text-green-400' : i === 1 ? 'text-blue-400' : 'text-yellow-400';
                 const textColor = i === 0 ? 'text-emerald-300/80' : 'text-muted/80';
-                const scoreStr = pv.mate !== undefined 
-                  ? (pv.mate > 0 ? `+M${pv.mate}` : `-M${Math.abs(pv.mate)}`) 
-                  : ((pv.score > 0 ? '+' : '') + (pv.score / 100).toFixed(2));
+                const scoreStr = displayScore(pv.evaluation ?? null);
                   
                 return (
                   <div key={pv.multipv} className="text-[11px] font-mono break-words leading-relaxed">

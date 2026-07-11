@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { EngineInfo } from '../types/engine';
+import type { EngineInfo } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
 
@@ -29,6 +29,7 @@ export function useEngine() {
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const nextRequestIdRef = useRef<EngineRequestId>(1);
   const activeRequestIdRef = useRef<EngineRequestId | null>(null);
+  const activeRootFenRef = useRef<string | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -52,11 +53,13 @@ export function useEngine() {
 
   const invalidateActiveRequest = useCallback(() => {
     activeRequestIdRef.current = null;
+    activeRootFenRef.current = null;
     setBestMove(null);
   }, []);
 
-  const activateRequest = useCallback((requestId: EngineRequestId) => {
+  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string) => {
     activeRequestIdRef.current = requestId;
+    activeRootFenRef.current = rootFen;
     setBestMove(null);
     setEngineInfo(null);
   }, []);
@@ -92,6 +95,8 @@ export function useEngine() {
             if (!stateRef.current.isWaitingForNewGameReady &&
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               setEngineInfo(prev => ({
+                requestId: data.requestId,
+                rootFen: activeRootFenRef.current ?? undefined,
                 depth: data.depth,
                 pvs: data.pvs || [],
                 nodes: data.nodes ?? prev?.nodes,
@@ -137,7 +142,7 @@ export function useEngine() {
     };
 
     ws.current = socket;
-  }, [activateRequest, addToast, invalidateActiveRequest, setStatus]);
+  }, [addToast, invalidateActiveRequest, setStatus]);
 
   useEffect(() => {
     connect();
@@ -162,7 +167,7 @@ export function useEngine() {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
       setStatus('thinking');
       const requestId = allocateRequestId();
-      activateRequest(requestId);
+      activateRequest(requestId, fen);
 
       // Normalise: accept either the new options object or the legacy difficulty string
       const opts: SendMoveOptions = typeof options === 'string'
@@ -241,16 +246,9 @@ export function useEngine() {
   const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number, multiPv?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const requestId = allocateRequestId();
-      const currentStatus = stateRef.current.status;
-      if (currentStatus === 'thinking' || currentStatus === 'analyzing') {
-        setStatus('analyzing');
-        activateRequest(requestId);
-        ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
-      } else {
-        setStatus('analyzing');
-        activateRequest(requestId);
-        ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
-      }
+      setStatus('analyzing');
+      activateRequest(requestId, fen);
+      ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
     }
   }, [activateRequest, allocateRequestId, setStatus]);
 
@@ -259,7 +257,6 @@ export function useEngine() {
     engineInfo,
     bestMove,
     queuePosition,
-    activeRequestId: activeRequestIdRef.current,
     sendMove,
     newGame,
     reconnect,

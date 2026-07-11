@@ -1,11 +1,16 @@
+import type { NormalizedEvaluation } from '../lib/engine-evaluation';
+
 export interface PVLine {
   multipv: number;
-  score: number;
+  score?: number;
   mate?: number;
+  evaluation?: NormalizedEvaluation;
   pv: string[];
 }
 
 export interface EngineInfo {
+  requestId?: number;
+  rootFen?: string;
   depth: number;
   nodes?: number;
   time?: number; // ms

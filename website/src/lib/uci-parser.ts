@@ -55,11 +55,6 @@ export function parseUciInfo(line: string): ParsedInfo | null {
 
       } else if (scoreType === 'mate') {
         result.mate = parseInt(parts[i + 2], 10);
-        // Provide a large sentinel cp score so downstream consumers that
-        // only read `score` can still sort / display correctly:
-        //   positive mate  → White is delivering checkmate → +100 000
-        //   negative mate  → White is getting mated        → -100 000
-        result.score = result.mate > 0 ? 100_000 : -100_000;
       }
 
     } else if (token === 'nodes' && i + 1 < parts.length) {
