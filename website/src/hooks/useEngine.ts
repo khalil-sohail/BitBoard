@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { EngineInfo } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
+import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
 
 type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'disconnected' | 'session_expired' | 'error';
 
@@ -26,7 +27,8 @@ export function useEngine() {
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const pendingAnalysisRef = useRef<{ fen: string; moves: string[]; depth?: number; multiPv?: number } | null>(null);
+  const nextRequestIdRef = useRef<EngineRequestId>(1);
+  const activeRequestIdRef = useRef<EngineRequestId | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -41,6 +43,23 @@ export function useEngine() {
 
   const ws = useRef<WebSocket | null>(null);
   const { addToast } = useToast();
+
+  const allocateRequestId = useCallback((): EngineRequestId => {
+    const requestId = nextRequestIdRef.current;
+    nextRequestIdRef.current += 1;
+    return requestId;
+  }, []);
+
+  const invalidateActiveRequest = useCallback(() => {
+    activeRequestIdRef.current = null;
+    setBestMove(null);
+  }, []);
+
+  const activateRequest = useCallback((requestId: EngineRequestId) => {
+    activeRequestIdRef.current = requestId;
+    setBestMove(null);
+    setEngineInfo(null);
+  }, []);
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return;
@@ -70,7 +89,8 @@ export function useEngine() {
             setQueuePosition(data.position);
             break;
           case 'info':
-            if (!stateRef.current.isWaitingForNewGameReady) {
+            if (!stateRef.current.isWaitingForNewGameReady &&
+                shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               setEngineInfo(prev => ({
                 depth: data.depth,
                 pvs: data.pvs || [],
@@ -80,29 +100,29 @@ export function useEngine() {
             }
             break;
           case 'bestmove':
-            if (!stateRef.current.isWaitingForNewGameReady) {
+            if (!stateRef.current.isWaitingForNewGameReady &&
+                shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               setBestMove(data.move);
-              if (pendingAnalysisRef.current) {
-                const pending = pendingAnalysisRef.current;
-                pendingAnalysisRef.current = null;
-                setStatus('analyzing');
-                setEngineInfo(null);
-                ws.current?.send(JSON.stringify({ type: 'analyze', fen: pending.fen, moves: pending.moves, depth: pending.depth, multiPv: pending.multiPv }));
-              } else {
-                setStatus('idle');
-              }
+              activeRequestIdRef.current = null;
+              setStatus('idle');
             }
             break;
           case 'session_expired':
+            invalidateActiveRequest();
             setStatus('session_expired');
             addToast('Session expired due to inactivity', 'warning');
             break;
           case 'released':
+            invalidateActiveRequest();
             setStatus('disconnected');
             break;
           case 'error':
-            setStatus('error');
-            addToast(data.message || 'Engine error occurred', 'error');
+            if (data.requestId === undefined ||
+                shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              invalidateActiveRequest();
+              setStatus('error');
+              addToast(data.message || 'Engine error occurred', 'error');
+            }
             break;
         }
       } catch (e) {
@@ -111,12 +131,13 @@ export function useEngine() {
     };
 
     socket.onclose = () => {
+      invalidateActiveRequest();
       setStatus((stateRef.current.status === 'session_expired' ? 'session_expired' : 'disconnected'));
       ws.current = null;
     };
 
     ws.current = socket;
-  }, [addToast, setStatus]);
+  }, [activateRequest, addToast, invalidateActiveRequest, setStatus]);
 
   useEffect(() => {
     connect();
@@ -140,8 +161,8 @@ export function useEngine() {
   ) => {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
       setStatus('thinking');
-      setBestMove(null);
-      setEngineInfo(null);
+      const requestId = allocateRequestId();
+      activateRequest(requestId);
 
       // Normalise: accept either the new options object or the legacy difficulty string
       const opts: SendMoveOptions = typeof options === 'string'
@@ -150,6 +171,7 @@ export function useEngine() {
 
       ws.current.send(JSON.stringify({
         type: 'move',
+        requestId,
         fen,
         moves,
         wtime:      opts.wtime      ?? 0,
@@ -161,33 +183,35 @@ export function useEngine() {
         difficulty: opts.difficulty ?? 'standard',
       }));
     }
-  }, [setStatus]);
+  }, [activateRequest, allocateRequestId, setStatus]);
 
   const newGame = useCallback(() => {
+    invalidateActiveRequest();
     if (ws.current?.readyState === WebSocket.OPEN) {
       stateRef.current.isWaitingForNewGameReady = true;
       setStatus('idle');
-      setBestMove(null);
       setEngineInfo(null);
       ws.current.send(JSON.stringify({ type: 'newgame' }));
     } else {
       connect();
     }
-  }, [connect, setStatus]);
+  }, [connect, invalidateActiveRequest, setStatus]);
 
   const reconnect = useCallback(() => {
+    invalidateActiveRequest();
     if (ws.current) {
       ws.current.close();
     }
     connect();
-  }, [connect]);
+  }, [connect, invalidateActiveRequest]);
 
   const releaseSession = useCallback(() => {
+    invalidateActiveRequest();
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'releaseSession' }));
       setStatus('disconnected');
     }
-  }, [setStatus]);
+  }, [invalidateActiveRequest, setStatus]);
 
   const setEngineOption = useCallback((name: string, value: string | boolean | number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -200,37 +224,42 @@ export function useEngine() {
    * Used in Analysis Mode when the user loads a custom FEN.
    */
   const setPosition = useCallback((fen: string, moves: string[] = []) => {
+    invalidateActiveRequest();
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'position', fen, moves }));
     }
-  }, []);
+  }, [invalidateActiveRequest]);
 
   const stopEngine = useCallback(() => {
+    const requestId = activeRequestIdRef.current;
+    invalidateActiveRequest();
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type: 'stop' }));
+      ws.current.send(JSON.stringify(requestId === null ? { type: 'stop' } : { type: 'stop', requestId }));
     }
-  }, []);
+  }, [invalidateActiveRequest]);
 
   const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number, multiPv?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
+      const requestId = allocateRequestId();
       const currentStatus = stateRef.current.status;
       if (currentStatus === 'thinking' || currentStatus === 'analyzing') {
-        pendingAnalysisRef.current = { fen, moves, depth, multiPv };
-        ws.current.send(JSON.stringify({ type: 'stop' }));
+        setStatus('analyzing');
+        activateRequest(requestId);
+        ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
       } else {
         setStatus('analyzing');
-        setBestMove(null);
-        setEngineInfo(null);
-        ws.current.send(JSON.stringify({ type: 'analyze', fen, moves, depth, multiPv }));
+        activateRequest(requestId);
+        ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
       }
     }
-  }, [setStatus]);
+  }, [activateRequest, allocateRequestId, setStatus]);
 
   return {
     status,
     engineInfo,
     bestMove,
     queuePosition,
+    activeRequestId: activeRequestIdRef.current,
     sendMove,
     newGame,
     reconnect,
@@ -239,5 +268,6 @@ export function useEngine() {
     stopEngine,
     startAnalysis,
     releaseSession,
+    invalidateActiveRequest,
   };
 }

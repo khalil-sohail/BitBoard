@@ -13,6 +13,7 @@ const MAX_INCREMENT_MS = 60 * 60 * 1000;
 const MAX_MULTIPV = 8;
 const MAX_HASH_MB = 32768;
 const MAX_BOOK_DEPTH = 100;
+const MAX_REQUEST_ID = Number.MAX_SAFE_INTEGER;
 
 export type ProtocolErrorCode =
   | 'INVALID_JSON'
@@ -36,6 +37,7 @@ export type ParseResult<T> =
 
 export interface MoveMessage {
   type: 'move';
+  requestId: number;
   fen: string;
   moves: string[];
   wtime: number;
@@ -55,6 +57,7 @@ export interface PositionMessage {
 
 export interface AnalyzeMessage {
   type: 'analyze';
+  requestId: number;
   fen: string;
   moves: string[];
   depth?: number;
@@ -63,6 +66,7 @@ export interface AnalyzeMessage {
 
 export interface StopMessage {
   type: 'stop';
+  requestId?: number;
 }
 
 export interface NewGameMessage {
@@ -234,6 +238,18 @@ function validateInteger(
   return ok(value);
 }
 
+function validateRequestId(value: unknown): ParseResult<number> {
+  return validateInteger(value, 'requestId', 1, MAX_REQUEST_ID, 'INVALID_MESSAGE');
+}
+
+function validateOptionalRequestId(value: unknown): ParseResult<number | undefined> {
+  if (value === undefined) {
+    return ok(undefined);
+  }
+
+  return validateRequestId(value);
+}
+
 function optionalInteger(value: unknown, field: string, min: number, max: number): ParseResult<number | undefined> {
   if (value === undefined) {
     return ok(undefined);
@@ -274,6 +290,9 @@ function validateCommonPositionFields(record: Record<string, unknown>): ParseRes
 }
 
 function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveMessage> {
+  const requestId = validateRequestId(record.requestId);
+  if (requestId.ok === false) return requestId;
+
   const positionResult = validateCommonPositionFields(record);
   if (positionResult.ok === false) {
     return positionResult;
@@ -302,6 +321,7 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
 
   return ok({
     type: 'move',
+    requestId: requestId.value,
     fen: positionResult.value.fen,
     moves: positionResult.value.moves,
     wtime: wtime.value,
@@ -324,6 +344,9 @@ function validatePositionMessage(record: Record<string, unknown>): ParseResult<P
 }
 
 function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<AnalyzeMessage> {
+  const requestId = validateRequestId(record.requestId);
+  if (requestId.ok === false) return requestId;
+
   const positionResult = validateCommonPositionFields(record);
   if (positionResult.ok === false) {
     return positionResult;
@@ -337,6 +360,7 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
 
   return ok({
     type: 'analyze',
+    requestId: requestId.value,
     fen: positionResult.value.fen,
     moves: positionResult.value.moves,
     depth: depth.value,
@@ -344,13 +368,19 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
   });
 }
 
-function validateEmptyMessage(record: Record<string, unknown>, type: StopMessage['type']): ParseResult<StopMessage>;
+function validateStopMessage(record: Record<string, unknown>): ParseResult<StopMessage> {
+  const requestId = validateOptionalRequestId(record.requestId);
+  if (requestId.ok === false) return requestId;
+
+  return ok({ type: 'stop', requestId: requestId.value });
+}
+
 function validateEmptyMessage(record: Record<string, unknown>, type: NewGameMessage['type']): ParseResult<NewGameMessage>;
 function validateEmptyMessage(record: Record<string, unknown>, type: ReleaseSessionMessage['type']): ParseResult<ReleaseSessionMessage>;
 function validateEmptyMessage(
   _record: Record<string, unknown>,
-  type: StopMessage['type'] | NewGameMessage['type'] | ReleaseSessionMessage['type'],
-): ParseResult<StopMessage | NewGameMessage | ReleaseSessionMessage> {
+  type: NewGameMessage['type'] | ReleaseSessionMessage['type'],
+): ParseResult<NewGameMessage | ReleaseSessionMessage> {
   return ok({ type });
 }
 
@@ -408,7 +438,7 @@ export function validateClientMessage(value: unknown): ParseResult<ClientMessage
     case 'analyze':
       return validateAnalyzeMessage(value);
     case 'stop':
-      return validateEmptyMessage(value, 'stop');
+      return validateStopMessage(value);
     case 'newgame':
       return validateEmptyMessage(value, 'newgame');
     case 'releaseSession':

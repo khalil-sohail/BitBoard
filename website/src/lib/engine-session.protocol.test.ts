@@ -18,6 +18,10 @@ interface ServerMessage {
   type?: string;
   code?: string;
   message?: string;
+  requestId?: number;
+  move?: string;
+  depth?: number;
+  pvs?: unknown[];
 }
 
 class MockSocket extends EventEmitter {
@@ -114,6 +118,72 @@ class RecordingEngineProcess extends EventEmitter {
   }
 }
 
+class ManualEngineProcess extends EventEmitter {
+  public readonly stdin = new PassThrough();
+  public readonly stdout = new PassThrough();
+  public readonly stderr = new PassThrough();
+  public readonly writes: string[] = [];
+  public exitCode: number | null = null;
+  public signalCode: NodeJS.Signals | null = null;
+  private lineBuffer = '';
+
+  public constructor() {
+    super();
+    this.stdin.setEncoding('utf8');
+    this.stdin.on('data', chunk => {
+      this.lineBuffer += chunk.toString();
+      const lines = this.lineBuffer.split('\n');
+      this.lineBuffer = lines.pop() || '';
+      lines.forEach(line => this.handleLine(line.trim()));
+    });
+  }
+
+  public emitInfo(line = 'info depth 1 score cp 10 nodes 1 time 1 pv e2e4'): void {
+    this.stdout.write(`${line}\n`);
+  }
+
+  public emitBestMove(move = 'bestmove e2e4'): void {
+    this.stdout.write(`${move}\n`);
+  }
+
+  public kill(signal?: NodeJS.Signals | number): boolean {
+    if (this.exitCode !== null || this.signalCode !== null) {
+      return false;
+    }
+
+    this.signalCode = typeof signal === 'string' ? signal : 'SIGTERM';
+    setImmediate(() => this.emit('exit', null, this.signalCode));
+    return true;
+  }
+
+  public asChildProcess(): ChildProcess {
+    return this as unknown as ChildProcess;
+  }
+
+  private handleLine(line: string): void {
+    if (!line) {
+      return;
+    }
+
+    this.writes.push(line);
+
+    if (line === 'uci') {
+      this.stdout.write('uciok\n');
+      return;
+    }
+
+    if (line === 'isready') {
+      this.stdout.write('readyok\n');
+      return;
+    }
+
+    if (line === 'quit') {
+      this.exitCode = 0;
+      setImmediate(() => this.emit('exit', 0, null));
+    }
+  }
+}
+
 function waitForMessage(socket: MockSocket, type: string): Promise<ServerMessage> {
   const existing = socket.sent.find(message => message.type === type);
   if (existing) {
@@ -138,6 +208,33 @@ function waitForMessage(socket: MockSocket, type: string): Promise<ServerMessage
 
     socket.on('sent', handleSent);
   });
+}
+
+function messagesOfType(socket: MockSocket, type: string): ServerMessage[] {
+  return socket.sent.filter(message => message.type === type);
+}
+
+async function flushEvents(): Promise<void> {
+  await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+async function createManualSession(): Promise<{ pool: EnginePoolManager; engine: ManualEngineProcess; socket: MockSocket }> {
+  const engine = new ManualEngineProcess();
+  const pool = new EnginePoolManager({
+    maxConcurrent: 1,
+    enginePath: process.execPath,
+    idleTimeoutMs: 30_000,
+    sessionMaxMs: 30_000,
+    spawnEngineProcess: () => engine.asChildProcess(),
+  });
+  const socket = new MockSocket();
+
+  pool.handleConnection(socket.asWebSocket(), 'manual-session');
+  await waitForMessage(socket, 'ready');
+  engine.writes.length = 0;
+  socket.sent.length = 0;
+
+  return { pool, engine, socket };
 }
 
 function parsePayload(payload: unknown) {
@@ -183,17 +280,31 @@ function testFenValidation(): void {
 }
 
 function testMoveValidation(): void {
-  assertValid({ type: 'move', fen: DEFAULT_START_FEN, moves: ['e2e4', 'e7e8q'] });
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: ['i2e4'] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: ['e7e8x'] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [42] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: Array.from({ length: 513 }, () => 'e2e4') }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: ['e2e4\nstop'] }, 'INVALID_MOVE');
+  assertValid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e2e4', 'e7e8q'] });
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['i2e4'] }, 'INVALID_MOVE');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e7e8x'] }, 'INVALID_MOVE');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [42] }, 'INVALID_MOVE');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: Array.from({ length: 513 }, () => 'e2e4') }, 'INVALID_MOVE');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e2e4\nstop'] }, 'INVALID_MOVE');
+}
+
+function testRequestIdValidation(): void {
+  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'analyze', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertValid({ type: 'move', requestId: 7, fen: DEFAULT_START_FEN, moves: [] });
+  assertValid({ type: 'analyze', requestId: 8, fen: DEFAULT_START_FEN, moves: [], depth: 1, multiPv: 1 });
+  assertValid({ type: 'stop', requestId: 9 });
+  assertInvalid({ type: 'move', requestId: 0, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'move', requestId: -1, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'move', requestId: 1.5, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'move', requestId: '1', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'move', requestId: Number.MAX_SAFE_INTEGER + 1, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
 }
 
 function testNumericValidation(): void {
   assertValid({
     type: 'move',
+    requestId: 1,
     fen: DEFAULT_START_FEN,
     moves: ['e2e4'],
     wtime: 180000,
@@ -204,16 +315,16 @@ function testNumericValidation(): void {
     multiPv: 3,
   });
 
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [], depth: -1 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [], depth: 0 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [], depth: 1.5 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [], depth: 65 }, 'INVALID_NUMBER');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: -1 }, 'INVALID_NUMBER');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 0 }, 'INVALID_NUMBER');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 1.5 }, 'INVALID_NUMBER');
+  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 65 }, 'INVALID_NUMBER');
 
-  const nanResult = validateClientMessage({ type: 'move', fen: DEFAULT_START_FEN, moves: [], depth: NaN });
+  const nanResult = validateClientMessage({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: NaN });
   assert.equal(nanResult.ok, false);
   if (!nanResult.ok) assert.equal(nanResult.error.code, 'INVALID_NUMBER');
 
-  const infinityResult = validateClientMessage({ type: 'move', fen: DEFAULT_START_FEN, moves: [], wtime: Infinity });
+  const infinityResult = validateClientMessage({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], wtime: Infinity });
   assert.equal(infinityResult.ok, false);
   if (!infinityResult.ok) assert.equal(infinityResult.error.code, 'INVALID_NUMBER');
 }
@@ -282,8 +393,8 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
   assert.deepEqual(engine.writes, ['position startpos moves e2e4']);
 
   engine.writes.length = 0;
-  socket.emitRawMessage(JSON.stringify({ type: 'move', fen: DEFAULT_START_FEN, moves: ['bad'] }));
-  socket.emitRawMessage(JSON.stringify({ type: 'move', fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 1, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['bad'] }));
+  socket.emitRawMessage(JSON.stringify({ type: 'move', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 1, multiPv: 1 }));
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(engine.writes, [
     'setoption name MultiPV value 1',
@@ -294,14 +405,125 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
   socket.close();
 }
 
+async function testInfoCarriesRequestId(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 10, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  engine.emitInfo();
+  engine.emitInfo('info depth 2 score cp 20 nodes 2 time 2 pv d2d4');
+
+  const infos = messagesOfType(socket, 'info');
+  assert.equal(infos.length, 2);
+  assert.equal(infos[0].requestId, 10);
+  assert.equal(infos[1].requestId, 10);
+
+  socket.close();
+}
+
+async function testStopSwallowsTrailingBestMove(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  engine.emitInfo();
+  socket.emitRawMessage(JSON.stringify({ type: 'stop', requestId: 1 }));
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  assert.equal(messagesOfType(socket, 'info').length, 1);
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+
+  socket.close();
+}
+
+async function testNewerSearchSupersedesOlderSearch(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 2, multiPv: 1 }));
+
+  engine.emitInfo('info depth 1 score cp 11 nodes 1 time 1 pv e2e4');
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+  engine.emitInfo('info depth 1 score cp 22 nodes 1 time 1 pv e7e5');
+  engine.emitBestMove('bestmove e7e5');
+  await flushEvents();
+
+  const infos = messagesOfType(socket, 'info');
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(infos.length, 1);
+  assert.equal(infos[0].requestId, 2);
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 2);
+  assert.equal(bestMoves[0].move, 'e7e5');
+
+  socket.close();
+}
+
+async function testNewGameSwallowsOldBestMove(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'newgame' }));
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+  assert.ok(engine.writes.includes('ucinewgame'));
+  assert.ok(engine.writes.includes('isready'));
+
+  socket.close();
+}
+
+async function testReleaseSessionIgnoresProcessOutput(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'releaseSession' }));
+  const sentBeforeOutput = socket.sent.length;
+  engine.emitInfo();
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  assert.equal(socket.sent.length, sentBeforeOutput);
+}
+
+async function testRapidAnalyzeReplacementUsesLatestRequest(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 3, fen: DEFAULT_START_FEN, moves: ['d2d4'], depth: 2, multiPv: 1 }));
+
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+  engine.emitInfo('info depth 1 score cp 33 nodes 1 time 1 pv d7d5');
+  engine.emitBestMove('bestmove d7d5');
+
+  const infos = messagesOfType(socket, 'info');
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(infos.length, 1);
+  assert.equal(infos[0].requestId, 3);
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 3);
+
+  socket.close();
+}
+
 async function run(): Promise<void> {
   testJsonBoundary();
   testFenValidation();
   testMoveValidation();
+  testRequestIdValidation();
   testNumericValidation();
   testOptionValidation();
   testUciBuilders();
   await testInvalidInputDoesNotWriteToEngine();
+  await testInfoCarriesRequestId();
+  await testStopSwallowsTrailingBestMove();
+  await testNewerSearchSupersedesOlderSearch();
+  await testNewGameSwallowsOldBestMove();
+  await testReleaseSessionIgnoresProcessOutput();
+  await testRapidAnalyzeReplacementUsesLatestRequest();
 
   console.log('engine-session protocol tests passed');
 }

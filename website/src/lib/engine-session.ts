@@ -25,7 +25,7 @@ interface SessionPv {
 
 type PonderPhase =
   | { phase: 'idle' }
-  | { phase: 'thinking'; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number }
+  | { phase: 'thinking'; requestId: number; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number }
   | {
       phase: 'pondering';
       ponderPly: number;        // ply count at the moment pondering starts
@@ -40,7 +40,34 @@ type PonderPhase =
       pendingBinc: number;
       pendingDepth?: number;
       pendingMultiPv: number;
+      pendingRequestId?: number;
     };
+
+type ActiveSearchState = 'running' | 'stopping';
+
+interface ActiveSearch {
+  requestId: number;
+  generation: number;
+  state: ActiveSearchState;
+  searchMode: 'tc' | 'analysis';
+}
+
+type PendingOperation =
+  | {
+      type: 'search';
+      requestId: number;
+      searchMode: 'tc' | 'analysis';
+      startFen: string;
+      moves: string[];
+      wtime: number;
+      btime: number;
+      winc: number;
+      binc: number;
+      depth?: number;
+      multiPv: number;
+    }
+  | { type: 'newgame' }
+  | { type: 'position'; startFen: string; moves: string[] };
 
 interface EngineSession {
   id: string;
@@ -56,6 +83,9 @@ interface EngineSession {
   startFen: string;
   uciMoves: string[];
   ponderState: PonderPhase;
+  activeSearch: ActiveSearch | null;
+  pendingOperation: PendingOperation | null;
+  searchGeneration: number;
   lineBuffer: string;
 }
 
@@ -240,6 +270,9 @@ export class EnginePoolManager {
       startFen: DEFAULT_START_FEN,
       uciMoves: [],
       ponderState: { phase: 'idle' },
+      activeSearch: null,
+      pendingOperation: null,
+      searchGeneration: 0,
       lineBuffer: '',
     };
 
@@ -326,6 +359,7 @@ export class EnginePoolManager {
     // Suppress info lines while we're waiting for the stop-ack dummy bestmove
     const ps = session.ponderState;
     if (ps.phase === 'pondering' && ps.awaitingStopAck) return;
+    if (!session.activeSearch || session.activeSearch.state !== 'running') return;
 
     const parsedInfo = parseUciInfo(trimmed);
     if (parsedInfo && parsedInfo.depth) {
@@ -352,6 +386,7 @@ export class EnginePoolManager {
 
       session.ws.send(JSON.stringify({
         type: 'info',
+        requestId: session.activeSearch.requestId,
         depth: session.currentDepth,
         nodes: parsedInfo.nodes,
         time: parsedInfo.time,
@@ -368,6 +403,7 @@ export class EnginePoolManager {
     if (!parsed) return;
 
     const ps = session.ponderState;
+    const activeSearch = session.activeSearch;
 
     // ── Stop-ack discard ─────────────────────────────────────────────────
     // We sent 'stop' to the ponder search; this dummy bestmove is the engine
@@ -375,26 +411,50 @@ export class EnginePoolManager {
     if (ps.phase === 'pondering' && ps.awaitingStopAck) {
       if (ps.pendingUserMove === '') {
         session.ponderState = { phase: 'idle' };
+        this.runPendingOperation(session);
         return;
       }
       console.log(`[Ponder ${id}] Stop-ack received — issuing real 'go' command`);
       const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMultiPv,
-              baseFen, baseMoves } = ps;
+              pendingRequestId, baseFen, baseMoves } = ps;
+      if (pendingRequestId === undefined) {
+        session.ponderState = { phase: 'idle' };
+        this.runPendingOperation(session);
+        return;
+      }
 
       // Build the real position (opponent played pendingUserMove)
       const realMoves = [...baseMoves, pendingUserMove];
       writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', pendingMultiPv));
-      this.sendPositionAndGo(session, baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth);
+      this.sendPositionAndGo(session, pendingRequestId, 'tc', baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth);
+      return;
+    }
+
+    if (!activeSearch) {
+      session.ponderState = { phase: 'idle' };
+      this.runPendingOperation(session);
+      return;
+    }
+
+    if (activeSearch.state === 'stopping') {
+      session.activeSearch = null;
+      session.ponderState = { phase: 'idle' };
+      this.runPendingOperation(session);
       return;
     }
 
     // ── Normal thinking result ────────────────────────────────────────────
-    if (ps.phase === 'thinking') {
+    if (ps.phase === 'thinking' && ps.requestId === activeSearch.requestId) {
       const { bestMove, ponderMove } = parsed;
 
       // Send best move to the frontend
-      session.ws.send(JSON.stringify({ type: 'bestmove', move: bestMove }));
+      session.ws.send(JSON.stringify({
+        type: 'bestmove',
+        requestId: activeSearch.requestId,
+        move: bestMove === '0000' ? null : bestMove,
+      }));
       console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderMove ?? 'none'}`);
+      session.activeSearch = null;
 
       // Start pondering if we have a ponder move
       if (ponderMove && session.process.stdin && ps.searchMode === 'tc') {
@@ -421,14 +481,14 @@ export class EnginePoolManager {
       } else {
         session.ponderState = { phase: 'idle' };
       }
+      this.runPendingOperation(session);
       return;
     }
 
-    // ── Idle / unexpected bestmove — just forward it ─────────────────────
-    if (parsed.bestMove && parsed.bestMove !== '0000') {
-      session.ws.send(JSON.stringify({ type: 'bestmove', move: parsed.bestMove }));
-    }
+    // ── Idle / unexpected bestmove — stale search output, swallow it. ─────
     session.ponderState = { phase: 'idle' };
+    session.activeSearch = null;
+    this.runPendingOperation(session);
   }
 
   // ── Client message handler ─────────────────────────────────────────────────
@@ -480,7 +540,7 @@ export class EnginePoolManager {
 
         if (!userMove) {
           // Can't determine user's move — fall back to stop + resync
-          this.stopPonderAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth);
           return;
         }
 
@@ -489,38 +549,45 @@ export class EnginePoolManager {
           // The opponent played exactly the move we were pondering.
           // Stop the ponder search, then issue a timed go on the same position.
           console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
-          this.stopPonderAndGo(session, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, targetMultiPv);
         } else if (incomingPly > ps.ponderPly) {
           // ── Ponder MISS ────────────────────────────────────────────────
           // Opponent played a different move — stop and resync.
           console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
-          this.stopPonderAndGo(session, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
         } else {
           // ── Ponder RESYNC ──────────────────────────────────────────────
           // Same or fewer moves than when pondering started.
           // Do not treat this as a HIT.
           // Stop/resync safely.
           console.log(`[Ponder ${id}] RESYNC — incomingPly=${incomingPly} <= ponderPly=${ps.ponderPly}`);
-          this.stopPonderAndGo(session, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
         }
         return;
       }
 
       // Not pondering — issue position + go directly.
-      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
-      this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
-      session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
+      this.enqueueSearch(session, {
+        type: 'search',
+        requestId: data.requestId,
+        searchMode: 'tc',
+        startFen,
+        moves,
+        wtime,
+        btime,
+        winc,
+        binc,
+        depth,
+        multiPv: targetMultiPv,
+      });
       return;
     }
 
     // ── position (Analysis Mode FEN load, no search) ───────────────────────
     if (data.type === 'position') {
       const moves = data.moves;
-      this.stopPonderSilently(session);
       const startFen = data.fen;
-      writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
-      session.startFen = startFen;
-      session.uciMoves = moves;
+      this.enqueueControlOperation(session, { type: 'position', startFen, moves });
       return;
     }
 
@@ -528,56 +595,39 @@ export class EnginePoolManager {
     if (data.type === 'analyze') {
       const moves = data.moves;
       const targetMultiPv = data.multiPv ?? ANALYSIS_MULTIPV;
-      this.stopPonderSilently(session);
-      // Restore MultiPV for analysis
-      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
       const startFen = data.fen;
-      writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
       const targetDepth = data.depth || 30;
-      writeUciCommand(session.process.stdin, buildGoCommand({
-        depth: targetDepth,
-        wtime: 0,
-        btime: 0,
-        winc: 0,
-        binc: 0,
-      }));
-      session.startFen = startFen;
-      session.uciMoves = moves;
-      session.ponderState = {
-        phase: 'thinking',
+      this.enqueueSearch(session, {
+        type: 'search',
+        requestId: data.requestId,
         searchMode: 'analysis',
+        startFen,
+        moves,
         wtime: 0,
         btime: 0,
         winc: 0,
         binc: 0,
         depth: targetDepth,
-      };
+        multiPv: targetMultiPv,
+      });
       return;
     }
 
     // ── newgame ────────────────────────────────────────────────────────────
     if (data.type === 'newgame') {
-      this.stopPonderSilently(session);
-      // Restore analysis MultiPV default between games
-      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
-      writeUciCommand(session.process.stdin, 'ucinewgame');
-      writeUciCommand(session.process.stdin, 'isready');
-      session.startFen = DEFAULT_START_FEN;
-      session.uciMoves = [];
-      session.ponderState  = { phase: 'idle' };
+      this.enqueueControlOperation(session, { type: 'newgame' });
       return;
     }
 
     // ── stop ──────────────────────────────────────────────────────────────
     if (data.type === 'stop') {
-      this.stopPonderSilently(session);
-      writeUciCommand(session.process.stdin, 'stop');
+      this.invalidateActiveSearch(session, data.requestId);
       return;
     }
 
     // ── releaseSession ─────────────────────────────────────────────────────
     if (data.type === 'releaseSession') {
-      this.stopPonderSilently(session);
+      this.invalidateActiveSearch(session);
       writeUciCommand(session.process.stdin, 'stop');
       this.terminateSession(id, 'released');
       return;
@@ -592,12 +642,120 @@ export class EnginePoolManager {
 
   // ── Ponder helpers ─────────────────────────────────────────────────────────
 
+  private enqueueSearch(session: EngineSession, operation: Extract<PendingOperation, { type: 'search' }>) {
+    if (!session.process.stdin) return;
+
+    if (session.activeSearch || session.ponderState.phase === 'pondering') {
+      session.pendingOperation = operation;
+      this.invalidateActiveSearch(session);
+      return;
+    }
+
+    this.startSearch(session, operation);
+  }
+
+  private enqueueControlOperation(session: EngineSession, operation: Exclude<PendingOperation, { type: 'search' }>) {
+    if (!session.process.stdin) return;
+
+    if (session.activeSearch || session.ponderState.phase === 'pondering') {
+      session.pendingOperation = operation;
+      this.invalidateActiveSearch(session);
+      return;
+    }
+
+    this.runControlOperation(session, operation);
+  }
+
+  private invalidateActiveSearch(session: EngineSession, requestId?: number) {
+    if (!session.process.stdin) return;
+
+    const ps = session.ponderState;
+    if (session.activeSearch) {
+      if (requestId !== undefined && session.activeSearch.requestId !== requestId) {
+        return;
+      }
+      if (session.activeSearch.state !== 'stopping') {
+        session.activeSearch = { ...session.activeSearch, state: 'stopping' };
+        writeUciCommand(session.process.stdin, 'stop');
+      }
+      return;
+    }
+
+    if (ps.phase === 'pondering') {
+      session.ponderState = {
+        ...ps,
+        awaitingStopAck: true,
+        pendingUserMove: '',
+        pendingWtime: 0,
+        pendingBtime: 0,
+        pendingWinc: 0,
+        pendingBinc: 0,
+        pendingMultiPv: 1,
+        pendingRequestId: undefined,
+      };
+      writeUciCommand(session.process.stdin, 'stop');
+    }
+  }
+
+  private runPendingOperation(session: EngineSession) {
+    const operation = session.pendingOperation;
+    if (!operation) return;
+
+    session.pendingOperation = null;
+    if (operation.type === 'search') {
+      this.startSearch(session, operation);
+    } else {
+      this.runControlOperation(session, operation);
+    }
+  }
+
+  private runControlOperation(session: EngineSession, operation: Exclude<PendingOperation, { type: 'search' }>) {
+    if (!session.process.stdin) return;
+
+    session.activeSearch = null;
+    session.currentDepth = 0;
+    session.pvs = [];
+    session.ponderState = { phase: 'idle' };
+
+    if (operation.type === 'newgame') {
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
+      writeUciCommand(session.process.stdin, 'ucinewgame');
+      writeUciCommand(session.process.stdin, 'isready');
+      session.startFen = DEFAULT_START_FEN;
+      session.uciMoves = [];
+      return;
+    }
+
+    writeUciCommand(session.process.stdin, buildPositionCommand(operation.startFen, operation.moves));
+    session.startFen = operation.startFen;
+    session.uciMoves = operation.moves;
+  }
+
+  private startSearch(session: EngineSession, operation: Extract<PendingOperation, { type: 'search' }>) {
+    if (!session.process.stdin) return;
+
+    writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', operation.multiPv));
+    this.sendPositionAndGo(
+      session,
+      operation.requestId,
+      operation.searchMode,
+      operation.startFen,
+      operation.moves,
+      operation.wtime,
+      operation.btime,
+      operation.winc,
+      operation.binc,
+      operation.depth,
+    );
+  }
+
   /**
    * Stop the ponder search, buffer the pending user move + TC, and wait for
    * the dummy bestmove stop-ack before issuing the real go command.
    */
   private stopPonderAndGo(
     session: EngineSession,
+    requestId: number,
     startFen: string,
     moves: string[],
     wtime: number,
@@ -624,15 +782,26 @@ export class EnginePoolManager {
         pendingBinc: binc,
         pendingDepth: depth,
         pendingMultiPv: targetMultiPv,
+        pendingRequestId: requestId,
         baseFen:   startFen,
         baseMoves: moves,
       };
       writeUciCommand(session.process.stdin, 'stop');
     } else {
       // Not pondering — issue immediately
-      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
-      this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
-      session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
+      this.enqueueSearch(session, {
+        type: 'search',
+        requestId,
+        searchMode: 'tc',
+        startFen,
+        moves,
+        wtime,
+        btime,
+        winc,
+        binc,
+        depth,
+        multiPv: targetMultiPv,
+      });
     }
   }
 
@@ -654,11 +823,11 @@ export class EnginePoolManager {
         pendingWinc: 0,
         pendingBinc: 0,
         pendingMultiPv: 1,
+        pendingRequestId: undefined,
       };
       writeUciCommand(session.process.stdin, 'stop');
     } else if (ps.phase === 'thinking') {
-      writeUciCommand(session.process.stdin, 'stop');
-      session.ponderState = { phase: 'idle' };
+      this.invalidateActiveSearch(session);
     }
   }
 
@@ -667,6 +836,8 @@ export class EnginePoolManager {
    */
   private sendPositionAndGo(
     session: EngineSession,
+    requestId: number,
+    searchMode: 'tc' | 'analysis',
     startFen: string,
     moves: string[],
     wtime: number,
@@ -679,7 +850,16 @@ export class EnginePoolManager {
 
     writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
     writeUciCommand(session.process.stdin, buildGoCommand({ depth, wtime, btime, winc, binc }));
-    session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc };
+    session.searchGeneration += 1;
+    session.activeSearch = {
+      requestId,
+      generation: session.searchGeneration,
+      state: 'running',
+      searchMode,
+    };
+    session.currentDepth = 0;
+    session.pvs = [];
+    session.ponderState = { phase: 'thinking', requestId, searchMode, wtime, btime, winc, binc, depth };
     session.startFen = startFen;
     session.uciMoves = moves;
   }
