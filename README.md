@@ -88,6 +88,21 @@ The UI is built with a dark, technical "engine room" aesthetic. It utilizes Reac
 - Node.js (v18+)
 - Make & GCC/Clang (for compiling C++23)
 
+### Verify the repository
+
+Run all engine, frontend, backend, protocol, and production-build checks:
+
+```bash
+make verify
+```
+
+Focused verification targets are also available:
+
+```bash
+make verify-engine
+make verify-website
+```
+
 ### Manual Run
 
 1. **Compile the engine:**
@@ -104,7 +119,37 @@ The UI is built with a dark, technical "engine room" aesthetic. It utilizes Reac
    ```bash
    npm run dev:all
    ```
-4. Access the application at `http://localhost:3000`.
+4. Access the application at `http://localhost:3000` unless you changed
+   `FRONTEND_PORT`.
+
+The default application ports are:
+
+```dotenv
+FRONTEND_PORT=3000
+BACKEND_PORT=3001
+```
+
+Local npm commands load these from `website/.env.local` and the usual Next.js
+mode files: `.env`, `.env.local`, `.env.development`,
+`.env.development.local`, `.env.production`, and `.env.production.local`.
+Shell values win over env files. For one launched process, `PORT` is an
+explicit override; otherwise frontend/full-stack modes use `FRONTEND_PORT` and
+backend-only modes use `BACKEND_PORT`.
+
+```text
+dev:frontend      -> FRONTEND_PORT
+dev:full          -> FRONTEND_PORT
+start:frontend    -> FRONTEND_PORT
+start:server      -> FRONTEND_PORT
+
+dev:backend       -> BACKEND_PORT
+start:backend     -> BACKEND_PORT
+```
+
+```bash
+FRONTEND_PORT=3100 npm run dev:frontend
+BACKEND_PORT=3101 npm run dev:backend
+```
 
 ## Docker Setup
 
@@ -115,6 +160,21 @@ The project provides a production-ready containerized pipeline.
    ```bash
    docker compose -f deploy/docker-compose.yml up -d --build
    ```
+
+To run the Docker stack on non-default ports:
+
+```bash
+FRONTEND_PORT=8180 BACKEND_PORT=8181 \
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Docker Compose loads deployment values from `deploy/.env`. `FRONTEND_PORT`
+configures the frontend container listener and nginx-proxy upstream port.
+`BACKEND_PORT` configures the backend container listener, health check, and
+nginx-proxy upstream port. The nginx public ports stay fixed at 80 and 443, and
+SSH stays fixed at 22 outside this application configuration. Browser
+WebSockets stay same-origin on `/api/engine`; no backend port is exposed to
+frontend JavaScript.
 
 ## Project Structure
 

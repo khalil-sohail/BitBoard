@@ -15,7 +15,7 @@ ENV NODE_ENV=$NODE_ENV
 ENV NEXT_PRIVATE_STANDALONE=true
 
 COPY website/ ./
-RUN npm run build
+RUN npm run build:frontend
 
 FROM node:20-bullseye-slim AS runner
 
@@ -25,7 +25,11 @@ ENV NODE_ENV=production
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/scripts ./scripts
 
+# Default frontend port. Runtime can override with PORT/FRONTEND_PORT.
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+# The standalone artifact is copied to /app; the launcher resolves PORT from
+# runtime env before starting the generated server.
+CMD ["node", "scripts/run-with-port.mjs", "frontend", "production", "--", "node", "server.js"]

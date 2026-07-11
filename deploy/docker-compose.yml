@@ -10,7 +10,6 @@ services:
       - certs:/etc/nginx/certs:ro
       - vhost:/etc/nginx/vhost.d
       - html:/usr/share/nginx/html
-      - ./nginx-location.conf:/etc/nginx/vhost.d/${VIRTUAL_HOST}_location:ro
     depends_on:
       frontend:
         condition: service_healthy
@@ -41,16 +40,26 @@ services:
 
   frontend:
     image: ${REGISTRY}/chess-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        VIRTUAL_HOST: ${VIRTUAL_HOST}
+        LETSENCRYPT_HOST: ${LETSENCRYPT_HOST}
+        NODE_ENV: ${NODE_ENV:-production}
     container_name: chess-frontend
-    env_file:
-      - .env
     environment:
-      - PORT=3000
+      - PORT=${FRONTEND_PORT:-3000}
+      - FRONTEND_PORT=${FRONTEND_PORT:-3000}
       - HOSTNAME=0.0.0.0
+      - VIRTUAL_HOST=${VIRTUAL_HOST}
+      - VIRTUAL_PATH=/
+      - LETSENCRYPT_HOST=${LETSENCRYPT_HOST}
+      - VIRTUAL_PORT=${FRONTEND_PORT:-3000}
     expose:
-      - "3000"
+      - "${FRONTEND_PORT:-3000}"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"const port = process.env.PORT; if (!port) process.exit(1); require('http').get('http://127.0.0.1:' + port + '/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -61,17 +70,24 @@ services:
 
   backend:
     image: ${REGISTRY}/chess-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
     container_name: chess-backend
     environment:
       - ENGINE_PATH=${ENGINE_PATH:-/app/engine/chess-engine}
-      - PORT=${PORT:-8080}
+      - PORT=${BACKEND_PORT:-3001}
+      - BACKEND_PORT=${BACKEND_PORT:-3001}
       - NODE_ENV=${NODE_ENV:-production}
       - BACKEND_ONLY=${BACKEND_ONLY:-true}
       - DEBUG=${ENGINE_DEBUG:-false}
+      - VIRTUAL_HOST=${VIRTUAL_HOST}
+      - VIRTUAL_PATH=/api/engine
+      - VIRTUAL_PORT=${BACKEND_PORT:-3001}
     expose:
-      - "8080"
+      - "${BACKEND_PORT:-3001}"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"const port = process.env.PORT; if (!port) process.exit(1); require('http').get('http://127.0.0.1:' + port + '/', (r) => { if (r.statusCode !== 200) process.exit(1); else process.exit(0); }).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3

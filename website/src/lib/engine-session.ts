@@ -1,44 +1,24 @@
-import { spawn, ChildProcess } from 'child_process';
-import { WebSocket } from 'ws';
+import { spawn, ChildProcess, SpawnOptions } from 'child_process';
+import { RawData, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
 import { parseUciInfo, parseBestMove } from './uci-parser';
+import {
+  ANALYSIS_MULTIPV,
+  ClientMessage,
+  DEFAULT_START_FEN,
+  buildGoCommand,
+  buildPositionCommand,
+  buildSetOptionCommand,
+  parseClientMessage,
+  writeUciCommand,
+} from './engine-protocol';
 
 interface SessionPv {
   multipv: number;
   score?: number;
   mate?: number;
   pv?: string[];
-}
-
-interface ClientMessage {
-  type?: string;
-  fen?: string;
-  moves?: string[];
-  wtime?: number;
-  btime?: number;
-  winc?: number;
-  binc?: number;
-  depth?: number;
-  multiPv?: number;
-  name?: string;
-  value?: string | number | boolean;
-}
-
-function isClientMessage(value: unknown): value is ClientMessage {
-  return typeof value === 'object' && value !== null;
-}
-
-function numberOrDefault(value: unknown, fallback: number): number {
-  return typeof value === 'number' ? value : fallback;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function stringArrayOrEmpty(value: unknown): string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string') ? value : [];
 }
 
 // ── Ponder state machine ──────────────────────────────────────────────────────
@@ -79,54 +59,173 @@ interface EngineSession {
   lineBuffer: string;
 }
 
-const MAX_CONCURRENT = 10;
+interface QueuedClient {
+  id: string;
+  ws: WebSocket;
+  enqueuedAt: number;
+  removeCloseListener: () => void;
+}
+
+interface EnginePoolOptions {
+  maxConcurrent?: number;
+  enginePath?: string;
+  idleTimeoutMs?: number;
+  sessionMaxMs?: number;
+  spawnEngineProcess?: (enginePath: string, args: string[], options?: SpawnOptions) => ChildProcess;
+}
+
+const DEFAULT_MAX_CONCURRENT = 10;
 const IDLE_TIMEOUT_MS = 2 * 60_000;
 const SESSION_MAX_MS = 2 * 60 * 60_000;
 const HASH_SIZE_MB = 32;
 
-// When a time-control game is active we force MultiPV=1 so that pondering
-// is meaningful (we ponder the single best continuation).
-const ANALYSIS_MULTIPV = 3;
-
-class EnginePoolManager {
+export class EnginePoolManager {
   private active = new Map<string, EngineSession>();
-  private waitQueue: Array<{ ws: WebSocket; id: string }> = [];
+  private waitQueue: QueuedClient[] = [];
+  private maxConcurrent: number;
+  private enginePathOverride?: string;
+  private idleTimeoutMs: number;
+  private sessionMaxMs: number;
+  private spawnEngineProcess: (enginePath: string, args: string[], options?: SpawnOptions) => ChildProcess;
+
+  public constructor(options: EnginePoolOptions = {}) {
+    this.maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
+    this.enginePathOverride = options.enginePath;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
+    this.sessionMaxMs = options.sessionMaxMs ?? SESSION_MAX_MS;
+    this.spawnEngineProcess = options.spawnEngineProcess ?? ((enginePath, args, spawnOptions) => (
+      spawn(enginePath, args, spawnOptions ?? {})
+    ));
+  }
 
   public handleConnection(ws: WebSocket, id: string) {
-    if (this.active.size < MAX_CONCURRENT) {
+    if (!this.isSocketOpen(ws)) {
+      return;
+    }
+
+    if (this.active.size < this.maxConcurrent) {
       this.spawnEngine(ws, id);
     } else {
       if (this.waitQueue.length >= 20) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Server is full. Try again later.' }));
+        this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Server is full. Try again later.' }));
         ws.close();
         return;
       }
-      this.waitQueue.push({ ws, id });
+      this.enqueueClient(ws, id);
+    }
+  }
+
+  public getDebugState() {
+    return {
+      activeIds: Array.from(this.active.keys()),
+      queuedIds: this.waitQueue.map(item => item.id),
+    };
+  }
+
+  private enqueueClient(ws: WebSocket, id: string) {
+    if (!this.isSocketOpen(ws) || this.waitQueue.some(item => item.id === id)) {
+      return;
+    }
+
+    const handleQueuedClose = () => {
+      this.removeQueuedClient(id);
+    };
+
+    ws.once('close', handleQueuedClose);
+
+    const entry: QueuedClient = {
+      id,
+      ws,
+      enqueuedAt: Date.now(),
+      removeCloseListener: () => {
+        ws.off('close', handleQueuedClose);
+      },
+    };
+
+    this.waitQueue.push(entry);
+
+    if (!this.isSocketOpen(ws)) {
+      this.removeQueuedClient(id);
+      return;
+    }
+
+    this.updateQueuePositions();
+  }
+
+  private removeQueuedClient(id: string, updatePositions = true): boolean {
+    const qIndex = this.waitQueue.findIndex(item => item.id === id);
+    if (qIndex === -1) {
+      return false;
+    }
+
+    const [entry] = this.waitQueue.splice(qIndex, 1);
+    entry.removeCloseListener();
+
+    if (updatePositions) {
+      this.updateQueuePositions();
+    }
+
+    return true;
+  }
+
+  private pruneClosedQueuedClients(): boolean {
+    let changed = false;
+
+    for (let index = this.waitQueue.length - 1; index >= 0; index -= 1) {
+      const entry = this.waitQueue[index];
+      if (!this.isSocketOpen(entry.ws)) {
+        this.waitQueue.splice(index, 1);
+        entry.removeCloseListener();
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  private updateQueuePositions() {
+    this.pruneClosedQueuedClients();
+
+    const failedIds: string[] = [];
+
+    this.waitQueue.forEach((item, index) => {
+      const sent = this.sendIfOpen(item.ws, JSON.stringify({ type: 'queued', position: index + 1 }));
+      if (!sent) {
+        failedIds.push(item.id);
+      }
+    });
+
+    if (failedIds.length > 0) {
+      failedIds.forEach(id => this.removeQueuedClient(id, false));
       this.updateQueuePositions();
     }
   }
 
-  private updateQueuePositions() {
-    this.waitQueue.forEach((item, index) => {
-      item.ws.send(JSON.stringify({ type: 'queued', position: index + 1 }));
-    });
-  }
-
   private resolveEnginePath() {
+    if (this.enginePathOverride) {
+      return this.enginePathOverride;
+    }
+
     return process.env.ENGINE_PATH || path.join(process.cwd(), '../engine/chess-engine');
   }
 
   private spawnEngine(ws: WebSocket, id: string) {
+    if (!this.isSocketOpen(ws)) {
+      return;
+    }
+
     const enginePath = this.resolveEnginePath();
 
     if (!fs.existsSync(enginePath)) {
-      ws.send(JSON.stringify({ type: 'error', message: `Engine binary not found at ${enginePath}` }));
+      this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: `Engine binary not found at ${enginePath}` }));
       console.error(`Engine binary not found at ${enginePath}`);
       this.terminateSession(id, 'error');
       return;
     }
 
-    const engineProcess = spawn(enginePath, ['--mode=gui']);
+    const engineProcess = this.spawnEngineProcess(enginePath, ['--mode=gui'], {
+      cwd: path.dirname(enginePath),
+    });
 
     const session: EngineSession = {
       id,
@@ -134,11 +233,11 @@ class EnginePoolManager {
       ws,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
-      idleTimer: setTimeout(() => this.terminateSession(id, 'idle'), IDLE_TIMEOUT_MS),
-      sessionTimer: setTimeout(() => this.terminateSession(id, 'session_expired'), SESSION_MAX_MS),
+      idleTimer: setTimeout(() => this.terminateSession(id, 'idle'), this.idleTimeoutMs),
+      sessionTimer: setTimeout(() => this.terminateSession(id, 'session_expired'), this.sessionMaxMs),
       currentDepth: 0,
       pvs: [],
-      startFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      startFen: DEFAULT_START_FEN,
       uciMoves: [],
       ponderState: { phase: 'idle' },
       lineBuffer: '',
@@ -148,7 +247,7 @@ class EnginePoolManager {
 
     if (engineProcess.stdin && engineProcess.stdout) {
       engineProcess.stderr?.on('data', () => {});
-      engineProcess.stdin.write('uci\n');
+      writeUciCommand(engineProcess.stdin, 'uci');
 
       let isReady = false;
 
@@ -169,14 +268,14 @@ class EnginePoolManager {
           if (!isReady) {
             // ── Initialisation handshake ─────────────────────────────────
             if (trimmed === 'uciok') {
-              engineProcess.stdin?.write(`setoption name Hash value ${HASH_SIZE_MB}\n`);
-              engineProcess.stdin?.write(`setoption name OwnBook value true\n`);
-              engineProcess.stdin?.write(`setoption name BookDepth value 30\n`);
-              engineProcess.stdin?.write(`setoption name MultiPV value ${ANALYSIS_MULTIPV}\n`);
-              engineProcess.stdin?.write('isready\n');
+              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('Hash', HASH_SIZE_MB));
+              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('OwnBook', true));
+              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('BookDepth', 30));
+              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
+              writeUciCommand(engineProcess.stdin, 'isready');
             } else if (trimmed === 'readyok') {
               isReady = true;
-              ws.send(JSON.stringify({ type: 'ready' }));
+              this.sendIfOpen(ws, JSON.stringify({ type: 'ready' }));
             }
           } else {
             // ── Normal message dispatch ──────────────────────────────────
@@ -185,7 +284,7 @@ class EnginePoolManager {
             } else if (trimmed.startsWith('bestmove ')) {
               this.handleBestMoveLine(id, trimmed);
             } else if (trimmed === 'readyok') {
-              ws.send(JSON.stringify({ type: 'ready' }));
+              this.sendIfOpen(ws, JSON.stringify({ type: 'ready' }));
             }
           }
         }
@@ -193,29 +292,24 @@ class EnginePoolManager {
 
       engineProcess.on('error', (err) => {
         console.error(`Engine error (Session ${id}):`, err);
-        ws.send(JSON.stringify({ type: 'error', message: 'Engine process error' }));
+        this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Engine process error' }));
         this.terminateSession(id, 'error');
       });
 
       engineProcess.on('exit', (code) => {
         console.log(`Engine exited (Session ${id}) with code ${code}`);
         if (this.active.has(id)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Engine crashed unexpectedly' }));
+          this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Engine crashed unexpectedly' }));
           this.terminateSession(id, 'error');
         }
       });
     } else {
-      ws.send(JSON.stringify({ type: 'error', message: 'Failed to start engine' }));
+      this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Failed to start engine' }));
       this.terminateSession(id, 'error');
     }
 
     ws.on('message', (message) => {
-      try {
-        const data: unknown = JSON.parse(message.toString());
-        this.handleClientMessage(id, data);
-      } catch (e) {
-        console.error('Invalid message from client:', e);
-      }
+      this.handleRawClientMessage(id, ws, message);
     });
 
     ws.on('close', () => {
@@ -289,7 +383,7 @@ class EnginePoolManager {
 
       // Build the real position (opponent played pendingUserMove)
       const realMoves = [...baseMoves, pendingUserMove];
-      session.process.stdin?.write(`setoption name MultiPV value ${pendingMultiPv}\n`);
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', pendingMultiPv));
       this.sendPositionAndGo(session, baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth);
       return;
     }
@@ -305,14 +399,10 @@ class EnginePoolManager {
       // Start pondering if we have a ponder move
       if (ponderMove && session.process.stdin && ps.searchMode === 'tc') {
         const ponderMoves = [...session.uciMoves, bestMove];
-        const isStartPos = session.startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-        const posCmd = isStartPos
-          ? `position startpos moves ${ponderMoves.join(' ')}\n`
-          : `position fen ${session.startFen} moves ${ponderMoves.join(' ')}\n`;
 
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderMove}`);
-        session.process.stdin.write(posCmd);
-        session.process.stdin.write('go ponder\n');
+        writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderMoves));
+        writeUciCommand(session.process.stdin, 'go ponder');
 
         session.ponderState = {
           phase: 'pondering',
@@ -343,28 +433,38 @@ class EnginePoolManager {
 
   // ── Client message handler ─────────────────────────────────────────────────
 
-  private handleClientMessage(id: string, data: unknown) {
+  private handleRawClientMessage(id: string, ws: WebSocket, raw: RawData) {
+    const parsed = parseClientMessage(raw);
+    if (parsed.ok === false) {
+      this.sendIfOpen(ws, JSON.stringify({
+        type: 'error',
+        code: parsed.error.code,
+        message: parsed.error.message,
+      }));
+      return;
+    }
+
+    this.handleClientMessage(id, parsed.value);
+  }
+
+  private handleClientMessage(id: string, data: ClientMessage) {
     const session = this.active.get(id);
     if (!session || !session.process.stdin) return;
-    if (!isClientMessage(data)) return;
 
     this.updateActivity(id);
 
     // ── move (time-controlled game) ────────────────────────────────────────
     if (data.type === 'move') {
-      const moves = stringArrayOrEmpty(data.moves);
-      const wtime = numberOrDefault(data.wtime, 0);
-      const btime = numberOrDefault(data.btime, 0);
-      const winc  = numberOrDefault(data.winc, 0);
-      const binc  = numberOrDefault(data.binc, 0);
-      const depth: number | undefined = data.depth;
-      const targetMultiPv: number = data.multiPv ?? 1;
+      const moves = data.moves;
+      const wtime = data.wtime;
+      const btime = data.btime;
+      const winc  = data.winc;
+      const binc  = data.binc;
+      const depth = data.depth;
+      const targetMultiPv = data.multiPv;
 
       // Update position shadow
-      let startFen = session.startFen;
-      if (!startFen || moves.length === 0) {
-        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-      }
+      const startFen = data.fen;
       session.startFen = startFen;
       session.uciMoves = moves;
 
@@ -407,7 +507,7 @@ class EnginePoolManager {
       }
 
       // Not pondering — issue position + go directly.
-      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
       this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
       return;
@@ -415,18 +515,10 @@ class EnginePoolManager {
 
     // ── position (Analysis Mode FEN load, no search) ───────────────────────
     if (data.type === 'position') {
-      const moves = stringArrayOrEmpty(data.moves);
+      const moves = data.moves;
       this.stopPonderSilently(session);
-      let startFen = session.startFen;
-      if (!startFen || moves.length === 0) {
-        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-      }
-      const movesStr = moves.length > 0 ? ` moves ${moves.join(' ')}` : '';
-      const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-      const positionCmd = isStartPos
-        ? `position startpos${movesStr}\n`
-        : `position fen ${startFen}${movesStr}\n`;
-      session.process.stdin.write(positionCmd);
+      const startFen = data.fen;
+      writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
       session.startFen = startFen;
       session.uciMoves = moves;
       return;
@@ -434,23 +526,21 @@ class EnginePoolManager {
 
     // ── analyze (Analysis Mode deep search) ───────────────────────────────
     if (data.type === 'analyze') {
-      const moves = stringArrayOrEmpty(data.moves);
+      const moves = data.moves;
       const targetMultiPv = data.multiPv ?? ANALYSIS_MULTIPV;
       this.stopPonderSilently(session);
       // Restore MultiPV for analysis
-      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
-      let startFen = session.startFen;
-      if (!startFen || moves.length === 0) {
-        startFen = data.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-      }
-      const movesStr = moves.length > 0 ? ` moves ${moves.join(' ')}` : '';
-      const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-      const positionCmd = isStartPos
-        ? `position startpos${movesStr}\n`
-        : `position fen ${startFen}${movesStr}\n`;
-      session.process.stdin.write(positionCmd);
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
+      const startFen = data.fen;
+      writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
       const targetDepth = data.depth || 30;
-      session.process.stdin.write(`go depth ${targetDepth}\n`);
+      writeUciCommand(session.process.stdin, buildGoCommand({
+        depth: targetDepth,
+        wtime: 0,
+        btime: 0,
+        winc: 0,
+        binc: 0,
+      }));
       session.startFen = startFen;
       session.uciMoves = moves;
       session.ponderState = {
@@ -469,10 +559,10 @@ class EnginePoolManager {
     if (data.type === 'newgame') {
       this.stopPonderSilently(session);
       // Restore analysis MultiPV default between games
-      session.process.stdin.write(`setoption name MultiPV value ${ANALYSIS_MULTIPV}\n`);
-      session.process.stdin.write('ucinewgame\n');
-      session.process.stdin.write('isready\n');
-      session.startFen   = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
+      writeUciCommand(session.process.stdin, 'ucinewgame');
+      writeUciCommand(session.process.stdin, 'isready');
+      session.startFen = DEFAULT_START_FEN;
       session.uciMoves = [];
       session.ponderState  = { phase: 'idle' };
       return;
@@ -481,24 +571,21 @@ class EnginePoolManager {
     // ── stop ──────────────────────────────────────────────────────────────
     if (data.type === 'stop') {
       this.stopPonderSilently(session);
-      session.process.stdin.write('stop\n');
+      writeUciCommand(session.process.stdin, 'stop');
       return;
     }
 
     // ── releaseSession ─────────────────────────────────────────────────────
     if (data.type === 'releaseSession') {
       this.stopPonderSilently(session);
-      session.process.stdin.write('stop\n');
+      writeUciCommand(session.process.stdin, 'stop');
       this.terminateSession(id, 'released');
       return;
     }
 
     // ── setoption ─────────────────────────────────────────────────────────
     if (data.type === 'setoption') {
-      const name = stringOrUndefined(data.name);
-      if (name !== undefined && data.value !== undefined) {
-        session.process.stdin.write(`setoption name ${name} value ${data.value}\n`);
-      }
+      writeUciCommand(session.process.stdin, buildSetOptionCommand(data.name, data.value));
       return;
     }
   }
@@ -540,10 +627,10 @@ class EnginePoolManager {
         baseFen:   startFen,
         baseMoves: moves,
       };
-      session.process.stdin.write('stop\n');
+      writeUciCommand(session.process.stdin, 'stop');
     } else {
       // Not pondering — issue immediately
-      session.process.stdin.write(`setoption name MultiPV value ${targetMultiPv}\n`);
+      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', targetMultiPv));
       this.sendPositionAndGo(session, startFen, moves, wtime, btime, winc, binc, depth);
       session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc, depth };
     }
@@ -568,9 +655,9 @@ class EnginePoolManager {
         pendingBinc: 0,
         pendingMultiPv: 1,
       };
-      session.process.stdin.write('stop\n');
+      writeUciCommand(session.process.stdin, 'stop');
     } else if (ps.phase === 'thinking') {
-      session.process.stdin.write('stop\n');
+      writeUciCommand(session.process.stdin, 'stop');
       session.ponderState = { phase: 'idle' };
     }
   }
@@ -590,27 +677,8 @@ class EnginePoolManager {
   ) {
     if (!session.process.stdin) return;
 
-    const movesStr  = moves.length > 0 ? ` moves ${moves.join(' ')}` : '';
-    const isStartPos = startFen === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-    const posCmd = isStartPos
-      ? `position startpos${movesStr}\n`
-      : `position fen ${startFen}${movesStr}\n`;
-
-    session.process.stdin.write(posCmd);
-
-    const hasTC = wtime > 0 || btime > 0;
-    let goCmd: string;
-    if (depth !== undefined) {
-      // Training Mode: ignore clock entirely, enforce strict depth
-      goCmd = `go depth ${depth}\n`;
-    } else if (hasTC) {
-      goCmd = `go wtime ${wtime} btime ${btime} winc ${winc} binc ${binc}\n`;
-    } else {
-      // Fallback: fixed movetime for difficulty-based games
-      goCmd = 'go movetime 3000\n';
-    }
-
-    session.process.stdin.write(goCmd);
+    writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
+    writeUciCommand(session.process.stdin, buildGoCommand({ depth, wtime, btime, winc, binc }));
     session.ponderState = { phase: 'thinking', searchMode: 'tc', wtime, btime, winc, binc };
     session.startFen = startFen;
     session.uciMoves = moves;
@@ -623,20 +691,33 @@ class EnginePoolManager {
     if (session) {
       session.lastActivityAt = Date.now();
       clearTimeout(session.idleTimer);
-      session.idleTimer = setTimeout(() => this.terminateSession(id, 'idle'), IDLE_TIMEOUT_MS);
+      session.idleTimer = setTimeout(() => this.terminateSession(id, 'idle'), this.idleTimeoutMs);
       clearTimeout(session.sessionTimer);
-      session.sessionTimer = setTimeout(() => this.terminateSession(id, 'session_expired'), SESSION_MAX_MS);
+      session.sessionTimer = setTimeout(() => this.terminateSession(id, 'session_expired'), this.sessionMaxMs);
+    }
+  }
+
+  private isSocketOpen(ws: WebSocket) {
+    return ws.readyState === WebSocket.OPEN;
+  }
+
+  private sendIfOpen(ws: WebSocket, payload: string) {
+    if (!this.isSocketOpen(ws)) {
+      return false;
+    }
+
+    try {
+      ws.send(payload);
+      return true;
+    } catch {
+      return false;
     }
   }
 
   private terminateSession(id: string, reason: string) {
     const session = this.active.get(id);
     if (!session) {
-      const qIndex = this.waitQueue.findIndex(item => item.id === id);
-      if (qIndex !== -1) {
-        this.waitQueue.splice(qIndex, 1);
-        this.updateQueuePositions();
-      }
+      this.removeQueuedClient(id);
       return;
     }
 
@@ -645,19 +726,21 @@ class EnginePoolManager {
     clearTimeout(session.idleTimer);
     clearTimeout(session.sessionTimer);
 
+    this.active.delete(id);
+
     if (reason === 'session_expired' || reason === 'idle' || reason === 'released') {
       if (session.ws.readyState === WebSocket.OPEN) {
         if (reason === 'released') {
-          session.ws.send(JSON.stringify({ type: 'released' }));
+          this.sendIfOpen(session.ws, JSON.stringify({ type: 'released' }));
         } else {
-          session.ws.send(JSON.stringify({ type: 'session_expired', reason }));
+          this.sendIfOpen(session.ws, JSON.stringify({ type: 'session_expired', reason }));
         }
         session.ws.close();
       }
     }
 
     if (session.process.stdin) {
-      session.process.stdin.write('quit\n');
+      writeUciCommand(session.process.stdin, 'quit');
     }
 
     session.process.kill('SIGTERM');
@@ -667,17 +750,32 @@ class EnginePoolManager {
       }
     }, 3000);
 
-    this.active.delete(id);
     this.dequeueNext();
   }
 
   private dequeueNext() {
-    if (this.waitQueue.length > 0 && this.active.size < MAX_CONCURRENT) {
+    let queueChanged = false;
+
+    while (this.waitQueue.length > 0 && this.active.size < this.maxConcurrent) {
       const next = this.waitQueue.shift();
       if (next) {
+        queueChanged = true;
+        next.removeCloseListener();
+
+        if (!this.isSocketOpen(next.ws)) {
+          continue;
+        }
+
         this.spawnEngine(next.ws, next.id);
-        this.updateQueuePositions();
+
+        if (this.active.has(next.id)) {
+          break;
+        }
       }
+    }
+
+    if (queueChanged) {
+      this.updateQueuePositions();
     }
   }
 }

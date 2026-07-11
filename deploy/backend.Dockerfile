@@ -23,15 +23,15 @@ COPY --from=engine-builder /app/engine/openings /app/engine/openings
 WORKDIR /app/website
 COPY website/package*.json ./
 
-# Install ALL deps (need typescript and ts-node to compile server.ts)
+# Install ALL deps (need TypeScript to compile server.ts)
 RUN npm ci
 
 COPY website/ ./
 
 # Compile server.ts to dist/server.js — no ts-node at runtime
-RUN npx tsc --project tsconfig.server.json
+RUN npm run build:server
 
-# Expose backend WebSocket port
-EXPOSE 8080
+# Default backend WebSocket port. Runtime can override with PORT/BACKEND_PORT.
+EXPOSE 3001
 
-CMD ["npm", "run", "start:server"]
+CMD ["npm", "run", "start:backend"]

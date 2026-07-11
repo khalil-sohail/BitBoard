@@ -1,5 +1,7 @@
 import('ws').then(({ default: WebSocket }) => {
-  const ws = new WebSocket('ws://localhost:3000/api/engine');
+  const port = process.env.PORT || process.env.FRONTEND_PORT || process.env.BACKEND_PORT || '3000';
+  const url = process.env.WS_URL || `ws://localhost:${port}/api/engine`;
+  const ws = new WebSocket(url);
 
   ws.on('open', () => {
     console.log('Connected');

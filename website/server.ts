@@ -1,15 +1,15 @@
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
-import { loadEnvConfig } from '@next/env';
 import { WebSocketServer } from 'ws';
 import { enginePool } from './src/lib/engine-session';
-
-loadEnvConfig(process.cwd());
+import { loadServerEnvironment, resolveRuntimePort } from './src/lib/server-config';
 
 const dev = process.env.NODE_ENV !== 'production';
+loadServerEnvironment(process.cwd(), dev);
+
 const hostname = process.env.HOSTNAME || '0.0.0.0';
-const port = parseInt(process.env.PORT || '3000', 10);
+const port = resolveRuntimePort();
 
 if (process.env.BACKEND_ONLY === 'true') {
   const server = createServer((req, res) => {
