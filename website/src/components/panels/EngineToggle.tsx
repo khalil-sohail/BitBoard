@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from 'react';
 import { Badge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
-import { useEngine } from '../../hooks/useEngine';
 import { GameMode } from '../../types/engine';
 
 interface EngineToggleProps {
@@ -13,13 +11,23 @@ interface EngineToggleProps {
   multiPv: number;
   onMultiPvChange: (lines: number) => void;
   gameMode: GameMode;
+  ownBook: boolean;
+  optionsDisabled: boolean;
+  onOwnBookChange: (enabled: boolean) => void;
 }
 
-export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onDepthChange, multiPv, onMultiPvChange, gameMode }: EngineToggleProps) {
+export function EngineToggle({
+  currentVersion = "Texel-Tuned HCE",
+  maxDepth,
+  onDepthChange,
+  multiPv,
+  onMultiPvChange,
+  gameMode,
+  ownBook,
+  optionsDisabled,
+  onOwnBookChange,
+}: EngineToggleProps) {
   const { addToast } = useToast();
-  const { setEngineOption } = useEngine();
-  
-  const [useBook, setUseBook] = useState(true);
 
   const handleNNUEClick = () => {
     addToast('NNUE evaluation is currently under development.', 'info');
@@ -30,9 +38,7 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
   };
 
   const handleToggleBook = () => {
-    const newVal = !useBook;
-    setUseBook(newVal);
-    setEngineOption('OwnBook', newVal);
+    onOwnBookChange(!ownBook);
   };
 
   const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,9 +107,10 @@ export function EngineToggle({ currentVersion = "Texel-Tuned HCE", maxDepth, onD
             </label>
             <button
               onClick={handleToggleBook}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none ${useBook ? 'bg-primary' : 'bg-white/10'}`}
+              disabled={optionsDisabled}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${ownBook ? 'bg-primary' : 'bg-white/10'}`}
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${useBook ? 'translate-x-6' : 'translate-x-1'}`} />
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${ownBook ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>

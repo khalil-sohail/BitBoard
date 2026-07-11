@@ -509,6 +509,107 @@ async function testRapidAnalyzeReplacementUsesLatestRequest(): Promise<void> {
   socket.close();
 }
 
+async function testSetOptionUsesActiveSessionBeforeSearch(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 20, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  await flushEvents();
+
+  assert.deepEqual(engine.writes.slice(0, 4), [
+    'setoption name OwnBook value false',
+    'setoption name MultiPV value 1',
+    'position startpos',
+    'go depth 2',
+  ]);
+
+  engine.emitInfo('info depth 1 score cp 20 nodes 1 time 1 pv e2e4');
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 20);
+
+  socket.close();
+}
+
+async function testSetOptionDoesNotLeakAcrossClients(): Promise<void> {
+  const firstEngine = new ManualEngineProcess();
+  const secondEngine = new ManualEngineProcess();
+  const engines = [firstEngine, secondEngine];
+  let spawnIndex = 0;
+  const pool = new EnginePoolManager({
+    maxConcurrent: 2,
+    enginePath: process.execPath,
+    idleTimeoutMs: 30_000,
+    sessionMaxMs: 30_000,
+    spawnEngineProcess: () => {
+      const engine = engines[spawnIndex];
+      spawnIndex += 1;
+      if (!engine) throw new Error('unexpected engine spawn');
+      return engine.asChildProcess();
+    },
+  });
+  const firstSocket = new MockSocket();
+  const secondSocket = new MockSocket();
+
+  pool.handleConnection(firstSocket.asWebSocket(), 'first');
+  pool.handleConnection(secondSocket.asWebSocket(), 'second');
+  await waitForMessage(firstSocket, 'ready');
+  await waitForMessage(secondSocket, 'ready');
+  firstEngine.writes.length = 0;
+  secondEngine.writes.length = 0;
+
+  firstSocket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
+  secondSocket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: true }));
+  firstSocket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 40, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  await flushEvents();
+
+  assert.ok(firstEngine.writes.includes('setoption name OwnBook value false'));
+  assert.ok(firstEngine.writes.includes('go depth 2'));
+  assert.equal(firstEngine.writes.includes('setoption name OwnBook value true'), false);
+  assert.deepEqual(secondEngine.writes, ['setoption name OwnBook value true']);
+
+  firstSocket.close();
+  secondSocket.close();
+}
+
+async function testSetOptionQueuesBehindActiveSearch(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 30, fen: DEFAULT_START_FEN, moves: [], depth: 3, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
+  await flushEvents();
+
+  assert.ok(engine.writes.includes('stop'));
+  assert.equal(engine.writes.includes('setoption name OwnBook value false'), false);
+
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  assert.ok(engine.writes.includes('setoption name OwnBook value false'));
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+
+  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 31, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  engine.emitBestMove('bestmove d2d4');
+  await flushEvents();
+
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 31);
+  socket.close();
+}
+
+async function testNewGameDoesNotResetOwnBookOption(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
+  socket.emitRawMessage(JSON.stringify({ type: 'newgame' }));
+  await flushEvents();
+
+  const ownBookWrites = engine.writes.filter(line => line.startsWith('setoption name OwnBook'));
+  assert.deepEqual(ownBookWrites, ['setoption name OwnBook value false']);
+  assert.ok(engine.writes.includes('ucinewgame'));
+
+  socket.close();
+}
+
 async function run(): Promise<void> {
   testJsonBoundary();
   testFenValidation();
@@ -524,6 +625,10 @@ async function run(): Promise<void> {
   await testNewGameSwallowsOldBestMove();
   await testReleaseSessionIgnoresProcessOutput();
   await testRapidAnalyzeReplacementUsesLatestRequest();
+  await testSetOptionUsesActiveSessionBeforeSearch();
+  await testSetOptionDoesNotLeakAcrossClients();
+  await testSetOptionQueuesBehindActiveSearch();
+  await testNewGameDoesNotResetOwnBookOption();
 
   console.log('engine-session protocol tests passed');
 }

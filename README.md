@@ -140,7 +140,9 @@ backend-only modes use `BACKEND_PORT`.
 dev:frontend      -> FRONTEND_PORT
 dev:full          -> FRONTEND_PORT
 start:frontend    -> FRONTEND_PORT
-start:server      -> FRONTEND_PORT
+start             -> FRONTEND_PORT
+start:full        -> FRONTEND_PORT
+start:server      -> FRONTEND_PORT (alias for start:full)
 
 dev:backend       -> BACKEND_PORT
 start:backend     -> BACKEND_PORT
@@ -150,6 +152,26 @@ start:backend     -> BACKEND_PORT
 FRONTEND_PORT=3100 npm run dev:frontend
 BACKEND_PORT=3101 npm run dev:backend
 ```
+
+For local production, build the website and start the complete same-origin
+application:
+
+```bash
+cd website
+npm run build
+FRONTEND_PORT=3050 ENGINE_PATH=../engine/chess-engine npm start
+```
+
+`npm start` is an alias for `start:full`; it runs the compiled custom server,
+serves the Next.js frontend, and handles `/api/engine` WebSocket upgrades on
+the same public origin. `npm run start:frontend` starts only the standalone
+Next.js frontend and is intended for split/reverse-proxy deployments where
+`/api/engine` is routed to a backend service externally. `npm run
+start:backend` starts only the WebSocket/engine service.
+
+Engine settings shown in the web UI are sent through the page's active engine
+session. They persist across `ucinewgame` in the current page session and are
+reapplied when the page reconnects to a new engine process.
 
 ## Docker Setup
 

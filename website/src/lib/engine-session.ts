@@ -13,6 +13,7 @@ import {
   parseClientMessage,
   writeUciCommand,
 } from './engine-protocol';
+import type { EngineOptionName } from './engine-protocol';
 
 interface SessionPv {
   multipv: number;
@@ -67,7 +68,8 @@ type PendingOperation =
       multiPv: number;
     }
   | { type: 'newgame' }
-  | { type: 'position'; startFen: string; moves: string[] };
+  | { type: 'position'; startFen: string; moves: string[] }
+  | { type: 'setoption'; name: EngineOptionName; value: number | boolean };
 
 interface EngineSession {
   id: string;
@@ -635,7 +637,11 @@ export class EnginePoolManager {
 
     // ── setoption ─────────────────────────────────────────────────────────
     if (data.type === 'setoption') {
-      writeUciCommand(session.process.stdin, buildSetOptionCommand(data.name, data.value));
+      this.enqueueControlOperation(session, {
+        type: 'setoption',
+        name: data.name,
+        value: data.value,
+      });
       return;
     }
   }
@@ -723,6 +729,11 @@ export class EnginePoolManager {
       writeUciCommand(session.process.stdin, 'isready');
       session.startFen = DEFAULT_START_FEN;
       session.uciMoves = [];
+      return;
+    }
+
+    if (operation.type === 'setoption') {
+      writeUciCommand(session.process.stdin, buildSetOptionCommand(operation.name, operation.value));
       return;
     }
 

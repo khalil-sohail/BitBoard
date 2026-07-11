@@ -42,7 +42,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession } = useEngine();
+  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -56,10 +56,12 @@ export default function Home() {
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
   const [maxDepth, setMaxDepth] = useState(10);
   const [multiPv, setMultiPv] = useState(3);
+  const [ownBook, setOwnBook] = useState(true);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const appliedOwnBookRef = useRef<boolean | null>(null);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -106,6 +108,44 @@ export default function Home() {
   const showEnginePanel = isTraining || isAnalysis;
   const showEngineConf  = isTraining || isAnalysis;
   const showClock       = !isAnalysis && hasTC;
+
+  const engineOptionsUnavailable =
+    status === 'connecting' ||
+    status === 'queued' ||
+    status === 'disconnected' ||
+    status === 'session_expired' ||
+    status === 'error' ||
+    status === 'thinking' ||
+    status === 'analyzing';
+
+  useEffect(() => {
+    if (
+      status === 'connecting' ||
+      status === 'queued' ||
+      status === 'disconnected' ||
+      status === 'session_expired' ||
+      status === 'error'
+    ) {
+      appliedOwnBookRef.current = null;
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== 'idle') return;
+    if (appliedOwnBookRef.current === ownBook) return;
+    setEngineOption('OwnBook', ownBook);
+    appliedOwnBookRef.current = ownBook;
+  }, [ownBook, setEngineOption, status]);
+
+  const handleOwnBookChange = useCallback((enabled: boolean) => {
+    setOwnBook(enabled);
+    if (status === 'idle') {
+      setEngineOption('OwnBook', enabled);
+      appliedOwnBookRef.current = enabled;
+    } else {
+      appliedOwnBookRef.current = null;
+    }
+  }, [setEngineOption, status]);
 
   // ── Effective game-over (board or resign) ────────────────────────────────
   const effectiveGameOver = (gameStatus === 'active' && isGameOver) || gameStatus === 'completed';
@@ -568,6 +608,9 @@ export default function Home() {
                 multiPv={multiPv}
                 onMultiPvChange={setMultiPv}
                 gameMode={gameMode}
+                ownBook={ownBook}
+                optionsDisabled={engineOptionsUnavailable}
+                onOwnBookChange={handleOwnBookChange}
               />
             )}
 

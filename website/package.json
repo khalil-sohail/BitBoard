@@ -14,18 +14,20 @@
     "build:frontend": "next build",
     "build:server": "tsc --project tsconfig.server.json",
     "build:all": "npm run build:frontend && npm run build:server",
-    "start": "npm run start:frontend",
+    "start": "npm run start:full",
     "start:frontend": "node scripts/run-with-port.mjs frontend production -- node scripts/start-standalone.mjs",
     "start:backend": "node scripts/run-with-port.mjs backend production BACKEND_ONLY=true -- node dist/server.js",
-    "start:server": "node scripts/run-with-port.mjs full-stack production -- node dist/server.js",
+    "start:full": "node scripts/run-with-port.mjs full-stack production -- node dist/server.js",
+    "start:server": "npm run start:full",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --pretty false",
     "test:queue": "ts-node --project tsconfig.server.json src/lib/engine-session.queue.test.ts",
     "test:protocol": "ts-node --project tsconfig.server.json src/lib/engine-session.protocol.test.ts",
     "test:engine-filter": "ts-node --project tsconfig.server.json src/lib/engine-response-filter.test.ts",
     "test:evaluation": "ts-node --project tsconfig.server.json src/lib/engine-evaluation.test.ts",
+    "test:ownership": "ts-node --project tsconfig.server.json src/components/engine-ownership.test.ts",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation && npm run test:ownership"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

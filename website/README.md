@@ -50,7 +50,9 @@ values are preserved over file values.
 dev:frontend      -> FRONTEND_PORT
 dev:full          -> FRONTEND_PORT
 start:frontend    -> FRONTEND_PORT
-start:server      -> FRONTEND_PORT
+start             -> FRONTEND_PORT
+start:full        -> FRONTEND_PORT
+start:server      -> FRONTEND_PORT (alias for start:full)
 
 dev:backend       -> BACKEND_PORT
 start:backend     -> BACKEND_PORT
@@ -76,11 +78,21 @@ npm run build:all
 ## Production Start
 
 ```bash
+FRONTEND_PORT=3050 ENGINE_PATH=../engine/chess-engine npm start
+```
+
+Starts the complete local production application with the compiled custom
+server from `dist/server.js`: Next.js frontend routes and same-origin
+`/api/engine` WebSocket upgrades are both served by one process.
+
+```bash
 FRONTEND_PORT=3020 npm run start:frontend
 ```
 
 Prepares `.next/static` and `public` beside the standalone artifact, then starts
-`.next/standalone/server.js`.
+`.next/standalone/server.js`. This is frontend-only; it does not install the
+custom `/api/engine` upgrade handler. Use it only when a reverse proxy or split
+deployment routes `/api/engine` to a backend service.
 
 ```bash
 BACKEND_PORT=3021 ENGINE_PATH=../engine/chess-engine npm run start:backend
@@ -88,9 +100,13 @@ BACKEND_PORT=3021 ENGINE_PATH=../engine/chess-engine npm run start:backend
 
 Starts the compiled backend from `dist/server.js` with `BACKEND_ONLY=true`.
 
-The backend respects `HOSTNAME`, `PORT`, `BACKEND_PORT`, `BACKEND_ONLY`,
-`ENGINE_PATH`, and `DEBUG`. Both frontend and backend are required for the full
-chess experience.
+`npm run start:full` is the explicit full-stack command, and `npm run
+start:server` remains a compatibility alias for it. The backend respects
+`HOSTNAME`, `PORT`, `BACKEND_PORT`, `BACKEND_ONLY`, `ENGINE_PATH`, and `DEBUG`.
+
+Engine settings in the UI are sent through the page-owned active engine
+connection. They persist across new games in the current page session and are
+reapplied after reconnect when a new engine process is created.
 
 ## Tests
 
