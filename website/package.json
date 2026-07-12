@@ -28,10 +28,11 @@
     "test:difficulty": "ts-node --project tsconfig.server.json src/lib/engine-difficulty.test.ts",
     "test:terminal": "ts-node --project tsconfig.server.json src/lib/engine-terminal.test.ts",
     "test:promotion": "ts-node --project tsconfig.server.json src/lib/promotion.test.ts",
+    "test:training-hint": "ts-node --project tsconfig.server.json src/lib/training-hint.test.ts",
     "test:training-machine": "ts-node --project tsconfig.server.json src/lib/training-machine.test.ts",
     "test:ownership": "ts-node --project tsconfig.server.json src/components/engine-ownership.test.ts",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:promotion && npm run test:training-machine && npm run test:ownership"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:ownership"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

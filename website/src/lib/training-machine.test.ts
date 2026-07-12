@@ -3,6 +3,7 @@ import {
   assertTrainingInvariant,
   canChangeTrainingSettings,
   canPlayerMove,
+  canRequestHint,
   initialTrainingState,
   isBoardLocked,
   isEngineWorkPending,
@@ -88,6 +89,70 @@ function testEngineAndTerminalFlow(): void {
   assert.deepEqual(resultFromTerminal({ reason: 'stalemate' }), { reason: 'stalemate' });
 }
 
+function testHintFlow(): void {
+  const waiting: TrainingState = { status: 'waiting-player', playerColor: 'w' };
+  const requested = trainingReducer(waiting, { type: 'HINT_REQUESTED', fen: 'fen-a' });
+  assert.deepEqual(requested, {
+    status: 'waiting-player',
+    playerColor: 'w',
+    hint: { fen: 'fen-a', level: 1, status: 'idle', requestId: undefined, move: undefined, message: undefined },
+  });
+
+  const searching = trainingReducer(requested, { type: 'HINT_SEARCH_STARTED', fen: 'fen-a', requestId: 10 });
+  assert.deepEqual(searching, {
+    status: 'waiting-player',
+    playerColor: 'w',
+    hint: { fen: 'fen-a', level: 1, status: 'searching', requestId: 10, move: undefined, message: undefined },
+  });
+  assert.equal(trainingReducer(searching, { type: 'HINT_SEARCH_STARTED', fen: 'fen-b', requestId: 11 }), searching);
+  assert.equal(trainingReducer(searching, { type: 'HINT_AVAILABLE', fen: 'fen-a', requestId: 11, move: 'e2e4' }), searching);
+
+  const available = trainingReducer(searching, { type: 'HINT_AVAILABLE', fen: 'fen-a', requestId: 10, move: 'e2e4' });
+  assert.deepEqual(available, {
+    status: 'waiting-player',
+    playerColor: 'w',
+    hint: { fen: 'fen-a', level: 1, status: 'available', requestId: undefined, move: 'e2e4', message: undefined },
+  });
+  const advanced = trainingReducer(available, { type: 'HINT_REQUESTED', fen: 'fen-a' });
+  assert.equal(advanced.status, 'waiting-player');
+  if (advanced.status === 'waiting-player') {
+    assert.equal(advanced.hint?.level, 2);
+    assert.equal(advanced.hint?.move, 'e2e4');
+  }
+
+  assert.deepEqual(trainingReducer(available, { type: 'REVIEW_STARTED', reviewId: 5 }), {
+    status: 'reviewing-player-move',
+    playerColor: 'w',
+    reviewId: 5,
+  });
+  assert.deepEqual(trainingReducer(available, { type: 'PROMOTION_REQUIRED', promotion: whitePromotion }), {
+    status: 'promotion-pending',
+    playerColor: 'w',
+    promotion: whitePromotion,
+  });
+  assert.deepEqual(trainingReducer(available, { type: 'RESET_REQUESTED', reason: 'manual', playerColor: 'w' }), {
+    status: 'resetting',
+    reason: 'manual',
+    playerColor: 'w',
+  });
+  assert.deepEqual(trainingReducer(available, { type: 'EXIT' }), { status: 'inactive' });
+  assert.deepEqual(trainingReducer(available, {
+    type: 'TERMINAL',
+    result: { reason: 'draw' },
+  }), {
+    status: 'game-over',
+    result: { reason: 'draw' },
+  });
+  assert.deepEqual(trainingReducer(available, { type: 'DISCONNECTED' }), {
+    status: 'connection-lost',
+    recoverTo: { status: 'waiting-player', playerColor: 'w' },
+  });
+  assert.deepEqual(trainingReducer(searching, { type: 'ENGINE_FAILED', message: 'boom' }), {
+    status: 'engine-error',
+    message: 'boom',
+  });
+}
+
 function testResetFlow(): void {
   for (const state of states().filter(s => s.status !== 'inactive')) {
     const resetting = trainingReducer(state, { type: 'RESET_REQUESTED', reason: 'manual', playerColor: 'w' });
@@ -125,6 +190,20 @@ function testSelectorsAndInvariants(): void {
   assert.equal(isEngineWorkPending({ status: 'waiting-engine-move', playerColor: 'w' }), true);
   assert.equal(canChangeTrainingSettings({ status: 'reviewing-player-move', playerColor: 'w', reviewId: 1 }), false);
   assert.equal(canChangeTrainingSettings({ status: 'waiting-player', playerColor: 'w' }), true);
+  assert.equal(canRequestHint({ status: 'waiting-player', playerColor: 'w' }, 'idle', {
+    isTraining: true,
+    isGameActive: true,
+    isTerminal: false,
+    isPlayerTurn: true,
+    hasPromotionPending: false,
+  }), true);
+  assert.equal(canRequestHint({ status: 'waiting-player', playerColor: 'w' }, 'analyzing', {
+    isTraining: true,
+    isGameActive: true,
+    isTerminal: false,
+    isPlayerTurn: true,
+    hasPromotionPending: false,
+  }), false);
 
   for (const state of states()) {
     assert.doesNotThrow(() => assertTrainingInvariant(state));
@@ -162,6 +241,7 @@ function run(): void {
   testPlayerAndPromotionFlow();
   testReviewFlow();
   testEngineAndTerminalFlow();
+  testHintFlow();
   testResetFlow();
   testConnectionAndErrorFlow();
   testSelectorsAndInvariants();

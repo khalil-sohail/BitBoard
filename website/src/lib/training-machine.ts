@@ -7,10 +7,22 @@ export type GameResult =
   | { reason: 'checkmate'; winner: 'white' | 'black' }
   | { reason: 'stalemate' | 'draw' | 'timeout' | 'resignation' | 'unknown'; winner?: 'white' | 'black' };
 
+export type HintLevel = 0 | 1 | 2 | 3;
+export type HintStatus = 'idle' | 'searching' | 'available' | 'error';
+
+export interface HintContext {
+  fen: string;
+  level: HintLevel;
+  status: HintStatus;
+  requestId?: number;
+  move?: string;
+  message?: string;
+}
+
 export type TrainingState =
   | { status: 'inactive' }
   | { status: 'initializing'; playerColor: PlayerColor }
-  | { status: 'waiting-player'; playerColor: PlayerColor }
+  | { status: 'waiting-player'; playerColor: PlayerColor; hint?: HintContext }
   | { status: 'promotion-pending'; playerColor: PlayerColor; promotion: PendingPromotion }
   | { status: 'reviewing-player-move'; playerColor: PlayerColor; reviewId: number }
   | { status: 'showing-feedback'; playerColor: PlayerColor; reviewId: number; available: boolean }
@@ -34,6 +46,11 @@ export type TrainingEvent =
   | { type: 'FEEDBACK_SHOWN' }
   | { type: 'ENGINE_SEARCH_STARTED'; requestId?: number }
   | { type: 'ENGINE_MOVE_RECEIVED'; requestId?: number }
+  | { type: 'HINT_REQUESTED'; fen: string }
+  | { type: 'HINT_SEARCH_STARTED'; fen: string; requestId: number }
+  | { type: 'HINT_AVAILABLE'; fen: string; move: string; requestId?: number }
+  | { type: 'HINT_FAILED'; fen?: string; requestId?: number; message?: string }
+  | { type: 'HINT_CLEARED' }
   | { type: 'TERMINAL'; result: GameResult }
   | { type: 'RESET_REQUESTED'; reason: ResetReason; playerColor?: PlayerColor }
   | { type: 'RESET_COMPLETED'; playerColor: PlayerColor; turn: PlayerColor }
@@ -99,6 +116,47 @@ export function trainingReducer(state: TrainingState, event: TrainingEvent): Tra
       if (state.requestId !== undefined && event.requestId !== undefined && state.requestId !== event.requestId) return state;
       return { status: 'waiting-player', playerColor: state.playerColor };
 
+    case 'HINT_REQUESTED': {
+      if (state.status !== 'waiting-player') return state;
+      const sameFen = state.hint?.fen === event.fen;
+      if (sameFen && state.hint?.status === 'searching') return state;
+      const currentLevel = sameFen ? state.hint?.level ?? 0 : 0;
+      const nextLevel = Math.min(3, currentLevel + 1) as HintLevel;
+      return {
+        ...state,
+        hint: {
+          fen: event.fen,
+          level: nextLevel,
+          status: sameFen && state.hint?.move ? 'available' : 'idle',
+          move: sameFen ? state.hint?.move : undefined,
+          requestId: undefined,
+          message: undefined,
+        },
+      };
+    }
+
+    case 'HINT_SEARCH_STARTED':
+      if (state.status !== 'waiting-player') return state;
+      if (!state.hint || state.hint.fen !== event.fen) return state;
+      return { ...state, hint: { ...state.hint, status: 'searching', requestId: event.requestId, message: undefined } };
+
+    case 'HINT_AVAILABLE':
+      if (state.status !== 'waiting-player') return state;
+      if (!state.hint || state.hint.fen !== event.fen) return state;
+      if (state.hint.requestId !== undefined && event.requestId !== undefined && state.hint.requestId !== event.requestId) return state;
+      return { ...state, hint: { ...state.hint, status: 'available', move: event.move, requestId: undefined, message: undefined } };
+
+    case 'HINT_FAILED':
+      if (state.status !== 'waiting-player') return state;
+      if (event.fen !== undefined && state.hint?.fen !== event.fen) return state;
+      if (state.hint?.requestId !== undefined && event.requestId !== undefined && state.hint.requestId !== event.requestId) return state;
+      if (!state.hint) return state;
+      return { ...state, hint: { ...state.hint, status: 'error', requestId: undefined, move: undefined, message: event.message } };
+
+    case 'HINT_CLEARED':
+      if (state.status !== 'waiting-player' || !state.hint) return state;
+      return { status: 'waiting-player', playerColor: state.playerColor };
+
     case 'TERMINAL':
       if (state.status === 'inactive') return state;
       return { status: 'game-over', result: event.result };
@@ -134,6 +192,26 @@ export function trainingReducer(state: TrainingState, event: TrainingEvent): Tra
 
 export function canPlayerMove(state: TrainingState): boolean {
   return state.status === 'waiting-player';
+}
+
+export function canRequestHint(
+  state: TrainingState,
+  engineStatus: string,
+  context: {
+    isTraining: boolean;
+    isGameActive: boolean;
+    isTerminal: boolean;
+    isPlayerTurn: boolean;
+    hasPromotionPending: boolean;
+  },
+): boolean {
+  return context.isTraining &&
+    context.isGameActive &&
+    context.isPlayerTurn &&
+    !context.isTerminal &&
+    !context.hasPromotionPending &&
+    state.status === 'waiting-player' &&
+    engineStatus === 'idle';
 }
 
 export function isBoardLocked(state: TrainingState): boolean {
@@ -200,6 +278,9 @@ function recoverableState(state: TrainingState): RecoverableTrainingState {
   }
   if (state.status === 'showing-feedback') {
     return { status: 'waiting-engine-move', playerColor: state.playerColor };
+  }
+  if (state.status === 'waiting-player') {
+    return { status: 'waiting-player', playerColor: state.playerColor };
   }
   return state;
 }

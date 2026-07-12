@@ -23,8 +23,10 @@ function testOpponentProfilesDiffer(): void {
 function testReviewProfilesIgnoreDifficulty(): void {
   const root = getDifficultyProfile('blitz', 'training-root-review', { depth: 10, multiPv: 3 });
   const result = getDifficultyProfile('deep', 'training-result-review', { depth: 10, multiPv: 3 });
+  const hint = getDifficultyProfile('blitz', 'training-hint', { depth: 10, multiPv: 1 });
   assert.deepEqual(root, { depth: 10, multiPv: 3 });
   assert.deepEqual(result, { depth: 10, multiPv: 3 });
+  assert.deepEqual(hint, { depth: 10, multiPv: 1 });
 }
 
 function testAnalysisProfilePreservesExplicitInputs(): void {

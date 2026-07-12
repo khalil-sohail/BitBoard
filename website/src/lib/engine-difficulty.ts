@@ -6,6 +6,7 @@ export type SearchPurpose =
   | 'opponent'
   | 'training-root-review'
   | 'training-result-review'
+  | 'training-hint'
   | 'analysis';
 
 export interface SearchConfiguration {

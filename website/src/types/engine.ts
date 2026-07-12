@@ -1,5 +1,5 @@
 import type { NormalizedEvaluation } from '../lib/engine-evaluation';
-import type { EngineDifficulty } from '../lib/engine-difficulty';
+import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
 
 export interface PVLine {
   multipv: number;
@@ -12,6 +12,7 @@ export interface PVLine {
 export interface EngineInfo {
   requestId?: number;
   rootFen?: string;
+  purpose?: SearchPurpose;
   depth: number;
   nodes?: number;
   time?: number; // ms

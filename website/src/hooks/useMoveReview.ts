@@ -23,10 +23,10 @@ export function useMoveReview() {
     });
   }, []);
 
-  const setMoveGrade = useCallback((moveIndex: number, grade: MoveGrade, loss: number) => {
+  const setMoveGrade = useCallback((moveIndex: number, grade: MoveGrade, loss: number, metadata?: { hintLevelUsed?: 0 | 1 | 2 | 3 }) => {
     setGradeMap(prev => {
       const next = new Map(prev);
-      next.set(moveIndex, { moveIndex, grade, delta: -loss });
+      next.set(moveIndex, { moveIndex, grade, delta: -loss, hintLevelUsed: metadata?.hintLevelUsed });
       return next;
     });
   }, []);

@@ -61,7 +61,7 @@ export interface PositionMessage {
 export interface AnalyzeMessage {
   type: 'analyze';
   requestId: number;
-  purpose: 'training-root-review' | 'training-result-review' | 'analysis';
+  purpose: 'training-root-review' | 'training-result-review' | 'training-hint' | 'analysis';
   fen: string;
   moves: string[];
   depth?: number;
@@ -362,7 +362,7 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
     return err('INVALID_MESSAGE', 'difficulty is only valid for opponent searches.');
   }
 
-  const purpose = validateSearchPurpose(record.purpose, ['training-root-review', 'training-result-review', 'analysis']);
+  const purpose = validateSearchPurpose(record.purpose, ['training-root-review', 'training-result-review', 'training-hint', 'analysis']);
   if (purpose.ok === false) return purpose;
 
   const positionResult = validateCommonPositionFields(record);

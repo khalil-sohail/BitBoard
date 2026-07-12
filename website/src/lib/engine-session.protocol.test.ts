@@ -363,6 +363,7 @@ function testDifficultyAndPurposeValidation(): void {
   assertValid(analysisSearch({ purpose: 'analysis' }));
   assertValid(analysisSearch({ purpose: 'training-root-review' }));
   assertValid(analysisSearch({ purpose: 'training-result-review' }));
+  assertValid(analysisSearch({ purpose: 'training-hint' }));
   assertInvalid(analysisSearch({ purpose: 'opponent' }), 'INVALID_MESSAGE');
   assertInvalid(analysisSearch({ purpose: 'review' }), 'INVALID_MESSAGE');
   assertInvalid(analysisSearch({ difficulty: 'blitz' }), 'INVALID_MESSAGE');
@@ -824,6 +825,23 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     'setoption name MultiPV value 2',
     'position startpos',
     'go depth 7',
+  ]);
+
+  engine.emitBestMove('bestmove d2d4');
+  await flushEvents();
+  engine.writes.length = 0;
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 63,
+    purpose: 'training-hint',
+    depth: 11,
+    multiPv: 1,
+  })));
+  await flushEvents();
+  assert.deepEqual(engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 1',
+    'position startpos',
+    'go depth 11',
   ]);
 
   socket.close();

@@ -119,6 +119,12 @@ Deep      -> go depth 8
 Training move feedback uses separate review searches, so lower difficulty does
 not weaken the grading analysis.
 
+Training hints are progressive. Level 1 highlights the piece to consider, level
+2 adds the destination/arrow, and level 3 reveals the legal SAN move. Hint
+searches use stable review-strength analysis independent of opponent
+difficulty, and hint use is recorded separately from the move's chess-quality
+grade. Resetting, changing modes, or disconnecting clears the current hint.
+
 If the engine connection drops during Training, in-flight review/search work is
 discarded. After reconnect, Training resumes from the current board turn rather
 than applying or waiting for the old request.

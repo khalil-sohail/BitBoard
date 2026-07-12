@@ -19,15 +19,19 @@ import { useEngine } from "@/hooks/useEngine";
 import { useChessGame } from "@/hooks/useChessGame";
 import { useChessClock } from "@/hooks/useChessClock";
 import { useMoveReview } from "@/hooks/useMoveReview";
+import { useTrainingHint } from "@/hooks/useTrainingHint";
 import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
 import { NormalizedEvaluation, gradeMove, normalizeEngineInfo } from "@/lib/engine-evaluation";
 import {
   canChangeTrainingSettings,
   canPlayerMove,
+  canRequestHint,
   initialTrainingState,
   resultFromTerminal,
   trainingReducer,
 } from "@/lib/training-machine";
+import { hintLevelUsedForMove } from "@/lib/training-hint";
+import { TrainingHintPanel } from "@/components/panels/TrainingHintPanel";
 import type { GameResult } from "@/lib/training-machine";
 import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
 
@@ -43,6 +47,7 @@ interface PendingMoveReview {
   legalMoveCount: number;
   bestEvaluation: NormalizedEvaluation | null;
   isBook: boolean;
+  hintLevelUsed: 0 | 1 | 2 | 3;
   resultRequestStarted: boolean;
 }
 
@@ -258,12 +263,36 @@ export default function Home() {
 
   // ── Apply engine best move + clock management ────────────────────────────
   const normalizedInfo = useMemo(() => normalizeEngineInfo(engineInfo), [engineInfo]);
+  const displayEngineInfo = normalizedInfo?.purpose === 'training-hint' ? null : normalizedInfo;
   const latestEngineInfoRef = useRef(normalizedInfo);
-  useEffect(() => { latestEngineInfoRef.current = normalizedInfo; }, [normalizedInfo]);
+  useEffect(() => {
+    if (normalizedInfo?.purpose !== 'training-hint') {
+      latestEngineInfoRef.current = normalizedInfo;
+    }
+  }, [normalizedInfo]);
+
+  const trainingHint = useTrainingHint({
+    fen,
+    uciHistory,
+    maxDepth,
+    engineStatus: status,
+    trainingState,
+    engineInfo: normalizedInfo,
+    dispatchTraining,
+    startAnalysis,
+  });
+
+  const hintRequestAvailable = canRequestHint(trainingState, status, {
+    isTraining,
+    isGameActive,
+    isTerminal: effectiveGameOver,
+    isPlayerTurn: turn === orientation,
+    hasPromotionPending: trainingState.status === 'promotion-pending',
+  });
 
   useEffect(() => {
     const evaluation = normalizedInfo?.pvs?.[0]?.evaluation ?? null;
-    if (evaluation && normalizedInfo?.rootFen === fen) {
+    if (evaluation && normalizedInfo?.rootFen === fen && normalizedInfo.purpose !== 'training-hint') {
       recordPositionEval(evaluation, moveHistory.length);
     }
   }, [fen, moveHistory.length, normalizedInfo, recordPositionEval]);
@@ -301,7 +330,7 @@ export default function Home() {
       isBook: pendingReview.isBook,
     });
     if (review) {
-      setMoveGrade(pendingReview.moveIndex, review.grade, review.loss);
+      setMoveGrade(pendingReview.moveIndex, review.grade, review.loss, { hintLevelUsed: pendingReview.hintLevelUsed });
     }
     recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
     dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: resultEvaluation !== null });
@@ -407,13 +436,15 @@ export default function Home() {
 
     const moveIndex = moveHistory.length;
     const playerColor = turn;
-    const rootInfo = latestEngineInfoRef.current?.rootFen === fen
+    const rootInfo = latestEngineInfoRef.current?.rootFen === fen &&
+      (!isTraining || latestEngineInfoRef.current?.purpose === 'training-root-review')
       ? latestEngineInfoRef.current
       : null;
     const bestPv = rootInfo?.pvs?.[0];
     const rootBestMove = bestPv?.pv?.[0];
     const rootEvaluation = bestPv?.evaluation ?? null;
     const legalMoveCount = game.moves({ verbose: true }).length;
+    const hintLevelUsed = gameMode === 'training' ? hintLevelUsedForMove(trainingState, fen) : 0;
     let resultFen: string | null = null;
     let terminalAfterMove: GameResult | null = null;
     try {
@@ -449,6 +480,7 @@ export default function Home() {
           legalMoveCount,
           bestEvaluation: rootEvaluation,
           isBook: isLikelyBook,
+          hintLevelUsed,
           resultRequestStarted: false,
         };
         dispatchTraining({ type: 'REVIEW_STARTED', reviewId });
@@ -638,7 +670,7 @@ export default function Home() {
 
             {showEvalBar && (
               <EvalBar
-                evaluation={normalizedInfo?.pvs?.[0]?.evaluation ?? null}
+                evaluation={displayEngineInfo?.pvs?.[0]?.evaluation ?? null}
                 orientation={orientation}
               />
             )}
@@ -647,7 +679,7 @@ export default function Home() {
               <ChessBoardComponent
                 key={promotionResetKey}
                 fen={fen}
-                pvs={showEnginePanel ? normalizedInfo?.pvs : undefined}
+                pvs={showEnginePanel ? displayEngineInfo?.pvs : undefined}
                 onMove={handleUserMove}
                 onPromotionPending={handlePromotionPending}
                 onPromotionSelected={handlePromotionSelected}
@@ -656,6 +688,7 @@ export default function Home() {
                 orientation={orientation === 'w' ? 'white' : 'black'}
                 checkSquare={checkSquare}
                 lastMove={lastMove}
+                hintView={isTraining ? trainingHint.hintView : null}
               />
 
 
@@ -764,8 +797,17 @@ export default function Home() {
               />
             )}
 
+            {isTraining && (
+              <TrainingHintPanel
+                hint={trainingState.status === 'waiting-player' ? trainingState.hint : undefined}
+                hintView={trainingHint.hintView}
+                canRequest={hintRequestAvailable}
+                onRequest={trainingHint.requestHint}
+              />
+            )}
+
             {showEnginePanel && (
-              <EnginePanel info={normalizedInfo} status={status} queuePosition={queuePosition} />
+              <EnginePanel info={displayEngineInfo} status={status} queuePosition={queuePosition} />
             )}
 
             <MoveHistory moves={moveHistory} grades={grades} showGrades={showEnginePanel} />

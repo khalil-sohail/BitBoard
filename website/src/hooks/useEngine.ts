@@ -104,6 +104,7 @@ export function useEngine() {
               setEngineInfo(prev => ({
                 requestId: data.requestId,
                 rootFen: activeRootFenRef.current ?? undefined,
+                purpose: activePurposeRef.current ?? undefined,
                 depth: data.depth,
                 pvs: data.pvs || [],
                 nodes: data.nodes ?? prev?.nodes,
@@ -265,13 +266,15 @@ export function useEngine() {
     depth?: number,
     multiPv?: number,
     purpose: Exclude<SearchPurpose, 'opponent'> = 'analysis',
-  ) => {
+  ): EngineRequestId | null => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const requestId = allocateRequestId();
       setStatus('analyzing');
       activateRequest(requestId, fen, purpose);
       ws.current.send(JSON.stringify({ type: 'analyze', requestId, purpose, fen, moves, depth, multiPv }));
+      return requestId;
     }
+    return null;
   }, [activateRequest, allocateRequestId, setStatus]);
 
   return {

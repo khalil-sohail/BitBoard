@@ -96,7 +96,14 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
                     <span className="flex items-center gap-1.5">
                       <span className="font-semibold text-foreground truncate">{row.white.san}</span>
                       {showGrades && gradeMap.has(row.whiteIndex) && (
-                        <MoveBadge grade={gradeMap.get(row.whiteIndex)!.grade} compact />
+                        <>
+                          <MoveBadge grade={gradeMap.get(row.whiteIndex)!.grade} compact />
+                          {(gradeMap.get(row.whiteIndex)!.hintLevelUsed ?? 0) > 0 && (
+                            <span className="rounded-sm border border-pink-400/40 px-1 py-0.5 text-[9px] font-bold text-pink-300" title={`Hint level ${gradeMap.get(row.whiteIndex)!.hintLevelUsed} used`}>
+                              H{gradeMap.get(row.whiteIndex)!.hintLevelUsed}
+                            </span>
+                          )}
+                        </>
                       )}
                     </span>
                   </td>
@@ -107,7 +114,14 @@ export function MoveHistory({ moves, grades = [], showGrades = false }: MoveHist
                       <span className="flex items-center gap-1.5">
                         <span className="font-semibold text-foreground truncate">{row.black.san}</span>
                         {showGrades && gradeMap.has(row.blackIndex) && (
-                          <MoveBadge grade={gradeMap.get(row.blackIndex)!.grade} compact />
+                          <>
+                            <MoveBadge grade={gradeMap.get(row.blackIndex)!.grade} compact />
+                            {(gradeMap.get(row.blackIndex)!.hintLevelUsed ?? 0) > 0 && (
+                              <span className="rounded-sm border border-pink-400/40 px-1 py-0.5 text-[9px] font-bold text-pink-300" title={`Hint level ${gradeMap.get(row.blackIndex)!.hintLevelUsed} used`}>
+                                H{gradeMap.get(row.blackIndex)!.hintLevelUsed}
+                              </span>
+                            )}
+                          </>
                         )}
                       </span>
                     ) : null}

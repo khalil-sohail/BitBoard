@@ -4,6 +4,7 @@ import { useState, useMemo, type CSSProperties } from 'react';
 import { Chessboard, type Arrow, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { convertUciToArrow } from '../../lib/square-utils';
 import { PVLine } from '../../types/engine';
+import type { ProgressiveHintView } from '../../lib/training-hint';
 import {
   PROMOTION_PIECES,
   buildPromotionMove,
@@ -30,6 +31,7 @@ interface BoardProps {
   orientation?: 'white' | 'black';
   checkSquare?: string | null;
   lastMove?: { from: string; to: string } | null;
+  hintView?: ProgressiveHintView | null;
 }
 
 const PROMOTION_LABELS: Record<PromotionPiece, string> = {
@@ -55,6 +57,7 @@ export function ChessBoardComponent({
   orientation = 'white',
   checkSquare,
   lastMove,
+  hintView,
 }: BoardProps) {
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
@@ -87,6 +90,26 @@ export function ChessBoardComponent({
      }
      return arrows;
   }, [pvs]);
+
+  const hintArrows = useMemo(() => {
+    if (!hintView?.from || !hintView.to || hintView.level < 2) return [];
+    return [{
+      startSquare: hintView.from,
+      endSquare: hintView.to,
+      color: 'rgba(244, 114, 182, 0.9)',
+    }] as Arrow[];
+  }, [hintView]);
+
+  const hintSquareStyles = useMemo<Record<string, CSSProperties>>(() => {
+    if (!hintView?.from) return {};
+    const styles: Record<string, CSSProperties> = {
+      [hintView.from]: { boxShadow: 'inset 0 0 0 4px rgba(244, 114, 182, 0.85)' },
+    };
+    if (hintView.to && hintView.level >= 2) {
+      styles[hintView.to] = { boxShadow: 'inset 0 0 0 4px rgba(244, 114, 182, 0.7)' };
+    }
+    return styles;
+  }, [hintView]);
 
   function onSquareClick({ square }: SquareHandlerArgs) {
     if (disabled || pendingPromotion) return;
@@ -181,7 +204,7 @@ export function ChessBoardComponent({
           /* Hard-coded classic wood palette for guaranteed visibility */
           darkSquareStyle:  { backgroundColor: BOARD_DARK },
           lightSquareStyle: { backgroundColor: BOARD_LIGHT },
-          arrows: customArrows,
+          arrows: [...customArrows, ...hintArrows],
           squareStyles: {
             ...rightClickedSquares,
             ...(lastMove && {
@@ -191,6 +214,7 @@ export function ChessBoardComponent({
             ...(moveFrom && {
               [moveFrom]: { backgroundColor: HIGHLIGHT_BG },
             }),
+            ...hintSquareStyles,
             ...(checkSquare && {
               [checkSquare]: { 
                 background: 'radial-gradient(circle, rgba(255,0,0,0.8) 0%, rgba(255,0,0,0) 80%)' 

@@ -177,6 +177,11 @@ Training Mode supports three opponent-strength profiles: Blitz (`go movetime
 1000`), Standard (`go movetime 3000`), and Deep (`go depth 8`). These profiles
 only affect opponent move selection. Training feedback uses separate review
 searches so move grading is not weakened by the selected opponent difficulty.
+The Training hint button is progressive: level 1 highlights the piece, level 2
+adds the destination, and level 3 reveals the legal SAN move. Hints are tied to
+the exact current FEN and use stable review-strength analysis independent of
+opponent difficulty. Hint use is recorded separately from chess-quality move
+grading. Reset, mode changes, and disconnection clear the current hint.
 If the engine connection is lost during Training, in-flight review/search work
 is invalidated; reconnect resumes from the current board turn instead of
 reusing an unknown old request.
