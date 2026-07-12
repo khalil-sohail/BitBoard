@@ -3,6 +3,7 @@ import { RawData, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
 import { parseUciInfo, parseBestMove } from './uci-parser';
+import { classifyTerminalPosition } from './engine-terminal';
 import {
   ANALYSIS_MULTIPV,
   ClientMessage,
@@ -451,19 +452,25 @@ export class EnginePoolManager {
     // ── Normal thinking result ────────────────────────────────────────────
     if (ps.phase === 'thinking' && ps.requestId === activeSearch.requestId) {
       const { bestMove, ponderMove } = parsed;
+      const terminal = bestMove === '0000'
+        ? classifyTerminalPosition(session.startFen, session.uciMoves)
+        : undefined;
+      const move = bestMove === '0000' ? null : bestMove;
 
       // Send best move to the frontend
       session.ws.send(JSON.stringify({
         type: 'bestmove',
         requestId: activeSearch.requestId,
-        move: bestMove === '0000' ? null : bestMove,
+        move,
+        ...(ponderMove ? { ponder: ponderMove } : {}),
+        ...(terminal ? { terminal } : {}),
       }));
       console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderMove ?? 'none'}`);
       session.activeSearch = null;
 
       // Start pondering if we have a ponder move
-      if (ponderMove && session.process.stdin && ps.searchMode === 'tc') {
-        const ponderMoves = [...session.uciMoves, bestMove];
+      if (move && ponderMove && session.process.stdin && ps.searchMode === 'tc') {
+        const ponderMoves = [...session.uciMoves, move];
 
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderMove}`);
         writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderMoves));

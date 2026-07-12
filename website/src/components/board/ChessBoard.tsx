@@ -4,6 +4,13 @@ import { useState, useMemo, type CSSProperties } from 'react';
 import { Chessboard, type Arrow, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
 import { convertUciToArrow } from '../../lib/square-utils';
 import { PVLine } from '../../types/engine';
+import {
+  PROMOTION_PIECES,
+  buildPromotionMove,
+  isPromotionCandidate,
+  type PendingPromotion,
+  type PromotionPiece,
+} from '../../lib/promotion';
 
 // Classic chess.com wood palette — hard-coded for guaranteed contrast
 // regardless of CSS variable resolution context.
@@ -21,8 +28,21 @@ interface BoardProps {
   lastMove?: { from: string; to: string } | null;
 }
 
+const PROMOTION_LABELS: Record<PromotionPiece, string> = {
+  q: 'Queen',
+  r: 'Rook',
+  b: 'Bishop',
+  n: 'Knight',
+};
+
+const PROMOTION_SYMBOLS: Record<'w' | 'b', Record<PromotionPiece, string>> = {
+  w: { q: '♕', r: '♖', b: '♗', n: '♘' },
+  b: { q: '♛', r: '♜', b: '♝', n: '♞' },
+};
+
 export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', checkSquare, lastMove }: BoardProps) {
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const [rightClickedSquares, setRightClickedSquares] = useState<Record<string, CSSProperties>>({});
 
   // Draw custom arrows for top 3 PVs
@@ -62,14 +82,13 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
       return;
     }
 
-    // To square
-    const move = {
-      from: moveFrom,
-      to: square,
-      promotion: 'q', // always promote to queen for simplicity UI-wise, typical in simple integrations
-    };
+    const promotion = isPromotionCandidate(fen, moveFrom, square);
+    if (promotion) {
+      setPendingPromotion(promotion);
+      return;
+    }
 
-    const isValidMove = onMove(move);
+    const isValidMove = onMove({ from: moveFrom, to: square });
     if (!isValidMove) {
       setMoveFrom(square); // allow selecting a different piece
     } else {
@@ -92,14 +111,18 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
     });
   }
 
-  function onDrop({ sourceSquare, targetSquare, piece }: PieceDropHandlerArgs) {
+  function onDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
     if (!targetSquare) return false;
-    
-    const move = {
-      from: sourceSquare,
-      to: targetSquare,
-      promotion: piece.pieceType[1].toLowerCase() ?? 'q',
-    };
+
+    const promotion = isPromotionCandidate(fen, sourceSquare, targetSquare);
+    if (promotion) {
+      setPendingPromotion(promotion);
+      setMoveFrom(null);
+      setRightClickedSquares({});
+      return false;
+    }
+
+    const move = { from: sourceSquare, to: targetSquare };
 
     const isValidMove = onMove(move);
     if (isValidMove) {
@@ -108,6 +131,21 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
       return true;
     }
     return false;
+  }
+
+  function choosePromotion(piece: PromotionPiece) {
+    if (!pendingPromotion) return;
+
+    const isValidMove = onMove(buildPromotionMove(pendingPromotion, piece));
+    if (isValidMove) {
+      setMoveFrom(null);
+      setRightClickedSquares({});
+      setPendingPromotion(null);
+    }
+  }
+
+  function cancelPromotion() {
+    setPendingPromotion(null);
   }
 
   return (
@@ -140,6 +178,33 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
           },
         }}
       />
+      {pendingPromotion && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 backdrop-blur-sm">
+          <div className="rounded-lg border border-white/15 bg-zinc-950/95 p-3 shadow-2xl">
+            <div className="grid grid-cols-4 gap-2">
+              {PROMOTION_PIECES.map((piece) => (
+                <button
+                  key={piece}
+                  type="button"
+                  onClick={() => choosePromotion(piece)}
+                  className="flex h-14 w-14 items-center justify-center rounded-md border border-white/10 bg-zinc-900 text-3xl text-zinc-100 hover:border-primary/60 hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary"
+                  aria-label={`Promote to ${PROMOTION_LABELS[piece]}`}
+                  title={`Promote to ${PROMOTION_LABELS[piece]}`}
+                >
+                  {PROMOTION_SYMBOLS[pendingPromotion.color][piece]}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={cancelPromotion}
+              className="mt-3 w-full rounded-md border border-white/10 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-white/5 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -43,7 +43,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
+  const { status, engineInfo, bestMove, terminalCompletion, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -59,6 +59,7 @@ export default function Home() {
   const [multiPv, setMultiPv] = useState(3);
   const [ownBook, setOwnBook] = useState(true);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
+  const [promotionResetKey, setPromotionResetKey] = useState(0);
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -253,6 +254,16 @@ export default function Home() {
   }, [normalizedInfo, recordPositionEval, setMoveGrade, status]);
 
   useEffect(() => {
+    const pendingReview = pendingMoveReviewRef.current;
+    if (!pendingReview?.resultRequestStarted) return;
+    if (terminalCompletion?.rootFen !== pendingReview.resultFen) return;
+    if (terminalCompletion.purpose !== 'training-result-review') return;
+
+    recordPositionEval(null, pendingReview.moveIndex + 1);
+    pendingMoveReviewRef.current = null;
+  }, [recordPositionEval, terminalCompletion]);
+
+  useEffect(() => {
     if (gameStatus === 'completed') return;
     let isMounted = true;
 
@@ -382,6 +393,7 @@ export default function Home() {
   const handleLoadFen = (fenStr: string) => {
     const ok = loadFen(fenStr);
     if (ok) {
+      setPromotionResetKey(value => value + 1);
       analysisFenRef.current = fenStr;
       resetGrades();
       pendingMoveReviewRef.current = null;
@@ -393,6 +405,7 @@ export default function Home() {
 
   const handleFenReset = () => {
     analysisFenRef.current = null;
+    setPromotionResetKey(value => value + 1);
     resetGame();
     resetGrades();
     pendingMoveReviewRef.current = null;
@@ -402,6 +415,7 @@ export default function Home() {
   // ── New game ─────────────────────────────────────────────────────────────
   const handleNewGame = () => {
     if (isAnalysis) {
+      setPromotionResetKey(value => value + 1);
       analysisFenRef.current = null;
       resetGame();
       resetGrades();
@@ -427,6 +441,7 @@ export default function Home() {
     setGameStatus('active');
 
     analysisFenRef.current = null;
+    setPromotionResetKey(value => value + 1);
     resetGame();
     resetGrades();
     pendingMoveReviewRef.current = null;
@@ -450,6 +465,7 @@ export default function Home() {
   // ── Mode change ──────────────────────────────────────────────────────────
   const handleModeChange = (newMode: GameMode) => {
     stopEngine();
+    setPromotionResetKey(value => value + 1);
     pendingMoveReviewRef.current = null;
     resetGrades();
     setGameMode(newMode);
@@ -514,6 +530,7 @@ export default function Home() {
 
             <div className="h-full aspect-square max-h-[calc(100vh-12rem)] relative flex-shrink-0">
               <ChessBoardComponent
+                key={promotionResetKey}
                 fen={fen}
                 pvs={showEnginePanel ? normalizedInfo?.pvs : undefined}
                 onMove={handleUserMove}

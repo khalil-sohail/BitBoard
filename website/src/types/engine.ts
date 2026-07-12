@@ -18,6 +18,18 @@ export interface EngineInfo {
   pvs: PVLine[];
 }
 
+export interface EngineTerminalResult {
+  reason: 'checkmate' | 'stalemate' | 'draw' | 'no-legal-move' | 'unknown';
+  winner?: 'white' | 'black';
+}
+
+export interface EngineTerminalCompletion {
+  requestId: number;
+  rootFen?: string;
+  purpose?: string;
+  terminal: EngineTerminalResult;
+}
+
 export interface EvalPoint {
   moveNumber: number;
   eval: number; // white's perspective

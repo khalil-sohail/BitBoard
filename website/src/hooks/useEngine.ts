@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { EngineInfo } from '../types/engine';
+import type { EngineInfo, EngineTerminalCompletion } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
 import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
@@ -26,6 +26,7 @@ export interface SendMoveOptions {
 export function useEngine() {
   const [status, setReactStatus] = useState<ConnectionStatus>('disconnected');
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
+  const [terminalCompletion, setTerminalCompletion] = useState<EngineTerminalCompletion | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const nextRequestIdRef = useRef<EngineRequestId>(1);
@@ -58,6 +59,7 @@ export function useEngine() {
     activeRootFenRef.current = null;
     activePurposeRef.current = null;
     setBestMove(null);
+    setTerminalCompletion(null);
   }, []);
 
   const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose) => {
@@ -66,6 +68,7 @@ export function useEngine() {
     activePurposeRef.current = purpose;
     setBestMove(null);
     setEngineInfo(null);
+    setTerminalCompletion(null);
   }, []);
 
   const connect = useCallback(() => {
@@ -111,8 +114,18 @@ export function useEngine() {
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady &&
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              const purpose = activePurposeRef.current ?? undefined;
+              const rootFen = activeRootFenRef.current ?? undefined;
               if (activePurposeRef.current === 'opponent') {
                 setBestMove(data.move);
+              }
+              if (data.move === null && data.terminal) {
+                setTerminalCompletion({
+                  requestId: data.requestId,
+                  rootFen,
+                  purpose,
+                  terminal: data.terminal,
+                });
               }
               activeRequestIdRef.current = null;
               activePurposeRef.current = null;
@@ -265,6 +278,7 @@ export function useEngine() {
     status,
     engineInfo,
     bestMove,
+    terminalCompletion,
     queuePosition,
     sendMove,
     newGame,

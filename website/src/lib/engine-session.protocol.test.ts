@@ -19,7 +19,11 @@ interface ServerMessage {
   code?: string;
   message?: string;
   requestId?: number;
-  move?: string;
+  move?: string | null;
+  terminal?: {
+    reason: string;
+    winner?: string;
+  };
   depth?: number;
   pvs?: unknown[];
 }
@@ -498,6 +502,96 @@ async function testNewerSearchSupersedesOlderSearch(): Promise<void> {
   socket.close();
 }
 
+async function testTerminalBestMoveCarriesClassification(): Promise<void> {
+  const checkmate = await createManualSession();
+  checkmate.socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 90,
+    fen: '7k/6Q1/7K/8/8/8/8/8 b - - 0 1',
+    depth: 2,
+    multiPv: 1,
+  })));
+  checkmate.engine.emitBestMove('bestmove 0000');
+  await flushEvents();
+  const checkmateBest = messagesOfType(checkmate.socket, 'bestmove')[0];
+  assert.equal(checkmateBest.requestId, 90);
+  assert.equal(checkmateBest.move, null);
+  assert.deepEqual(checkmateBest.terminal, { reason: 'checkmate', winner: 'white' });
+  checkmate.socket.close();
+
+  const stalemate = await createManualSession();
+  stalemate.socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 91,
+    fen: '8/8/8/8/8/5kq1/8/7K w - - 0 1',
+    depth: 2,
+    multiPv: 1,
+  })));
+  stalemate.engine.emitBestMove('bestmove 0000');
+  await flushEvents();
+  const stalemateBest = messagesOfType(stalemate.socket, 'bestmove')[0];
+  assert.equal(stalemateBest.move, null);
+  assert.deepEqual(stalemateBest.terminal, { reason: 'stalemate' });
+  stalemate.socket.close();
+
+  const draw = await createManualSession();
+  draw.socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 92,
+    fen: '8/8/8/8/8/8/8/K6k w - - 0 1',
+    depth: 2,
+    multiPv: 1,
+  })));
+  draw.engine.emitBestMove('bestmove 0000');
+  await flushEvents();
+  const drawBest = messagesOfType(draw.socket, 'bestmove')[0];
+  assert.equal(drawBest.move, null);
+  assert.deepEqual(drawBest.terminal, { reason: 'draw' });
+  draw.socket.close();
+}
+
+async function testTerminalBestMoveClearsSearchAndLaterRequestWorks(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 93,
+    fen: '8/8/8/8/8/5kq1/8/7K w - - 0 1',
+    depth: 2,
+    multiPv: 1,
+  })));
+  engine.emitBestMove('bestmove 0000');
+  await flushEvents();
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 94, depth: 2, multiPv: 1 })));
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(bestMoves.length, 2);
+  assert.equal(bestMoves[0].requestId, 93);
+  assert.equal(bestMoves[0].move, null);
+  assert.equal(bestMoves[1].requestId, 94);
+  assert.equal(bestMoves[1].move, 'e2e4');
+  assert.equal(bestMoves.some(message => message.move === '0000'), false);
+
+  socket.close();
+}
+
+async function testStaleTerminalBestMoveIsSwallowed(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 95, depth: 2, multiPv: 1 })));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 96, moves: ['e2e4'], depth: 2, multiPv: 1 })));
+  engine.emitBestMove('bestmove 0000');
+  await flushEvents();
+  engine.emitBestMove('bestmove e7e5');
+  await flushEvents();
+
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 96);
+  assert.equal(bestMoves[0].move, 'e7e5');
+
+  socket.close();
+}
+
 async function testNewGameSwallowsOldBestMove(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
@@ -795,6 +889,9 @@ async function run(): Promise<void> {
   await testInfoCarriesRequestId();
   await testStopSwallowsTrailingBestMove();
   await testNewerSearchSupersedesOlderSearch();
+  await testTerminalBestMoveCarriesClassification();
+  await testTerminalBestMoveClearsSearchAndLaterRequestWorks();
+  await testStaleTerminalBestMoveIsSwallowed();
   await testNewGameSwallowsOldBestMove();
   await testReleaseSessionIgnoresProcessOutput();
   await testRapidAnalyzeReplacementUsesLatestRequest();
