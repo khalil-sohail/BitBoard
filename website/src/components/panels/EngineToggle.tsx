@@ -2,12 +2,15 @@
 
 import { Badge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
-import { GameMode } from '../../types/engine';
+import { DifficultyLevel, GameMode } from '../../types/engine';
+import { DIFFICULTY_OPTIONS } from '../../lib/engine-difficulty';
 
 interface EngineToggleProps {
   currentVersion?: string;
   maxDepth: number;
   onDepthChange: (depth: number) => void;
+  difficulty: DifficultyLevel;
+  onDifficultyChange: (difficulty: DifficultyLevel) => void;
   multiPv: number;
   onMultiPvChange: (lines: number) => void;
   gameMode: GameMode;
@@ -20,6 +23,8 @@ export function EngineToggle({
   currentVersion = "Texel-Tuned HCE",
   maxDepth,
   onDepthChange,
+  difficulty,
+  onDifficultyChange,
   multiPv,
   onMultiPvChange,
   gameMode,
@@ -164,6 +169,25 @@ export function EngineToggle({
                 </button>
               ))}
             </div>
+
+            {gameMode === 'training' && (
+              <div className="flex w-full items-center bg-background border border-white/5 rounded-lg p-1 mt-3">
+                {DIFFICULTY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => onDifficultyChange(opt.id)}
+                    className={`flex-1 px-2 py-1.5 text-xs rounded-md shadow-sm font-semibold whitespace-nowrap transition-colors ${
+                      difficulty === opt.id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground'
+                    }`}
+                    title={`Opponent: ${opt.sublabel}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -34,6 +34,7 @@ interface PendingMoveReview {
   legalMoveCount: number;
   bestEvaluation: NormalizedEvaluation | null;
   isBook: boolean;
+  resultRequestStarted: boolean;
 }
 
 // Default time control: 3+0
@@ -156,25 +157,20 @@ export default function Home() {
     // ONLY fire when the game is actively running
     if (!isGameActive) return;
     if (isWaitingForStop) return;
+    if (gameMode === 'training' && pendingMoveReviewRef.current) return;
     if (turn === engineColor && status === 'idle' && !effectiveGameOver) {
-      
-      // Fair Play mode runs purely on time, no depth ceiling.
-      // Other modes (Training, Analysis) include depth as a limit or ceiling.
-      const searchDepth = gameMode === 'fair' ? undefined : maxDepth;
-
       if (hasTC) {
         sendMove(fen, uciHistory, {
           wtime: clock.whiteMs,
           btime: clock.blackMs,
           winc:  timeControl.incMs,
           binc:  timeControl.incMs,
-          depth: searchDepth,
+          difficulty,
           multiPv: multiPv,
         });
       } else {
         sendMove(fen, uciHistory, {
           difficulty,
-          depth: searchDepth,
           multiPv: multiPv,
         });
       }
@@ -189,7 +185,7 @@ export default function Home() {
 
     // Immediately send the current position to the engine
     const timer = setTimeout(() => {
-      startAnalysis(fen, uciHistory, maxDepth, multiPv);
+      startAnalysis(fen, uciHistory, maxDepth, multiPv, 'analysis');
     }, 100);
     return () => clearTimeout(timer);
   }, [fen, uciHistory, gameMode, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
@@ -200,7 +196,7 @@ export default function Home() {
     if (effectiveGameOver) return;
     if (turn !== engineColor) {
       const timer = setTimeout(() => {
-        startAnalysis(fen, uciHistory, maxDepth, multiPv);
+        startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-root-review');
       }, 100);
       return () => clearTimeout(timer);
     }
@@ -217,6 +213,44 @@ export default function Home() {
       recordPositionEval(evaluation, moveHistory.length);
     }
   }, [fen, moveHistory.length, normalizedInfo, recordPositionEval]);
+
+  useEffect(() => {
+    const pendingReview = pendingMoveReviewRef.current;
+    if (!pendingReview) return;
+    if (gameMode !== 'training' || gameStatus !== 'active') return;
+    if (status !== 'idle' || fen !== pendingReview.resultFen) return;
+    if (pendingReview.resultRequestStarted) return;
+
+    pendingReview.resultRequestStarted = true;
+    startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-result-review');
+  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startAnalysis, status, uciHistory]);
+
+  useEffect(() => {
+    const pendingReview = pendingMoveReviewRef.current;
+    if (!pendingReview?.resultRequestStarted) return;
+    if (status !== 'idle') return;
+    if (normalizedInfo?.rootFen !== pendingReview.resultFen) return;
+
+    const rawResultEvaluation = normalizedInfo.pvs?.[0]?.evaluation ?? null;
+    const resultLooksSyntheticBook =
+      pendingReview.moveIndex < 10 &&
+      normalizedInfo.depth === 1 &&
+      rawResultEvaluation?.kind === 'centipawn' &&
+      rawResultEvaluation.value === 0;
+    const resultEvaluation = resultLooksSyntheticBook ? null : rawResultEvaluation;
+    const review = gradeMove({
+      best: pendingReview.bestEvaluation,
+      played: resultEvaluation,
+      playerColor: pendingReview.playerColor,
+      legalMoveCount: pendingReview.legalMoveCount,
+      isBook: pendingReview.isBook,
+    });
+    if (review) {
+      setMoveGrade(pendingReview.moveIndex, review.grade, review.loss);
+    }
+    recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
+    pendingMoveReviewRef.current = null;
+  }, [normalizedInfo, recordPositionEval, setMoveGrade, status]);
 
   useEffect(() => {
     if (gameStatus === 'completed') return;
@@ -260,29 +294,6 @@ export default function Home() {
             clock.startClock(orientation);
           }
 
-          const info = latestEngineInfoRef.current;
-          const pendingReview = pendingMoveReviewRef.current;
-          const rawResultEvaluation = info?.pvs?.[0]?.evaluation ?? null;
-          if (pendingReview && info?.rootFen === pendingReview.resultFen) {
-            const resultLooksSyntheticBook =
-              pendingReview.moveIndex < 10 &&
-              info.depth === 1 &&
-              rawResultEvaluation?.kind === 'centipawn' &&
-              rawResultEvaluation.value === 0;
-            const resultEvaluation = resultLooksSyntheticBook ? null : rawResultEvaluation;
-            const review = gradeMove({
-              best: pendingReview.bestEvaluation,
-              played: resultEvaluation,
-              playerColor: pendingReview.playerColor,
-              legalMoveCount: pendingReview.legalMoveCount,
-              isBook: pendingReview.isBook,
-            });
-            if (review) {
-              setMoveGrade(pendingReview.moveIndex, review.grade, review.loss);
-            }
-            recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
-            pendingMoveReviewRef.current = null;
-          }
         }
       });
     }
@@ -346,6 +357,7 @@ export default function Home() {
           legalMoveCount,
           bestEvaluation: rootEvaluation,
           isBook: isLikelyBook,
+          resultRequestStarted: false,
         };
       }
       if (hasTC && !effectiveGameOver) {
@@ -374,7 +386,7 @@ export default function Home() {
       resetGrades();
       pendingMoveReviewRef.current = null;
       if (gameMode === 'analysis') {
-        startAnalysis(fenStr, [], maxDepth, multiPv);
+        startAnalysis(fenStr, [], maxDepth, multiPv, 'analysis');
       }
     }
   };
@@ -594,7 +606,7 @@ export default function Home() {
                   resetGrades();
                   pendingMoveReviewRef.current = null;
                   if (gameMode === 'analysis') {
-                    startAnalysis(finalFen, [], maxDepth, multiPv);
+                    startAnalysis(finalFen, [], maxDepth, multiPv, 'analysis');
                   }
                 }}
               />
@@ -605,6 +617,8 @@ export default function Home() {
                 currentVersion="Texel-Tuned HCE" 
                 maxDepth={maxDepth}
                 onDepthChange={setMaxDepth}
+                difficulty={difficulty}
+                onDifficultyChange={setDifficulty}
                 multiPv={multiPv}
                 onMultiPvChange={setMultiPv}
                 gameMode={gameMode}

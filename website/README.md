@@ -108,6 +108,17 @@ Engine settings in the UI are sent through the page-owned active engine
 connection. They persist across new games in the current page session and are
 reapplied after reconnect when a new engine process is created.
 
+Training Mode difficulty controls opponent move selection only:
+
+```text
+Blitz     -> go movetime 1000
+Standard  -> go movetime 3000
+Deep      -> go depth 8
+```
+
+Training move feedback uses separate review searches, so lower difficulty does
+not weaken the grading analysis.
+
 ## Tests
 
 ```bash

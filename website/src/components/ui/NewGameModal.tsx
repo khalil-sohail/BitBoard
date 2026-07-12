@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { DifficultyLevel, PlayerColor, TimeControl, TIME_CONTROLS, GameMode } from '../../types/engine';
+import { DIFFICULTY_OPTIONS } from '../../lib/engine-difficulty';
 
 export interface NewGameConfig {
   playerColor: PlayerColor | 'random';
@@ -25,12 +26,6 @@ const COLOR_OPTIONS: { id: PlayerColor | 'random'; label: string; icon: string }
   { id: 'w',      label: 'White',  icon: '♔' },
   { id: 'random', label: 'Random', icon: '⚄' },
   { id: 'b',      label: 'Black',  icon: '♚' },
-];
-
-const DIFFICULTY_OPTIONS: { id: DifficultyLevel; label: string; sublabel: string }[] = [
-  { id: 'blitz',    label: 'Blitz',    sublabel: '1 sec'  },
-  { id: 'standard', label: 'Standard', sublabel: '3 sec'  },
-  { id: 'deep',     label: 'Deep',     sublabel: 'D8'     },
 ];
 
 export function NewGameModal({
@@ -189,11 +184,11 @@ function NewGameModalContent({
           </div>
           )}
 
-          {/* Engine Strength (only shown when no time control — avoids contradiction) */}
-          {gameMode !== 'training' && !hasTC && (
+          {/* Engine Strength */}
+          {(gameMode === 'training' || !hasTC) && (
             <div>
               <label className="text-[10px] font-semibold text-muted/70 uppercase tracking-widest block mb-2">
-                Engine Strength
+                Opponent Strength
               </label>
               <div className="flex gap-2">
                 {DIFFICULTY_OPTIONS.map((opt) => {
@@ -218,7 +213,7 @@ function NewGameModalContent({
                 })}
               </div>
               <p className="text-[9px] text-muted/50 mt-1.5 text-center">
-                Engine strength controls movetime when no clock is active.
+                Lower levels change opponent search only; Training feedback uses review depth.
               </p>
             </div>
           )}

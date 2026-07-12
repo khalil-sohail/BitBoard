@@ -14,6 +14,7 @@ import {
   writeUciCommand,
 } from './engine-protocol';
 import type { EngineOptionName } from './engine-protocol';
+import { getDifficultyProfile } from './engine-difficulty';
 
 interface SessionPv {
   multipv: number;
@@ -26,7 +27,7 @@ interface SessionPv {
 
 type PonderPhase =
   | { phase: 'idle' }
-  | { phase: 'thinking'; requestId: number; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number }
+  | { phase: 'thinking'; requestId: number; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number; movetimeMs?: number }
   | {
       phase: 'pondering';
       ponderPly: number;        // ply count at the moment pondering starts
@@ -40,6 +41,7 @@ type PonderPhase =
       pendingWinc: number;
       pendingBinc: number;
       pendingDepth?: number;
+      pendingMovetimeMs?: number;
       pendingMultiPv: number;
       pendingRequestId?: number;
     };
@@ -65,6 +67,7 @@ type PendingOperation =
       winc: number;
       binc: number;
       depth?: number;
+      movetimeMs?: number;
       multiPv: number;
     }
   | { type: 'newgame' }
@@ -417,7 +420,7 @@ export class EnginePoolManager {
         return;
       }
       console.log(`[Ponder ${id}] Stop-ack received — issuing real 'go' command`);
-      const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMultiPv,
+      const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMovetimeMs, pendingMultiPv,
               pendingRequestId, baseFen, baseMoves } = ps;
       if (pendingRequestId === undefined) {
         session.ponderState = { phase: 'idle' };
@@ -428,7 +431,7 @@ export class EnginePoolManager {
       // Build the real position (opponent played pendingUserMove)
       const realMoves = [...baseMoves, pendingUserMove];
       writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', pendingMultiPv));
-      this.sendPositionAndGo(session, pendingRequestId, 'tc', baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth);
+      this.sendPositionAndGo(session, pendingRequestId, 'tc', baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMovetimeMs);
       return;
     }
 
@@ -522,8 +525,13 @@ export class EnginePoolManager {
       const btime = data.btime;
       const winc  = data.winc;
       const binc  = data.binc;
-      const depth = data.depth;
-      const targetMultiPv = data.multiPv;
+      const hasClock = wtime > 0 || btime > 0;
+      const opponentProfile = hasClock
+        ? { depth: data.depth, multiPv: data.multiPv }
+        : getDifficultyProfile(data.difficulty, 'opponent');
+      const depth = opponentProfile.depth;
+      const movetimeMs = hasClock ? undefined : opponentProfile.movetimeMs;
+      const targetMultiPv = opponentProfile.multiPv;
 
       // Update position shadow
       const startFen = data.fen;
@@ -542,7 +550,7 @@ export class EnginePoolManager {
 
         if (!userMove) {
           // Can't determine user's move — fall back to stop + resync
-          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs);
           return;
         }
 
@@ -551,19 +559,19 @@ export class EnginePoolManager {
           // The opponent played exactly the move we were pondering.
           // Stop the ponder search, then issue a timed go on the same position.
           console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
-          this.stopPonderAndGo(session, data.requestId, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
         } else if (incomingPly > ps.ponderPly) {
           // ── Ponder MISS ────────────────────────────────────────────────
           // Opponent played a different move — stop and resync.
           console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
-          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
         } else {
           // ── Ponder RESYNC ──────────────────────────────────────────────
           // Same or fewer moves than when pondering started.
           // Do not treat this as a HIT.
           // Stop/resync safely.
           console.log(`[Ponder ${id}] RESYNC — incomingPly=${incomingPly} <= ponderPly=${ps.ponderPly}`);
-          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, targetMultiPv);
+          this.stopPonderAndGo(session, data.requestId, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
         }
         return;
       }
@@ -580,6 +588,7 @@ export class EnginePoolManager {
         winc,
         binc,
         depth,
+        movetimeMs,
         multiPv: targetMultiPv,
       });
       return;
@@ -596,9 +605,11 @@ export class EnginePoolManager {
     // ── analyze (Analysis Mode deep search) ───────────────────────────────
     if (data.type === 'analyze') {
       const moves = data.moves;
-      const targetMultiPv = data.multiPv ?? ANALYSIS_MULTIPV;
       const startFen = data.fen;
-      const targetDepth = data.depth || 30;
+      const profile = getDifficultyProfile('standard', data.purpose, {
+        depth: data.depth,
+        multiPv: data.multiPv,
+      });
       this.enqueueSearch(session, {
         type: 'search',
         requestId: data.requestId,
@@ -609,8 +620,9 @@ export class EnginePoolManager {
         btime: 0,
         winc: 0,
         binc: 0,
-        depth: targetDepth,
-        multiPv: targetMultiPv,
+        depth: profile.depth,
+        movetimeMs: profile.movetimeMs,
+        multiPv: profile.multiPv,
       });
       return;
     }
@@ -757,6 +769,7 @@ export class EnginePoolManager {
       operation.winc,
       operation.binc,
       operation.depth,
+      operation.movetimeMs,
     );
   }
 
@@ -774,6 +787,7 @@ export class EnginePoolManager {
     winc: number,
     binc: number,
     depth?: number,
+    movetimeMs?: number,
     targetMultiPv: number = 1,
   ) {
     if (!session.process.stdin) return;
@@ -792,6 +806,7 @@ export class EnginePoolManager {
         pendingWinc: winc,
         pendingBinc: binc,
         pendingDepth: depth,
+        pendingMovetimeMs: movetimeMs,
         pendingMultiPv: targetMultiPv,
         pendingRequestId: requestId,
         baseFen:   startFen,
@@ -811,6 +826,7 @@ export class EnginePoolManager {
         winc,
         binc,
         depth,
+        movetimeMs,
         multiPv: targetMultiPv,
       });
     }
@@ -833,6 +849,7 @@ export class EnginePoolManager {
         pendingBtime: 0,
         pendingWinc: 0,
         pendingBinc: 0,
+        pendingMovetimeMs: undefined,
         pendingMultiPv: 1,
         pendingRequestId: undefined,
       };
@@ -856,11 +873,12 @@ export class EnginePoolManager {
     winc: number,
     binc: number,
     depth?: number,
+    movetimeMs?: number,
   ) {
     if (!session.process.stdin) return;
 
     writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
-    writeUciCommand(session.process.stdin, buildGoCommand({ depth, wtime, btime, winc, binc }));
+    writeUciCommand(session.process.stdin, buildGoCommand({ depth, movetimeMs, wtime, btime, winc, binc }));
     session.searchGeneration += 1;
     session.activeSearch = {
       requestId,
@@ -870,7 +888,7 @@ export class EnginePoolManager {
     };
     session.currentDepth = 0;
     session.pvs = [];
-    session.ponderState = { phase: 'thinking', requestId, searchMode, wtime, btime, winc, binc, depth };
+    session.ponderState = { phase: 'thinking', requestId, searchMode, wtime, btime, winc, binc, depth, movetimeMs };
     session.startFen = startFen;
     session.uciMoves = moves;
   }

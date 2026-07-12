@@ -241,6 +241,29 @@ function parsePayload(payload: unknown) {
   return parseClientMessage(Buffer.from(JSON.stringify(payload)));
 }
 
+function opponentSearch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'move',
+    requestId: 1,
+    purpose: 'opponent',
+    difficulty: 'standard',
+    fen: DEFAULT_START_FEN,
+    moves: [],
+    ...overrides,
+  };
+}
+
+function analysisSearch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'analyze',
+    requestId: 1,
+    purpose: 'analysis',
+    fen: DEFAULT_START_FEN,
+    moves: [],
+    ...overrides,
+  };
+}
+
 function assertInvalid(payload: unknown, code: string): void {
   const result = parsePayload(payload);
   assert.equal(result.ok, false);
@@ -280,33 +303,30 @@ function testFenValidation(): void {
 }
 
 function testMoveValidation(): void {
-  assertValid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e2e4', 'e7e8q'] });
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['i2e4'] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e7e8x'] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [42] }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: Array.from({ length: 513 }, () => 'e2e4') }, 'INVALID_MOVE');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['e2e4\nstop'] }, 'INVALID_MOVE');
+  assertValid(opponentSearch({ moves: ['e2e4', 'e7e8q'] }));
+  assertInvalid(opponentSearch({ moves: ['i2e4'] }), 'INVALID_MOVE');
+  assertInvalid(opponentSearch({ moves: ['e7e8x'] }), 'INVALID_MOVE');
+  assertInvalid(opponentSearch({ moves: [42] }), 'INVALID_MOVE');
+  assertInvalid(opponentSearch({ moves: Array.from({ length: 513 }, () => 'e2e4') }), 'INVALID_MOVE');
+  assertInvalid(opponentSearch({ moves: ['e2e4\nstop'] }), 'INVALID_MOVE');
 }
 
 function testRequestIdValidation(): void {
-  assertInvalid({ type: 'move', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertInvalid({ type: 'analyze', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertValid({ type: 'move', requestId: 7, fen: DEFAULT_START_FEN, moves: [] });
-  assertValid({ type: 'analyze', requestId: 8, fen: DEFAULT_START_FEN, moves: [], depth: 1, multiPv: 1 });
+  assertInvalid(opponentSearch({ requestId: undefined }), 'INVALID_MESSAGE');
+  assertInvalid(analysisSearch({ requestId: undefined }), 'INVALID_MESSAGE');
+  assertValid(opponentSearch({ requestId: 7 }));
+  assertValid(analysisSearch({ requestId: 8, depth: 1, multiPv: 1 }));
   assertValid({ type: 'stop', requestId: 9 });
-  assertInvalid({ type: 'move', requestId: 0, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertInvalid({ type: 'move', requestId: -1, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertInvalid({ type: 'move', requestId: 1.5, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertInvalid({ type: 'move', requestId: '1', fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
-  assertInvalid({ type: 'move', requestId: Number.MAX_SAFE_INTEGER + 1, fen: DEFAULT_START_FEN, moves: [] }, 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ requestId: 0 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ requestId: -1 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ requestId: 1.5 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ requestId: '1' }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ requestId: Number.MAX_SAFE_INTEGER + 1 }), 'INVALID_MESSAGE');
 }
 
 function testNumericValidation(): void {
   assertValid({
-    type: 'move',
-    requestId: 1,
-    fen: DEFAULT_START_FEN,
-    moves: ['e2e4'],
+    ...opponentSearch({ moves: ['e2e4'] }),
     wtime: 180000,
     btime: 180000,
     winc: 2000,
@@ -315,18 +335,33 @@ function testNumericValidation(): void {
     multiPv: 3,
   });
 
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: -1 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 0 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 1.5 }, 'INVALID_NUMBER');
-  assertInvalid({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 65 }, 'INVALID_NUMBER');
+  assertInvalid(opponentSearch({ depth: -1 }), 'INVALID_NUMBER');
+  assertInvalid(opponentSearch({ depth: 0 }), 'INVALID_NUMBER');
+  assertInvalid(opponentSearch({ depth: 1.5 }), 'INVALID_NUMBER');
+  assertInvalid(opponentSearch({ depth: 65 }), 'INVALID_NUMBER');
 
-  const nanResult = validateClientMessage({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: NaN });
+  const nanResult = validateClientMessage(opponentSearch({ depth: NaN }));
   assert.equal(nanResult.ok, false);
   if (!nanResult.ok) assert.equal(nanResult.error.code, 'INVALID_NUMBER');
 
-  const infinityResult = validateClientMessage({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: [], wtime: Infinity });
+  const infinityResult = validateClientMessage(opponentSearch({ wtime: Infinity }));
   assert.equal(infinityResult.ok, false);
   if (!infinityResult.ok) assert.equal(infinityResult.error.code, 'INVALID_NUMBER');
+}
+
+function testDifficultyAndPurposeValidation(): void {
+  assertValid(opponentSearch({ difficulty: 'blitz' }));
+  assertValid(opponentSearch({ difficulty: 'standard' }));
+  assertValid(opponentSearch({ difficulty: 'deep' }));
+  assertInvalid(opponentSearch({ difficulty: undefined }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ difficulty: 'easy' }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ purpose: 'analysis' }), 'INVALID_MESSAGE');
+  assertValid(analysisSearch({ purpose: 'analysis' }));
+  assertValid(analysisSearch({ purpose: 'training-root-review' }));
+  assertValid(analysisSearch({ purpose: 'training-result-review' }));
+  assertInvalid(analysisSearch({ purpose: 'opponent' }), 'INVALID_MESSAGE');
+  assertInvalid(analysisSearch({ purpose: 'review' }), 'INVALID_MESSAGE');
+  assertInvalid(analysisSearch({ difficulty: 'blitz' }), 'INVALID_MESSAGE');
 }
 
 function testOptionValidation(): void {
@@ -354,6 +389,10 @@ function testUciBuilders(): void {
   assert.equal(
     buildGoCommand({ depth: 10, wtime: 0, btime: 0, winc: 0, binc: 0 }),
     'go depth 10',
+  );
+  assert.equal(
+    buildGoCommand({ movetimeMs: 1000, wtime: 0, btime: 0, winc: 0, binc: 0 }),
+    'go movetime 1000',
   );
   assert.equal(buildSetOptionCommand('OwnBook', false), 'setoption name OwnBook value false');
 }
@@ -393,13 +432,13 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
   assert.deepEqual(engine.writes, ['position startpos moves e2e4']);
 
   engine.writes.length = 0;
-  socket.emitRawMessage(JSON.stringify({ type: 'move', requestId: 1, fen: DEFAULT_START_FEN, moves: ['bad'] }));
-  socket.emitRawMessage(JSON.stringify({ type: 'move', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 1, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 1, moves: ['bad'] })));
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 2, moves: ['e2e4'], difficulty: 'deep', multiPv: 1 })));
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(engine.writes, [
     'setoption name MultiPV value 1',
     'position startpos moves e2e4',
-    'go depth 1',
+    'go depth 8',
   ]);
 
   socket.close();
@@ -408,7 +447,7 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
 async function testInfoCarriesRequestId(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 10, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 10, depth: 2, multiPv: 1 })));
   engine.emitInfo();
   engine.emitInfo('info depth 2 score cp 20 nodes 2 time 2 pv d2d4');
 
@@ -423,7 +462,7 @@ async function testInfoCarriesRequestId(): Promise<void> {
 async function testStopSwallowsTrailingBestMove(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 1, depth: 2, multiPv: 1 })));
   engine.emitInfo();
   socket.emitRawMessage(JSON.stringify({ type: 'stop', requestId: 1 }));
   engine.emitBestMove('bestmove e2e4');
@@ -438,8 +477,8 @@ async function testStopSwallowsTrailingBestMove(): Promise<void> {
 async function testNewerSearchSupersedesOlderSearch(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 1, depth: 2, multiPv: 1 })));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 2, moves: ['e2e4'], depth: 2, multiPv: 1 })));
 
   engine.emitInfo('info depth 1 score cp 11 nodes 1 time 1 pv e2e4');
   engine.emitBestMove('bestmove e2e4');
@@ -462,7 +501,7 @@ async function testNewerSearchSupersedesOlderSearch(): Promise<void> {
 async function testNewGameSwallowsOldBestMove(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 1, depth: 2, multiPv: 1 })));
   socket.emitRawMessage(JSON.stringify({ type: 'newgame' }));
   engine.emitBestMove('bestmove e2e4');
   await flushEvents();
@@ -477,7 +516,7 @@ async function testNewGameSwallowsOldBestMove(): Promise<void> {
 async function testReleaseSessionIgnoresProcessOutput(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 1, depth: 2, multiPv: 1 })));
   socket.emitRawMessage(JSON.stringify({ type: 'releaseSession' }));
   const sentBeforeOutput = socket.sent.length;
   engine.emitInfo();
@@ -490,9 +529,9 @@ async function testReleaseSessionIgnoresProcessOutput(): Promise<void> {
 async function testRapidAnalyzeReplacementUsesLatestRequest(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 1, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 2, fen: DEFAULT_START_FEN, moves: ['e2e4'], depth: 2, multiPv: 1 }));
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 3, fen: DEFAULT_START_FEN, moves: ['d2d4'], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 1, depth: 2, multiPv: 1 })));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 2, moves: ['e2e4'], depth: 2, multiPv: 1 })));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 3, moves: ['d2d4'], depth: 2, multiPv: 1 })));
 
   engine.emitBestMove('bestmove e2e4');
   await flushEvents();
@@ -513,7 +552,7 @@ async function testSetOptionUsesActiveSessionBeforeSearch(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
   socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 20, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 20, depth: 2, multiPv: 1 })));
   await flushEvents();
 
   assert.deepEqual(engine.writes.slice(0, 4), [
@@ -560,7 +599,7 @@ async function testSetOptionDoesNotLeakAcrossClients(): Promise<void> {
 
   firstSocket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
   secondSocket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: true }));
-  firstSocket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 40, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  firstSocket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 40, depth: 2, multiPv: 1 })));
   await flushEvents();
 
   assert.ok(firstEngine.writes.includes('setoption name OwnBook value false'));
@@ -575,7 +614,7 @@ async function testSetOptionDoesNotLeakAcrossClients(): Promise<void> {
 async function testSetOptionQueuesBehindActiveSearch(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 30, fen: DEFAULT_START_FEN, moves: [], depth: 3, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 30, depth: 3, multiPv: 1 })));
   socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
   await flushEvents();
 
@@ -588,7 +627,7 @@ async function testSetOptionQueuesBehindActiveSearch(): Promise<void> {
   assert.ok(engine.writes.includes('setoption name OwnBook value false'));
   assert.equal(messagesOfType(socket, 'bestmove').length, 0);
 
-  socket.emitRawMessage(JSON.stringify({ type: 'analyze', requestId: 31, fen: DEFAULT_START_FEN, moves: [], depth: 2, multiPv: 1 }));
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 31, depth: 2, multiPv: 1 })));
   engine.emitBestMove('bestmove d2d4');
   await flushEvents();
 
@@ -610,12 +649,146 @@ async function testNewGameDoesNotResetOwnBookOption(): Promise<void> {
   socket.close();
 }
 
+async function testDifficultyProfilesGenerateDistinctOpponentCommands(): Promise<void> {
+  const blitz = await createManualSession();
+  blitz.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 50, difficulty: 'blitz', multiPv: 3 })));
+  await flushEvents();
+  assert.deepEqual(blitz.engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 1',
+    'position startpos',
+    'go movetime 1000',
+  ]);
+  blitz.socket.close();
+
+  const standard = await createManualSession();
+  standard.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 51, difficulty: 'standard', multiPv: 3 })));
+  await flushEvents();
+  assert.deepEqual(standard.engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 1',
+    'position startpos',
+    'go movetime 3000',
+  ]);
+  standard.socket.close();
+
+  const deep = await createManualSession();
+  deep.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 52, difficulty: 'deep', multiPv: 3 })));
+  await flushEvents();
+  assert.deepEqual(deep.engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 1',
+    'position startpos',
+    'go depth 8',
+  ]);
+  deep.socket.close();
+}
+
+async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 60,
+    purpose: 'training-root-review',
+    depth: 11,
+    multiPv: 3,
+  })));
+  await flushEvents();
+  assert.deepEqual(engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 3',
+    'position startpos',
+    'go depth 11',
+  ]);
+
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+  engine.writes.length = 0;
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 61,
+    purpose: 'training-result-review',
+    depth: 11,
+    multiPv: 3,
+    moves: ['e2e4'],
+  })));
+  await flushEvents();
+  assert.deepEqual(engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 3',
+    'position startpos moves e2e4',
+    'go depth 11',
+  ]);
+
+  engine.emitBestMove('bestmove e7e5');
+  await flushEvents();
+  engine.writes.length = 0;
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({
+    requestId: 62,
+    purpose: 'analysis',
+    depth: 7,
+    multiPv: 2,
+  })));
+  await flushEvents();
+  assert.deepEqual(engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 2',
+    'position startpos',
+    'go depth 7',
+  ]);
+
+  socket.close();
+}
+
+async function testClockBasedOpponentKeepsClockCommand(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({
+    requestId: 70,
+    difficulty: 'blitz',
+    wtime: 180000,
+    btime: 180000,
+    winc: 2000,
+    binc: 2000,
+    multiPv: 3,
+  })));
+  await flushEvents();
+
+  assert.deepEqual(engine.writes.slice(0, 3), [
+    'setoption name MultiPV value 3',
+    'position startpos',
+    'go wtime 180000 btime 180000 winc 2000 binc 2000',
+  ]);
+
+  socket.close();
+}
+
+async function testDifficultyChangeAffectsNextSearchOnly(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 80, difficulty: 'blitz' })));
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 81, difficulty: 'deep' })));
+  await flushEvents();
+
+  assert.ok(engine.writes.includes('go movetime 1000'));
+  assert.ok(engine.writes.includes('stop'));
+  assert.equal(engine.writes.includes('go depth 8'), false);
+
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  assert.ok(engine.writes.includes('go depth 8'));
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+
+  engine.emitBestMove('bestmove d2d4');
+  await flushEvents();
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 81);
+
+  socket.close();
+}
+
 async function run(): Promise<void> {
   testJsonBoundary();
   testFenValidation();
   testMoveValidation();
   testRequestIdValidation();
   testNumericValidation();
+  testDifficultyAndPurposeValidation();
   testOptionValidation();
   testUciBuilders();
   await testInvalidInputDoesNotWriteToEngine();
@@ -629,6 +802,10 @@ async function run(): Promise<void> {
   await testSetOptionDoesNotLeakAcrossClients();
   await testSetOptionQueuesBehindActiveSearch();
   await testNewGameDoesNotResetOwnBookOption();
+  await testDifficultyProfilesGenerateDistinctOpponentCommands();
+  await testReviewAndAnalysisProfilesGenerateStableCommands();
+  await testClockBasedOpponentKeepsClockCommand();
+  await testDifficultyChangeAffectsNextSearchOnly();
 
   console.log('engine-session protocol tests passed');
 }

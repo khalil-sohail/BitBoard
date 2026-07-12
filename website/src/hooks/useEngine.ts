@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { EngineInfo } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
+import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
 
 type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'disconnected' | 'session_expired' | 'error';
 
@@ -14,8 +15,8 @@ export interface SendMoveOptions {
   winc?: number;
   /** Black increment per move in ms. */
   binc?: number;
-  /** Legacy difficulty string — only used when wtime/btime are both 0. */
-  difficulty?: string;
+  /** Opponent strength profile. Review and analysis requests never use this. */
+  difficulty: EngineDifficulty;
   /** Optional depth limit to cap the engine's search. */
   depth?: number;
   /** Number of principal variations to calculate (1-3). */
@@ -30,6 +31,7 @@ export function useEngine() {
   const nextRequestIdRef = useRef<EngineRequestId>(1);
   const activeRequestIdRef = useRef<EngineRequestId | null>(null);
   const activeRootFenRef = useRef<string | null>(null);
+  const activePurposeRef = useRef<SearchPurpose | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -54,12 +56,14 @@ export function useEngine() {
   const invalidateActiveRequest = useCallback(() => {
     activeRequestIdRef.current = null;
     activeRootFenRef.current = null;
+    activePurposeRef.current = null;
     setBestMove(null);
   }, []);
 
-  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string) => {
+  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose) => {
     activeRequestIdRef.current = requestId;
     activeRootFenRef.current = rootFen;
+    activePurposeRef.current = purpose;
     setBestMove(null);
     setEngineInfo(null);
   }, []);
@@ -107,8 +111,11 @@ export function useEngine() {
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady &&
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
-              setBestMove(data.move);
+              if (activePurposeRef.current === 'opponent') {
+                setBestMove(data.move);
+              }
               activeRequestIdRef.current = null;
+              activePurposeRef.current = null;
               setStatus('idle');
             }
             break;
@@ -157,35 +164,31 @@ export function useEngine() {
    * Send a move to the engine.
    *
    * If wtime/btime are provided (> 0), the engine will use real time controls.
-   * Otherwise it falls back to the legacy difficulty movetime approach.
+   * Otherwise it uses the selected opponent difficulty profile.
    */
   const sendMove = useCallback((
     fen: string,
     moves: string[],
-    options: SendMoveOptions | string = 'standard',
+    options: SendMoveOptions,
   ) => {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
       setStatus('thinking');
       const requestId = allocateRequestId();
-      activateRequest(requestId, fen);
-
-      // Normalise: accept either the new options object or the legacy difficulty string
-      const opts: SendMoveOptions = typeof options === 'string'
-        ? { difficulty: options }
-        : options;
+      activateRequest(requestId, fen, 'opponent');
 
       ws.current.send(JSON.stringify({
         type: 'move',
         requestId,
+        purpose: 'opponent',
         fen,
         moves,
-        wtime:      opts.wtime      ?? 0,
-        btime:      opts.btime      ?? 0,
-        winc:       opts.winc       ?? 0,
-        binc:       opts.binc       ?? 0,
-        depth:      opts.depth,
-        multiPv:    opts.multiPv ?? 1,
-        difficulty: opts.difficulty ?? 'standard',
+        wtime:      options.wtime      ?? 0,
+        btime:      options.btime      ?? 0,
+        winc:       options.winc       ?? 0,
+        binc:       options.binc       ?? 0,
+        depth:      options.depth,
+        multiPv:    options.multiPv ?? 1,
+        difficulty: options.difficulty,
       }));
     }
   }, [activateRequest, allocateRequestId, setStatus]);
@@ -243,12 +246,18 @@ export function useEngine() {
     }
   }, [invalidateActiveRequest]);
 
-  const startAnalysis = useCallback((fen: string, moves: string[] = [], depth?: number, multiPv?: number) => {
+  const startAnalysis = useCallback((
+    fen: string,
+    moves: string[] = [],
+    depth?: number,
+    multiPv?: number,
+    purpose: Exclude<SearchPurpose, 'opponent'> = 'analysis',
+  ) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const requestId = allocateRequestId();
       setStatus('analyzing');
-      activateRequest(requestId, fen);
-      ws.current.send(JSON.stringify({ type: 'analyze', requestId, fen, moves, depth, multiPv }));
+      activateRequest(requestId, fen, purpose);
+      ws.current.send(JSON.stringify({ type: 'analyze', requestId, purpose, fen, moves, depth, multiPv }));
     }
   }, [activateRequest, allocateRequestId, setStatus]);
 

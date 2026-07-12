@@ -17,6 +17,8 @@ import('ws').then(({ default: WebSocket }) => {
       ws.send(JSON.stringify({
         type: 'move',
         requestId: nextRequestId++,
+        purpose: 'opponent',
+        difficulty: 'standard',
         fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         moves: ['e2e4'],
       }));

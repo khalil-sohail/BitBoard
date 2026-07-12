@@ -173,6 +173,11 @@ Engine settings shown in the web UI are sent through the page's active engine
 session. They persist across `ucinewgame` in the current page session and are
 reapplied when the page reconnects to a new engine process.
 
+Training Mode supports three opponent-strength profiles: Blitz (`go movetime
+1000`), Standard (`go movetime 3000`), and Deep (`go depth 8`). These profiles
+only affect opponent move selection. Training feedback uses separate review
+searches so move grading is not weakened by the selected opponent difficulty.
+
 ## Docker Setup
 
 The project provides a production-ready containerized pipeline.

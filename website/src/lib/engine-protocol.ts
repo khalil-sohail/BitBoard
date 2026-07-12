@@ -1,5 +1,7 @@
 import { RawData } from 'ws';
 import { validateFen } from 'chess.js';
+import { isEngineDifficulty } from './engine-difficulty';
+import type { EngineDifficulty, SearchPurpose } from './engine-difficulty';
 
 export const DEFAULT_START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 export const ANALYSIS_MULTIPV = 3;
@@ -38,6 +40,7 @@ export type ParseResult<T> =
 export interface MoveMessage {
   type: 'move';
   requestId: number;
+  purpose: 'opponent';
   fen: string;
   moves: string[];
   wtime: number;
@@ -46,7 +49,7 @@ export interface MoveMessage {
   binc: number;
   depth?: number;
   multiPv: number;
-  difficulty?: string;
+  difficulty: EngineDifficulty;
 }
 
 export interface PositionMessage {
@@ -58,6 +61,7 @@ export interface PositionMessage {
 export interface AnalyzeMessage {
   type: 'analyze';
   requestId: number;
+  purpose: 'training-root-review' | 'training-result-review' | 'analysis';
   fen: string;
   moves: string[];
   depth?: number;
@@ -258,21 +262,24 @@ function optionalInteger(value: unknown, field: string, min: number, max: number
   return validateInteger(value, field, min, max);
 }
 
-function validateOptionalDifficulty(value: unknown): ParseResult<string | undefined> {
-  if (value === undefined) {
-    return ok(undefined);
-  }
-
-  const result = validateString(value, 'difficulty');
-  if (result.ok === false) {
-    return result;
-  }
-
-  if (!['blitz', 'standard', 'deep'].includes(result.value)) {
+function validateDifficulty(value: unknown): ParseResult<EngineDifficulty> {
+  if (!isEngineDifficulty(value)) {
     return err('INVALID_MESSAGE', 'difficulty is invalid.');
   }
 
-  return ok(result.value);
+  return ok(value);
+}
+
+function validateSearchPurpose(value: unknown, allowed: readonly SearchPurpose[]): ParseResult<SearchPurpose> {
+  if (typeof value !== 'string') {
+    return err('INVALID_MESSAGE', 'purpose must be a string.');
+  }
+
+  if (!allowed.includes(value as SearchPurpose)) {
+    return err('INVALID_MESSAGE', 'purpose is invalid.');
+  }
+
+  return ok(value as SearchPurpose);
 }
 
 function validateCommonPositionFields(record: Record<string, unknown>): ParseResult<{ fen: string; moves: string[] }> {
@@ -292,6 +299,9 @@ function validateCommonPositionFields(record: Record<string, unknown>): ParseRes
 function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveMessage> {
   const requestId = validateRequestId(record.requestId);
   if (requestId.ok === false) return requestId;
+
+  const purpose = validateSearchPurpose(record.purpose, ['opponent']);
+  if (purpose.ok === false) return purpose;
 
   const positionResult = validateCommonPositionFields(record);
   if (positionResult.ok === false) {
@@ -316,12 +326,13 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
   const multiPv = validateInteger(record.multiPv ?? 1, 'multiPv', 1, MAX_MULTIPV);
   if (multiPv.ok === false) return multiPv;
 
-  const difficulty = validateOptionalDifficulty(record.difficulty);
+  const difficulty = validateDifficulty(record.difficulty);
   if (difficulty.ok === false) return difficulty;
 
   return ok({
     type: 'move',
     requestId: requestId.value,
+    purpose: 'opponent',
     fen: positionResult.value.fen,
     moves: positionResult.value.moves,
     wtime: wtime.value,
@@ -347,6 +358,13 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
   const requestId = validateRequestId(record.requestId);
   if (requestId.ok === false) return requestId;
 
+  if (record.difficulty !== undefined) {
+    return err('INVALID_MESSAGE', 'difficulty is only valid for opponent searches.');
+  }
+
+  const purpose = validateSearchPurpose(record.purpose, ['training-root-review', 'training-result-review', 'analysis']);
+  if (purpose.ok === false) return purpose;
+
   const positionResult = validateCommonPositionFields(record);
   if (positionResult.ok === false) {
     return positionResult;
@@ -361,6 +379,7 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
   return ok({
     type: 'analyze',
     requestId: requestId.value,
+    purpose: purpose.value as AnalyzeMessage['purpose'],
     fen: positionResult.value.fen,
     moves: positionResult.value.moves,
     depth: depth.value,
@@ -484,6 +503,7 @@ export function buildPositionCommand(fen: string, moves: readonly string[]): str
 
 export function buildGoCommand(params: {
   depth?: number;
+  movetimeMs?: number;
   wtime: number;
   btime: number;
   winc: number;
@@ -491,6 +511,10 @@ export function buildGoCommand(params: {
 }): string {
   if (params.depth !== undefined) {
     return `go depth ${params.depth}`;
+  }
+
+  if (params.movetimeMs !== undefined) {
+    return `go movetime ${params.movetimeMs}`;
   }
 
   const hasTC = params.wtime > 0 || params.btime > 0;

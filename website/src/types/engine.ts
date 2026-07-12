@@ -1,4 +1,5 @@
 import type { NormalizedEvaluation } from '../lib/engine-evaluation';
+import type { EngineDifficulty } from '../lib/engine-difficulty';
 
 export interface PVLine {
   multipv: number;
@@ -24,7 +25,7 @@ export interface EvalPoint {
 
 export type PlayerColor = 'w' | 'b';
 
-export type DifficultyLevel = 'blitz' | 'standard' | 'deep';
+export type DifficultyLevel = EngineDifficulty;
 
 /**
  * The three operating modes for the chess platform.
