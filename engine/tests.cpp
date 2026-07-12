@@ -1,8 +1,12 @@
 #include "board.hpp"
+#include "openingBook.hpp"
 #include "search.hpp"
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -54,6 +58,64 @@ bool containsMove(const std::vector<Move>& moves, const Move& target) {
     return std::any_of(moves.begin(), moves.end(), [&](const Move& move) {
         return sameMove(move, target);
     });
+}
+
+uint16_t encodePolyglotMove(const std::string& uci) {
+    const int fromFile = uci[0] - 'a';
+    const int fromRank = uci[1] - '1';
+    const int toFile = uci[2] - 'a';
+    const int toRank = uci[3] - '1';
+    int promotion = 0;
+    if (uci.size() == 5) {
+        if (uci[4] == 'n') promotion = 1;
+        else if (uci[4] == 'b') promotion = 2;
+        else if (uci[4] == 'r') promotion = 3;
+        else if (uci[4] == 'q') promotion = 4;
+    }
+    return static_cast<uint16_t>(
+        toFile |
+        (toRank << 3) |
+        (fromFile << 6) |
+        (fromRank << 9) |
+        (promotion << 12));
+}
+
+void writeBigEndian16(std::ofstream& out, uint16_t value) {
+    out.put(static_cast<char>((value >> 8) & 0xff));
+    out.put(static_cast<char>(value & 0xff));
+}
+
+void writeBigEndian32(std::ofstream& out, uint32_t value) {
+    out.put(static_cast<char>((value >> 24) & 0xff));
+    out.put(static_cast<char>((value >> 16) & 0xff));
+    out.put(static_cast<char>((value >> 8) & 0xff));
+    out.put(static_cast<char>(value & 0xff));
+}
+
+void writeBigEndian64(std::ofstream& out, uint64_t value) {
+    for (int shift = 56; shift >= 0; shift -= 8) {
+        out.put(static_cast<char>((value >> shift) & 0xff));
+    }
+}
+
+struct TestBookEntry {
+    uint64_t key;
+    std::string move;
+    uint16_t weight;
+    uint32_t learn;
+};
+
+std::filesystem::path writeTempBook(const std::string& name, const std::vector<TestBookEntry>& entries) {
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / name;
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    require(out.is_open(), "Failed to create temporary book: " + path.string());
+    for (const TestBookEntry& entry : entries) {
+        writeBigEndian64(out, entry.key);
+        writeBigEndian16(out, encodePolyglotMove(entry.move));
+        writeBigEndian16(out, entry.weight);
+        writeBigEndian32(out, entry.learn);
+    }
+    return path;
 }
 
 std::string boardSignature(const Board& board) {
@@ -502,6 +564,146 @@ void test_find_best_move_ponder_is_legal_when_available() {
     require(board.undoMove(), "undoMove failed after ponder legality check");
 }
 
+void test_opening_book_returns_empty_for_missing_position() {
+    Board board;
+    const std::filesystem::path path = writeTempBook("bitboard-empty-position.bin", {
+        {board.computePolyglotHash() + 1, "e2e4", 10, 0},
+    });
+
+    OpeningBook book(path.string());
+    require(book.getBookMoveCandidates(board).empty(), "Expected no candidates for missing book key");
+    require(!book.selectBookMove(board).has_value(), "Expected no selected move for missing book key");
+}
+
+void test_opening_book_parses_candidates_weights_and_duplicates() {
+    Board board;
+    const uint64_t key = board.computePolyglotHash();
+    const std::filesystem::path path = writeTempBook("bitboard-candidates.bin", {
+        {key, "e2e4", 10, 7},
+        {key, "d2d4", 30, 3},
+        {key, "e2e4", 5, 9},
+        {key, "e2e5", 99, 1},
+    });
+
+    OpeningBook book(path.string());
+    const std::vector<BookMoveCandidate> candidates = book.getBookMoveCandidates(board);
+    require(candidates.size() == 2, "Expected two legal deduplicated candidates, got " + std::to_string(candidates.size()));
+    require(moveKey(candidates[0].move) == "d2d4", "Expected highest weighted candidate first");
+    require(candidates[0].weight == 30, "Expected d2d4 weight 30");
+    require(moveKey(candidates[1].move) == "e2e4", "Expected duplicate e2e4 candidate second");
+    require(candidates[1].weight == 15, "Expected duplicate weights to combine to 15");
+    require(candidates[1].learn == 9, "Expected duplicate learn value to keep max learn");
+}
+
+void test_opening_book_single_candidate_and_best_are_deterministic() {
+    Board board;
+    const uint64_t key = board.computePolyglotHash();
+    const std::filesystem::path path = writeTempBook("bitboard-single.bin", {
+        {key, "g1f3", 1, 0},
+    });
+
+    OpeningBook book(path.string());
+    book.setSelectionMode(BookSelectionMode::Weighted);
+    for (int i = 0; i < 5; ++i) {
+        std::optional<SelectedBookMove> selected = book.selectBookMove(board);
+        require(selected.has_value(), "Expected single candidate selection");
+        require(moveKey(selected->move) == "g1f3", "Single book candidate should remain deterministic");
+        require(selected->candidateCount == 1, "Single candidate metadata should report one candidate");
+    }
+
+    const std::filesystem::path multiPath = writeTempBook("bitboard-best.bin", {
+        {key, "e2e4", 10, 0},
+        {key, "d2d4", 50, 0},
+    });
+    OpeningBook multiBook(multiPath.string());
+    multiBook.setSelectionMode(BookSelectionMode::Best);
+    std::optional<SelectedBookMove> selected = multiBook.selectBookMove(board);
+    require(selected.has_value(), "Expected best selection");
+    require(moveKey(selected->move) == "d2d4", "Best mode should choose highest weight");
+}
+
+void test_opening_book_weighted_selector_is_seeded_and_weighted() {
+    Board board;
+    const uint64_t key = board.computePolyglotHash();
+    const std::filesystem::path path = writeTempBook("bitboard-weighted.bin", {
+        {key, "e2e4", 90, 0},
+        {key, "d2d4", 10, 0},
+    });
+
+    OpeningBook first(path.string());
+    OpeningBook second(path.string());
+    first.setSeed(1234);
+    second.setSeed(1234);
+
+    std::vector<std::string> firstSequence;
+    std::vector<std::string> secondSequence;
+    int e4Count = 0;
+    int d4Count = 0;
+    for (int i = 0; i < 100; ++i) {
+        const auto a = first.selectBookMove(board);
+        const auto b = second.selectBookMove(board);
+        require(a.has_value() && b.has_value(), "Expected weighted selections");
+        firstSequence.push_back(moveKey(a->move));
+        secondSequence.push_back(moveKey(b->move));
+        if (moveKey(a->move) == "e2e4") ++e4Count;
+        if (moveKey(a->move) == "d2d4") ++d4Count;
+    }
+
+    require(firstSequence == secondSequence, "Same book seed should reproduce the same sequence");
+    require(d4Count > 0, "Low-weight candidate should remain possible in deterministic sample");
+    require(e4Count > d4Count, "Higher-weight candidate should appear more often in deterministic sample");
+
+    OpeningBook different(path.string());
+    different.setSeed(5678);
+    bool differs = false;
+    for (const std::string& expected : firstSequence) {
+        const auto selected = different.selectBookMove(board);
+        require(selected.has_value(), "Expected selection from different seeded book");
+        if (moveKey(selected->move) != expected) {
+            differs = true;
+            break;
+        }
+    }
+    require(differs, "Different seed should be able to produce a different sequence");
+}
+
+void test_opening_book_zero_weight_and_top_n_policy() {
+    Board board;
+    const uint64_t key = board.computePolyglotHash();
+    const std::filesystem::path zeroPath = writeTempBook("bitboard-zero-weight.bin", {
+        {key, "e2e4", 0, 0},
+        {key, "d2d4", 0, 0},
+    });
+
+    OpeningBook zeroBook(zeroPath.string());
+    zeroBook.setSeed(42);
+    bool sawE4 = false;
+    bool sawD4 = false;
+    for (int i = 0; i < 20; ++i) {
+        const auto selected = zeroBook.selectBookMove(board);
+        require(selected.has_value(), "Expected zero-weight uniform selection");
+        sawE4 = sawE4 || moveKey(selected->move) == "e2e4";
+        sawD4 = sawD4 || moveKey(selected->move) == "d2d4";
+    }
+    require(sawE4 && sawD4, "Zero-weight candidates should be selected uniformly by seeded RNG");
+
+    const std::filesystem::path topNPath = writeTempBook("bitboard-topn.bin", {
+        {key, "e2e4", 100, 0},
+        {key, "d2d4", 90, 0},
+        {key, "c2c4", 80, 0},
+    });
+    OpeningBook topNBook(topNPath.string());
+    topNBook.setSelectionMode(BookSelectionMode::TopNWeighted);
+    topNBook.setTopN(1);
+    topNBook.setSeed(1);
+    for (int i = 0; i < 10; ++i) {
+        const auto selected = topNBook.selectBookMove(board);
+        require(selected.has_value(), "Expected top-N selection");
+        require(moveKey(selected->move) == "e2e4", "TopN=1 should only select the strongest candidate");
+        require(selected->candidateCount == 3, "Top-N metadata should preserve full legal candidate count");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -529,6 +731,11 @@ int main() {
         {"findBestMove pair contract", test_find_best_move_pair_contract},
         {"findBestMoveCompat matches pair best", test_find_best_move_compat_matches_pair_best},
         {"findBestMove ponder legality", test_find_best_move_ponder_is_legal_when_available},
+        {"Opening book missing-position fallback", test_opening_book_returns_empty_for_missing_position},
+        {"Opening book candidates, weights, and duplicates", test_opening_book_parses_candidates_weights_and_duplicates},
+        {"Opening book deterministic single/best selection", test_opening_book_single_candidate_and_best_are_deterministic},
+        {"Opening book seeded weighted selection", test_opening_book_weighted_selector_is_seeded_and_weighted},
+        {"Opening book zero-weight and top-N policy", test_opening_book_zero_weight_and_top_n_policy},
     };
 
     int passed = 0;

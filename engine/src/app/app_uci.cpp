@@ -57,10 +57,14 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
     std::optional<OpeningBook> openingBook;
     bool openingBookStatusPrinted = false;
+    BookSelectionMode bookSelectionMode = BookSelectionMode::Weighted;
+    size_t bookSelectionTopN = 4;
     auto ensureOpeningBookLoaded = [&]() {
         if (!openingBook.has_value()) {
             openingBook.emplace(options.bookPath);
             openingBook->load();
+            openingBook->setSelectionMode(bookSelectionMode);
+            openingBook->setTopN(bookSelectionTopN);
         }
         if (!openingBookStatusPrinted) {
             if (openingBook->lineCount() > 0) {
@@ -87,6 +91,9 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name OwnBook type check default true" << std::endl;
             std::cout << "option name BookDepth type spin default 30 min 0 max 100" << std::endl;
+            std::cout << "option name BookSelection type combo default weighted var best var weighted var top-n-weighted" << std::endl;
+            std::cout << "option name BookSelectionTopN type spin default 4 min 1 max 32" << std::endl;
+            std::cout << "option name BookSeed type spin default 1592594996 min 0 max 2147483647" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min 1 max 8" << std::endl;
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "uciok" << std::endl;
@@ -160,6 +167,40 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                     std::cout << "info string BookDepth set to " << SearchConstants::MAX_BOOK_DEPTH << std::endl;
                 } catch (...) {
                     std::cout << "info string Invalid BookDepth value: " << optValue << std::endl;
+                }
+            } else if (optName == "BookSelection") {
+                if (optValue == "best") {
+                    bookSelectionMode = BookSelectionMode::Best;
+                } else if (optValue == "weighted") {
+                    bookSelectionMode = BookSelectionMode::Weighted;
+                } else if (optValue == "top-n-weighted") {
+                    bookSelectionMode = BookSelectionMode::TopNWeighted;
+                } else {
+                    std::cout << "info string Invalid BookSelection value: " << optValue << std::endl;
+                    continue;
+                }
+                if (openingBook.has_value()) {
+                    openingBook->setSelectionMode(bookSelectionMode);
+                }
+                std::cout << "info string BookSelection set to " << optValue << std::endl;
+            } else if (optName == "BookSelectionTopN") {
+                try {
+                    bookSelectionTopN = static_cast<size_t>(std::max(1, std::stoi(optValue)));
+                    if (openingBook.has_value()) {
+                        openingBook->setTopN(bookSelectionTopN);
+                    }
+                    std::cout << "info string BookSelectionTopN set to " << bookSelectionTopN << std::endl;
+                } catch (...) {
+                    std::cout << "info string Invalid BookSelectionTopN value: " << optValue << std::endl;
+                }
+            } else if (optName == "BookSeed") {
+                try {
+                    const uint32_t seed = static_cast<uint32_t>(std::stoul(optValue));
+                    ensureOpeningBookLoaded();
+                    openingBook->setSeed(seed);
+                    std::cout << "info string BookSeed set" << std::endl;
+                } catch (...) {
+                    std::cout << "info string Invalid BookSeed value: " << optValue << std::endl;
                 }
             } else if (optName == "MultiPV") {
                 try {
@@ -274,19 +315,21 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             if (!localPonder && openingBook.has_value() && SearchConstants::USE_OPENING_BOOK &&
                 board.sanHistory().size() <
                     static_cast<size_t>(SearchConstants::MAX_BOOK_DEPTH)) {
-                std::optional<Move> bookMove = openingBook->getBookMove(board);
+                std::optional<SelectedBookMove> bookMove = openingBook->selectBookMove(board);
                 if (bookMove.has_value()) {
                     std::vector<Move> legalMoves = board.generateLegalMoves();
                     const auto it = std::find_if(
                         legalMoves.begin(), legalMoves.end(),
                         [&](const Move& legalMove) {
-                            return legalMove.from      == bookMove->from &&
-                                   legalMove.to        == bookMove->to   &&
-                                   legalMove.promotion == bookMove->promotion;
+                            return legalMove.from      == bookMove->move.from &&
+                                   legalMove.to        == bookMove->move.to   &&
+                                   legalMove.promotion == bookMove->move.promotion;
                         });
                     if (it != legalMoves.end()) {
-                        const std::string bm = AppText::moveToCompactString(board, *bookMove);
-                        std::cout << "info depth 1 score cp 0 pv " << bm << std::endl;
+                        const std::string bm = AppText::moveToCompactString(board, bookMove->move);
+                        std::cout << "info string book move " << bm
+                                  << " candidates " << bookMove->candidateCount
+                                  << " weight " << bookMove->weight << std::endl;
                         std::cout << "bestmove " << bm << std::endl;
                         continue; // back to getline — no thread needed
                     }

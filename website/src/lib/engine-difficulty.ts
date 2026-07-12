@@ -13,7 +13,13 @@ export interface SearchConfiguration {
   depth?: number;
   movetimeMs?: number;
   multiPv: number;
+  openingSelection?: OpeningSelectionConfiguration;
 }
+
+export type OpeningSelectionConfiguration =
+  | { mode: 'weighted' }
+  | { mode: 'top-n-weighted'; maxCandidates: number }
+  | { mode: 'best' };
 
 export interface DifficultyOption {
   id: EngineDifficulty;
@@ -28,9 +34,9 @@ export const DIFFICULTY_OPTIONS: readonly DifficultyOption[] = Object.freeze([
 ]);
 
 const OPPONENT_PROFILES: Readonly<Record<EngineDifficulty, SearchConfiguration>> = Object.freeze({
-  blitz: Object.freeze({ movetimeMs: 1000, multiPv: 1 }),
-  standard: Object.freeze({ movetimeMs: 3000, multiPv: 1 }),
-  deep: Object.freeze({ depth: 8, multiPv: 1 }),
+  blitz: Object.freeze({ movetimeMs: 1000, multiPv: 1, openingSelection: Object.freeze({ mode: 'weighted' }) }),
+  standard: Object.freeze({ movetimeMs: 3000, multiPv: 1, openingSelection: Object.freeze({ mode: 'top-n-weighted', maxCandidates: 4 }) }),
+  deep: Object.freeze({ depth: 8, multiPv: 1, openingSelection: Object.freeze({ mode: 'best' }) }),
 });
 
 const DEFAULT_REVIEW_DEPTH = 12;

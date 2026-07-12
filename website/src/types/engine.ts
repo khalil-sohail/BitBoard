@@ -13,6 +13,7 @@ export interface EngineInfo {
   requestId?: number;
   rootFen?: string;
   purpose?: SearchPurpose;
+  source?: 'search' | 'book';
   depth: number;
   nodes?: number;
   time?: number; // ms
@@ -29,6 +30,11 @@ export interface EngineTerminalCompletion {
   rootFen?: string;
   purpose?: string;
   terminal: EngineTerminalResult;
+}
+
+export interface BestMoveBookMetadata {
+  candidateCount: number;
+  selectedWeight?: number;
 }
 
 export interface EvalPoint {

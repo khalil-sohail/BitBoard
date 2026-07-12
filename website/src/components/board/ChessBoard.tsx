@@ -2,8 +2,6 @@
 
 import { useState, useMemo, type CSSProperties } from 'react';
 import { Chessboard, type Arrow, type PieceDropHandlerArgs, type SquareHandlerArgs } from 'react-chessboard';
-import { convertUciToArrow } from '../../lib/square-utils';
-import { PVLine } from '../../types/engine';
 import type { ProgressiveHintView } from '../../lib/training-hint';
 import {
   PROMOTION_PIECES,
@@ -22,7 +20,7 @@ const RCLICK_BG    = 'rgba(235, 97, 80, 0.8)';  // right-click annotation
 
 interface BoardProps {
   fen: string;
-  pvs: PVLine[] | undefined;
+  arrows?: Arrow[];
   onMove: (move: { from: string; to: string; promotion?: string }) => boolean;
   onPromotionPending?: (promotion: PendingPromotion) => void;
   onPromotionSelected?: (piece: PromotionPiece) => void;
@@ -48,7 +46,7 @@ const PROMOTION_SYMBOLS: Record<'w' | 'b', Record<PromotionPiece, string>> = {
 
 export function ChessBoardComponent({
   fen,
-  pvs,
+  arrows = [],
   onMove,
   onPromotionPending,
   onPromotionSelected,
@@ -62,43 +60,6 @@ export function ChessBoardComponent({
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const [rightClickedSquares, setRightClickedSquares] = useState<Record<string, CSSProperties>>({});
-
-  // Draw custom arrows for top 3 PVs
-  const customArrows = useMemo(() => {
-     if (!pvs || pvs.length === 0) return [];
-     
-     const colors = [
-       'rgba(34, 197, 94, 0.8)',  // MultiPV 1 (Best): Green
-       'rgba(59, 130, 246, 0.8)', // MultiPV 2: Blue
-       'rgba(234, 179, 8, 0.8)'   // MultiPV 3: Yellow/Orange
-     ];
-     
-     const arrows: Arrow[] = [];
-     for (let i = 0; i < Math.min(pvs.length, 3); i++) {
-        const pvLine = pvs[i].pv;
-        if (pvLine && pvLine.length > 0) {
-            const uciMove = pvLine[0]; // just the first move
-            const arrow = convertUciToArrow(uciMove, colors[i]);
-            if (arrow) {
-               arrows.push({
-                   startSquare: arrow[0],
-                   endSquare: arrow[1],
-                   color: arrow[2]
-               });
-            }
-        }
-     }
-     return arrows;
-  }, [pvs]);
-
-  const hintArrows = useMemo(() => {
-    if (!hintView?.from || !hintView.to || hintView.level < 2) return [];
-    return [{
-      startSquare: hintView.from,
-      endSquare: hintView.to,
-      color: 'rgba(244, 114, 182, 0.9)',
-    }] as Arrow[];
-  }, [hintView]);
 
   const hintSquareStyles = useMemo<Record<string, CSSProperties>>(() => {
     if (!hintView?.from) return {};
@@ -204,7 +165,7 @@ export function ChessBoardComponent({
           /* Hard-coded classic wood palette for guaranteed visibility */
           darkSquareStyle:  { backgroundColor: BOARD_DARK },
           lightSquareStyle: { backgroundColor: BOARD_LIGHT },
-          arrows: [...customArrows, ...hintArrows],
+          arrows,
           squareStyles: {
             ...rightClickedSquares,
             ...(lastMove && {

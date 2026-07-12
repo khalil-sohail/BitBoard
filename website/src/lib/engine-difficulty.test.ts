@@ -15,9 +15,21 @@ function testSupportedValues(): void {
 }
 
 function testOpponentProfilesDiffer(): void {
-  assert.deepEqual(getDifficultyProfile('blitz', 'opponent'), { movetimeMs: 1000, multiPv: 1 });
-  assert.deepEqual(getDifficultyProfile('standard', 'opponent'), { movetimeMs: 3000, multiPv: 1 });
-  assert.deepEqual(getDifficultyProfile('deep', 'opponent'), { depth: 8, multiPv: 1 });
+  assert.deepEqual(getDifficultyProfile('blitz', 'opponent'), {
+    movetimeMs: 1000,
+    multiPv: 1,
+    openingSelection: { mode: 'weighted' },
+  });
+  assert.deepEqual(getDifficultyProfile('standard', 'opponent'), {
+    movetimeMs: 3000,
+    multiPv: 1,
+    openingSelection: { mode: 'top-n-weighted', maxCandidates: 4 },
+  });
+  assert.deepEqual(getDifficultyProfile('deep', 'opponent'), {
+    depth: 8,
+    multiPv: 1,
+    openingSelection: { mode: 'best' },
+  });
 }
 
 function testReviewProfilesIgnoreDifficulty(): void {

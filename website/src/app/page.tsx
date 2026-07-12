@@ -31,6 +31,7 @@ import {
   trainingReducer,
 } from "@/lib/training-machine";
 import { hintLevelUsedForMove } from "@/lib/training-hint";
+import { composeBoardArrows, toChessboardArrows } from "@/lib/board-arrows";
 import { TrainingHintPanel } from "@/components/panels/TrainingHintPanel";
 import type { GameResult } from "@/lib/training-machine";
 import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
@@ -281,6 +282,14 @@ export default function Home() {
     dispatchTraining,
     startAnalysis,
   });
+
+  const boardArrows = useMemo(() => toChessboardArrows(composeBoardArrows({
+    mode: gameMode,
+    trainingState,
+    currentFen: fen,
+    engineInfo: displayEngineInfo,
+    hintView: isTraining ? trainingHint.hintView : null,
+  })), [displayEngineInfo, fen, gameMode, isTraining, trainingHint.hintView, trainingState]);
 
   const hintRequestAvailable = canRequestHint(trainingState, status, {
     isTraining,
@@ -679,7 +688,7 @@ export default function Home() {
               <ChessBoardComponent
                 key={promotionResetKey}
                 fen={fen}
-                pvs={showEnginePanel ? displayEngineInfo?.pvs : undefined}
+                arrows={showEnginePanel ? boardArrows : []}
                 onMove={handleUserMove}
                 onPromotionPending={handlePromotionPending}
                 onPromotionSelected={handlePromotionSelected}

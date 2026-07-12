@@ -81,12 +81,12 @@ export interface ReleaseSessionMessage {
   type: 'releaseSession';
 }
 
-export type EngineOptionName = 'Hash' | 'OwnBook' | 'BookDepth' | 'MultiPV';
+export type EngineOptionName = 'Hash' | 'OwnBook' | 'BookDepth' | 'MultiPV' | 'BookSelection' | 'BookSelectionTopN' | 'BookSeed';
 
 export interface SetOptionMessage {
   type: 'setoption';
   name: EngineOptionName;
-  value: number | boolean;
+  value: number | boolean | string;
 }
 
 export type ClientMessage =
@@ -425,6 +425,25 @@ function validateSetOptionMessage(record: Record<string, unknown>): ParseResult<
     return value.ok === true ? ok({ type: 'setoption', name, value: value.value }) : value;
   }
 
+  if (name === 'BookSelection') {
+    const value = validateString(record.value, 'BookSelection');
+    if (value.ok === false) return err('INVALID_OPTION', value.error.message);
+    if (!['best', 'weighted', 'top-n-weighted'].includes(value.value)) {
+      return err('INVALID_OPTION', 'BookSelection is invalid.');
+    }
+    return ok({ type: 'setoption', name, value: value.value });
+  }
+
+  if (name === 'BookSelectionTopN') {
+    const value = validateInteger(record.value, 'BookSelectionTopN', 1, 32, 'INVALID_OPTION');
+    return value.ok === true ? ok({ type: 'setoption', name, value: value.value }) : value;
+  }
+
+  if (name === 'BookSeed') {
+    const value = validateInteger(record.value, 'BookSeed', 0, 2147483647, 'INVALID_OPTION');
+    return value.ok === true ? ok({ type: 'setoption', name, value: value.value }) : value;
+  }
+
   if (name === 'OwnBook') {
     if (typeof record.value !== 'boolean') {
       return err('INVALID_OPTION', 'OwnBook must be a boolean.');
@@ -525,7 +544,7 @@ export function buildGoCommand(params: {
   return 'go movetime 3000';
 }
 
-export function buildSetOptionCommand(name: EngineOptionName, value: number | boolean): string {
+export function buildSetOptionCommand(name: EngineOptionName, value: number | boolean | string): string {
   const serializedValue = typeof value === 'boolean' ? String(value) : `${value}`;
   assertSafeUciValue(name);
   assertSafeUciValue(serializedValue);

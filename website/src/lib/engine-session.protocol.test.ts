@@ -20,6 +20,11 @@ interface ServerMessage {
   message?: string;
   requestId?: number;
   move?: string | null;
+  source?: 'search' | 'book';
+  book?: {
+    candidateCount: number;
+    selectedWeight?: number;
+  };
   terminal?: {
     reason: string;
     winner?: string;
@@ -442,6 +447,8 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(engine.writes, [
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value best',
     'position startpos moves e2e4',
     'go depth 8',
   ]);
@@ -460,6 +467,27 @@ async function testInfoCarriesRequestId(): Promise<void> {
   assert.equal(infos.length, 2);
   assert.equal(infos[0].requestId, 10);
   assert.equal(infos[1].requestId, 10);
+
+  socket.close();
+}
+
+async function testBookBestMoveCarriesExplicitMetadata(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 12, difficulty: 'standard' })));
+  await flushEvents();
+  engine.emitInfo('info string book move e2e4 candidates 3 weight 42');
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  const infos = messagesOfType(socket, 'info');
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(infos.length, 0);
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 12);
+  assert.equal(bestMoves[0].move, 'e2e4');
+  assert.equal(bestMoves[0].source, 'book');
+  assert.deepEqual(bestMoves[0].book, { candidateCount: 3, selectedWeight: 42 });
 
   socket.close();
 }
@@ -650,9 +678,11 @@ async function testSetOptionUsesActiveSessionBeforeSearch(): Promise<void> {
   socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 20, depth: 2, multiPv: 1 })));
   await flushEvents();
 
-  assert.deepEqual(engine.writes.slice(0, 4), [
+  assert.deepEqual(engine.writes.slice(0, 6), [
     'setoption name OwnBook value false',
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value false',
+    'setoption name BookSelection value best',
     'position startpos',
     'go depth 2',
   ]);
@@ -714,12 +744,15 @@ async function testSetOptionQueuesBehindActiveSearch(): Promise<void> {
   await flushEvents();
 
   assert.ok(engine.writes.includes('stop'));
-  assert.equal(engine.writes.includes('setoption name OwnBook value false'), false);
+  const ownBookWritesBeforeAck = engine.writes.filter(line => line === 'setoption name OwnBook value false');
+  assert.equal(ownBookWritesBeforeAck.length, 1);
 
   engine.emitBestMove('bestmove e2e4');
   await flushEvents();
 
   assert.ok(engine.writes.includes('setoption name OwnBook value false'));
+  const ownBookWritesAfterAck = engine.writes.filter(line => line === 'setoption name OwnBook value false');
+  assert.equal(ownBookWritesAfterAck.length, 2);
   assert.equal(messagesOfType(socket, 'bestmove').length, 0);
 
   socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 31, depth: 2, multiPv: 1 })));
@@ -748,8 +781,10 @@ async function testDifficultyProfilesGenerateDistinctOpponentCommands(): Promise
   const blitz = await createManualSession();
   blitz.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 50, difficulty: 'blitz', multiPv: 3 })));
   await flushEvents();
-  assert.deepEqual(blitz.engine.writes.slice(0, 3), [
+  assert.deepEqual(blitz.engine.writes.slice(0, 5), [
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value weighted',
     'position startpos',
     'go movetime 1000',
   ]);
@@ -758,8 +793,11 @@ async function testDifficultyProfilesGenerateDistinctOpponentCommands(): Promise
   const standard = await createManualSession();
   standard.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 51, difficulty: 'standard', multiPv: 3 })));
   await flushEvents();
-  assert.deepEqual(standard.engine.writes.slice(0, 3), [
+  assert.deepEqual(standard.engine.writes.slice(0, 6), [
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value top-n-weighted',
+    'setoption name BookSelectionTopN value 4',
     'position startpos',
     'go movetime 3000',
   ]);
@@ -768,8 +806,10 @@ async function testDifficultyProfilesGenerateDistinctOpponentCommands(): Promise
   const deep = await createManualSession();
   deep.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 52, difficulty: 'deep', multiPv: 3 })));
   await flushEvents();
-  assert.deepEqual(deep.engine.writes.slice(0, 3), [
+  assert.deepEqual(deep.engine.writes.slice(0, 5), [
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value best',
     'position startpos',
     'go depth 8',
   ]);
@@ -786,8 +826,10 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     multiPv: 3,
   })));
   await flushEvents();
-  assert.deepEqual(engine.writes.slice(0, 3), [
+  assert.deepEqual(engine.writes.slice(0, 5), [
     'setoption name MultiPV value 3',
+    'setoption name OwnBook value false',
+    'setoption name BookSelection value best',
     'position startpos',
     'go depth 11',
   ]);
@@ -804,8 +846,10 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     moves: ['e2e4'],
   })));
   await flushEvents();
-  assert.deepEqual(engine.writes.slice(0, 3), [
+  assert.deepEqual(engine.writes.slice(0, 5), [
     'setoption name MultiPV value 3',
+    'setoption name OwnBook value false',
+    'setoption name BookSelection value best',
     'position startpos moves e2e4',
     'go depth 11',
   ]);
@@ -821,8 +865,10 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     multiPv: 2,
   })));
   await flushEvents();
-  assert.deepEqual(engine.writes.slice(0, 3), [
+  assert.deepEqual(engine.writes.slice(0, 5), [
     'setoption name MultiPV value 2',
+    'setoption name OwnBook value false',
+    'setoption name BookSelection value best',
     'position startpos',
     'go depth 7',
   ]);
@@ -838,8 +884,10 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     multiPv: 1,
   })));
   await flushEvents();
-  assert.deepEqual(engine.writes.slice(0, 3), [
+  assert.deepEqual(engine.writes.slice(0, 5), [
     'setoption name MultiPV value 1',
+    'setoption name OwnBook value false',
+    'setoption name BookSelection value best',
     'position startpos',
     'go depth 11',
   ]);
@@ -861,8 +909,10 @@ async function testClockBasedOpponentKeepsClockCommand(): Promise<void> {
   })));
   await flushEvents();
 
-  assert.deepEqual(engine.writes.slice(0, 3), [
+  assert.deepEqual(engine.writes.slice(0, 5), [
     'setoption name MultiPV value 3',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value weighted',
     'position startpos',
     'go wtime 180000 btime 180000 winc 2000 binc 2000',
   ]);
@@ -905,6 +955,7 @@ async function run(): Promise<void> {
   testUciBuilders();
   await testInvalidInputDoesNotWriteToEngine();
   await testInfoCarriesRequestId();
+  await testBookBestMoveCarriesExplicitMetadata();
   await testStopSwallowsTrailingBestMove();
   await testNewerSearchSupersedesOlderSearch();
   await testTerminalBestMoveCarriesClassification();

@@ -55,7 +55,7 @@ std::optional<PieceType> decodePromotion(int promotionCode) {
 
 OpeningBook::OpeningBook(const std::string& bookPath)
     : m_bookPath(bookPath),
-      m_rng(std::random_device{}()) {
+      m_rng(0x5eed1234U) {
     load();
 }
 
@@ -113,6 +113,18 @@ bool OpeningBook::load() {
 
 size_t OpeningBook::lineCount() const {
     return m_entries.size();
+}
+
+void OpeningBook::setSelectionMode(BookSelectionMode mode) {
+    m_selectionMode = mode;
+}
+
+void OpeningBook::setTopN(size_t topN) {
+    m_topN = std::max<size_t>(1, topN);
+}
+
+void OpeningBook::setSeed(uint32_t seed) {
+    m_rng.seed(seed);
 }
 
 std::pair<size_t, size_t> OpeningBook::findEntryRange(uint64_t hash) const {
@@ -185,56 +197,94 @@ std::optional<Move> OpeningBook::decodePolyGlotMove(uint16_t encodedMove, const 
 }
 
 std::optional<Move> OpeningBook::getBookMove(const Board& board) const {
-    if (m_entries.empty()) {
+    std::optional<SelectedBookMove> selected = selectBookMove(board);
+    if (!selected.has_value()) {
         return std::nullopt;
+    }
+    return selected->move;
+}
+
+std::vector<BookMoveCandidate> OpeningBook::getBookMoveCandidates(const Board& board) const {
+    if (m_entries.empty()) {
+        return {};
     }
 
     const uint64_t hash = board.computePolyglotHash();
     const auto [beginIndex, endIndex] = findEntryRange(hash);
 
     if (beginIndex == endIndex) {
-        return std::nullopt;
+        return {};
     }
 
-    struct Candidate {
-        Move move;
-        uint16_t weight;
-    };
-
-    std::vector<Candidate> candidates;
-    candidates.reserve(endIndex - beginIndex);
+    std::vector<BookMoveCandidate> candidates;
 
     for (size_t i = beginIndex; i < endIndex; ++i) {
         std::optional<Move> decoded = decodePolyGlotMove(m_entries[i].move, board);
         if (decoded.has_value()) {
-            candidates.push_back(Candidate{*decoded, m_entries[i].weight});
+            auto duplicate = std::find_if(candidates.begin(), candidates.end(), [&](const BookMoveCandidate& candidate) {
+                return candidate.move.from == decoded->from &&
+                       candidate.move.to == decoded->to &&
+                       candidate.move.promotion == decoded->promotion;
+            });
+            if (duplicate != candidates.end()) {
+                duplicate->weight = static_cast<uint16_t>(std::min<uint32_t>(
+                    std::numeric_limits<uint16_t>::max(),
+                    static_cast<uint32_t>(duplicate->weight) + m_entries[i].weight));
+                duplicate->learn = std::max(duplicate->learn, m_entries[i].learn);
+            } else {
+                candidates.push_back(BookMoveCandidate{*decoded, m_entries[i].weight, m_entries[i].learn});
+            }
         }
     }
 
+    std::sort(candidates.begin(), candidates.end(), [](const BookMoveCandidate& lhs, const BookMoveCandidate& rhs) {
+        if (lhs.weight != rhs.weight) return lhs.weight > rhs.weight;
+        if (lhs.move.from != rhs.move.from) return lhs.move.from < rhs.move.from;
+        if (lhs.move.to != rhs.move.to) return lhs.move.to < rhs.move.to;
+        return lhs.move.promotion < rhs.move.promotion;
+    });
+
+    return candidates;
+}
+
+std::optional<SelectedBookMove> OpeningBook::selectBookMove(const Board& board) const {
+    std::vector<BookMoveCandidate> candidates = getBookMoveCandidates(board);
     if (candidates.empty()) {
         return std::nullopt;
     }
 
+    const size_t originalCandidateCount = candidates.size();
+    if (m_selectionMode == BookSelectionMode::Best || candidates.size() == 1) {
+        const BookMoveCandidate& selected = candidates.front();
+        return SelectedBookMove{selected.move, selected.weight, selected.learn, originalCandidateCount};
+    }
+
+    if (m_selectionMode == BookSelectionMode::TopNWeighted && candidates.size() > m_topN) {
+        candidates.resize(m_topN);
+    }
+
     uint64_t totalWeight = 0;
-    for (const Candidate& c : candidates) {
+    for (const BookMoveCandidate& c : candidates) {
         totalWeight += static_cast<uint64_t>(c.weight);
     }
 
     if (totalWeight == 0) {
         std::uniform_int_distribution<size_t> uniform(0, candidates.size() - 1);
-        return candidates[uniform(m_rng)].move;
+        const BookMoveCandidate& selected = candidates[uniform(m_rng)];
+        return SelectedBookMove{selected.move, selected.weight, selected.learn, originalCandidateCount};
     }
 
     std::uniform_int_distribution<uint64_t> weighted(0, totalWeight - 1);
     const uint64_t target = weighted(m_rng);
 
     uint64_t cumulative = 0;
-    for (const Candidate& c : candidates) {
+    for (const BookMoveCandidate& c : candidates) {
         cumulative += static_cast<uint64_t>(c.weight);
         if (target < cumulative) {
-            return c.move;
+            return SelectedBookMove{c.move, c.weight, c.learn, originalCandidateCount};
         }
     }
 
-    return candidates.back().move;
+    const BookMoveCandidate& selected = candidates.back();
+    return SelectedBookMove{selected.move, selected.weight, selected.learn, originalCandidateCount};
 }
