@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { EngineInfo, EngineTerminalCompletion } from '../types/engine';
+import type { EngineBestMoveResult, EngineInfo, EngineTerminalCompletion } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
 import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
+import type { SearchLimit } from '../lib/engine-protocol';
 
 type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'disconnected' | 'session_expired' | 'error';
 
@@ -19,10 +20,15 @@ export interface SendMoveOptions {
   difficulty: EngineDifficulty;
   /** Optional depth limit to cap the engine's search. */
   depth?: number;
+  /** Resolved authoritative search limit. */
+  searchLimit?: SearchLimit;
   /** Number of principal variations to calculate (1-3). */
   multiPv?: number;
   /** Explicitly allow backend-managed pondering for fair engine games only. */
   ponder?: boolean;
+  policySource?: string;
+  mode?: string;
+  trainingPonderEnabled?: boolean;
 }
 
 export function useEngine() {
@@ -30,11 +36,13 @@ export function useEngine() {
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [terminalCompletion, setTerminalCompletion] = useState<EngineTerminalCompletion | null>(null);
   const [bestMove, setBestMove] = useState<string | null>(null);
+  const [bestMoveResult, setBestMoveResult] = useState<EngineBestMoveResult | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const nextRequestIdRef = useRef<EngineRequestId>(1);
   const activeRequestIdRef = useRef<EngineRequestId | null>(null);
   const activeRootFenRef = useRef<string | null>(null);
   const activePurposeRef = useRef<SearchPurpose | null>(null);
+  const activeLimitRef = useRef<SearchLimit | null>(null);
   const [searchStartedRequestId, setSearchStartedRequestId] = useState<EngineRequestId | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
@@ -61,16 +69,20 @@ export function useEngine() {
     activeRequestIdRef.current = null;
     activeRootFenRef.current = null;
     activePurposeRef.current = null;
+    activeLimitRef.current = null;
     setBestMove(null);
+    setBestMoveResult(null);
     setTerminalCompletion(null);
     setSearchStartedRequestId(null);
   }, []);
 
-  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose) => {
+  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose, limit?: SearchLimit) => {
     activeRequestIdRef.current = requestId;
     activeRootFenRef.current = rootFen;
     activePurposeRef.current = purpose;
+    activeLimitRef.current = limit ?? null;
     setBestMove(null);
+    setBestMoveResult(null);
     setEngineInfo(null);
     setTerminalCompletion(null);
     setSearchStartedRequestId(null);
@@ -115,7 +127,10 @@ export function useEngine() {
                 requestId: data.requestId,
                 rootFen: activeRootFenRef.current ?? undefined,
                 purpose: activePurposeRef.current ?? undefined,
+                requestedLimit: activeLimitRef.current ?? undefined,
                 depth: data.depth,
+                reportedDepth: data.depth,
+                selectiveDepth: data.selectiveDepth ?? null,
                 pvs: data.pvs || [],
                 nodes: data.nodes ?? prev?.nodes,
                 time: data.time ?? prev?.time,
@@ -127,6 +142,15 @@ export function useEngine() {
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               const purpose = activePurposeRef.current ?? undefined;
               const rootFen = activeRootFenRef.current ?? undefined;
+              const result: EngineBestMoveResult = {
+                requestId: data.requestId,
+                rootFen,
+                purpose,
+                move: data.move,
+                receivedAt: data.receivedAt,
+                engineDeadlineAt: data.engineDeadlineAt,
+              };
+              setBestMoveResult(result);
               if (activePurposeRef.current === 'opponent') {
                 setBestMove(data.move);
               }
@@ -140,6 +164,7 @@ export function useEngine() {
               }
               activeRequestIdRef.current = null;
               activePurposeRef.current = null;
+              activeLimitRef.current = null;
               setStatus('idle');
             }
             break;
@@ -198,7 +223,23 @@ export function useEngine() {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
       setStatus('thinking');
       const requestId = allocateRequestId();
-      activateRequest(requestId, fen, 'opponent');
+      const resolvedLimit = options.searchLimit ?? (options.depth !== undefined ? { mode: 'depth' as const, depth: options.depth } : undefined);
+      activateRequest(requestId, fen, 'opponent', resolvedLimit);
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[engine-search-request]', {
+          requestId,
+          purpose: 'opponent',
+          mode: options.mode,
+          fen,
+          trainingPonderEnabled: options.trainingPonderEnabled,
+          requestedLimit: options.depth !== undefined ? { mode: 'depth', depth: options.depth } : undefined,
+          resolvedLimit,
+          policySource: options.policySource,
+          ponder: options.ponder === true,
+          accepted: true,
+        });
+      }
 
       ws.current.send(JSON.stringify({
         type: 'move',
@@ -210,7 +251,8 @@ export function useEngine() {
         btime:      options.btime      ?? 0,
         winc:       options.winc       ?? 0,
         binc:       options.binc       ?? 0,
-        depth:      options.depth,
+        depth:      options.searchLimit ? undefined : options.depth,
+        searchLimit: options.searchLimit,
         multiPv:    options.multiPv ?? 1,
         difficulty: options.difficulty,
         ponder:     options.ponder === true,
@@ -277,12 +319,29 @@ export function useEngine() {
     depth?: number,
     multiPv?: number,
     purpose: Exclude<SearchPurpose, 'opponent'> = 'analysis',
+    searchLimit?: SearchLimit,
+    policySource?: string,
+    mode?: string,
   ): EngineRequestId | null => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const requestId = allocateRequestId();
       setStatus('analyzing');
-      activateRequest(requestId, fen, purpose);
-      ws.current.send(JSON.stringify({ type: 'analyze', requestId, purpose, fen, moves, depth, multiPv }));
+      const resolvedLimit = searchLimit ?? (depth !== undefined ? { mode: 'depth' as const, depth } : undefined);
+      activateRequest(requestId, fen, purpose, resolvedLimit);
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[engine-search-request]', {
+          requestId,
+          purpose,
+          mode,
+          fen,
+          requestedLimit: depth !== undefined ? { mode: 'depth', depth } : undefined,
+          resolvedLimit,
+          policySource,
+          ponder: false,
+          accepted: true,
+        });
+      }
+      ws.current.send(JSON.stringify({ type: 'analyze', requestId, purpose, fen, moves, depth: searchLimit ? undefined : depth, searchLimit, multiPv }));
       return requestId;
     }
     return null;
@@ -292,6 +351,7 @@ export function useEngine() {
     status,
     engineInfo,
     bestMove,
+    bestMoveResult,
     terminalCompletion,
     queuePosition,
     searchStartedRequestId,

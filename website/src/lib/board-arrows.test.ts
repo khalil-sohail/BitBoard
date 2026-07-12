@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import type { EngineInfo } from '../types/engine';
 import type { TrainingState } from './training-machine';
-import { composeBoardArrows, toChessboardArrows } from './board-arrows';
+import { AnalysisSnapshot, composeBoardArrows, toChessboardArrows } from './board-arrows';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -22,6 +22,22 @@ function info(overrides: Partial<EngineInfo> = {}): EngineInfo {
 
 const waitingPlayer: TrainingState = { status: 'waiting-player', playerColor: 'w' };
 const waitingEngine: TrainingState = { status: 'waiting-engine-move', playerColor: 'w', requestId: 8 };
+
+function snapshot(overrides: Partial<AnalysisSnapshot> = {}): AnalysisSnapshot {
+  return {
+    requestId: 10,
+    purpose: 'training-root-review',
+    fen: START_FEN,
+    requestedLimit: { mode: 'depth', depth: 8 },
+    reportedDepth: 8,
+    selectiveDepth: null,
+    multiPv: 1,
+    lines: [{ multipv: 1, pv: ['e2e4'] }],
+    status: 'finalized',
+    createdAt: 1,
+    ...overrides,
+  };
+}
 
 function testDuplicateAnalysisArrowDeduped(): void {
   const arrows = composeBoardArrows({
@@ -131,6 +147,76 @@ function testTerminalAndResetStatesShowNoLiveArrows(): void {
   }
 }
 
+function testFinalizedTrainingRootReviewPersistsWithoutLiveInfo(): void {
+  const arrows = composeBoardArrows({
+    mode: 'training',
+    trainingState: waitingPlayer,
+    currentFen: START_FEN,
+    analysis: {
+      live: null,
+      finalized: snapshot({ requestId: 10 }),
+    },
+  });
+
+  assert.equal(arrows.length, 1);
+  assert.equal(arrows[0].key, 'analysis-10-1-e2-e4');
+}
+
+function testFinalizedTrainingResultReviewPersistsThroughFeedback(): void {
+  const arrows = composeBoardArrows({
+    mode: 'training',
+    trainingState: { status: 'showing-feedback', playerColor: 'w', reviewId: 2, available: true },
+    currentFen: START_FEN,
+    analysis: {
+      live: null,
+      finalized: snapshot({
+        requestId: 11,
+        purpose: 'training-result-review',
+        lines: [{ multipv: 1, pv: ['d2d4'] }],
+      }),
+    },
+  });
+
+  assert.equal(arrows.length, 1);
+  assert.equal(arrows[0].kind, 'bestmove');
+  assert.equal(arrows[0].key, 'bestmove-11-1-d2-d4');
+}
+
+function testFinalizedSnapshotRequiresCurrentFen(): void {
+  const arrows = composeBoardArrows({
+    mode: 'training',
+    trainingState: waitingPlayer,
+    currentFen: START_FEN,
+    analysis: {
+      live: null,
+      finalized: snapshot({
+        requestId: 12,
+        fen: '8/8/8/8/8/8/8/8 w - - 0 1',
+      }),
+    },
+  });
+
+  assert.equal(arrows.length, 0);
+}
+
+function testHintBeatsFinalizedSnapshotSameGeometry(): void {
+  const arrows = composeBoardArrows({
+    mode: 'training',
+    trainingState: waitingPlayer,
+    currentFen: START_FEN,
+    hintView: { level: 2, text: '', from: 'e2', to: 'e4', isForced: false },
+    analysis: {
+      live: null,
+      finalized: snapshot({
+        requestId: 13,
+      }),
+    },
+  });
+
+  assert.equal(arrows.length, 1);
+  assert.equal(arrows[0].kind, 'hint');
+}
+
 function run(): void {
   testDuplicateAnalysisArrowDeduped();
   testDuplicatePvFirstMovesCollapseForBoard();
@@ -140,6 +226,10 @@ function run(): void {
   testTrainingRootReviewAllowedOnlyForWaitingPlayer();
   testAnalysisModeDisplaysMultiPvAndStableKeys();
   testTerminalAndResetStatesShowNoLiveArrows();
+  testFinalizedTrainingRootReviewPersistsWithoutLiveInfo();
+  testFinalizedTrainingResultReviewPersistsThroughFeedback();
+  testFinalizedSnapshotRequiresCurrentFen();
+  testHintBeatsFinalizedSnapshotSameGeometry();
 
   console.log('board arrow tests passed');
 }

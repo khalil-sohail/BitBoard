@@ -1,6 +1,7 @@
 import type { Arrow } from 'react-chessboard';
 import type { Square } from 'chess.js';
 import type { EngineInfo, GameMode, PVLine } from '../types/engine';
+import type { SearchLimit } from './engine-protocol';
 import type { ProgressiveHintView } from './training-hint';
 import type { TrainingState } from './training-machine';
 import { convertUciToArrow } from './square-utils';
@@ -17,11 +18,30 @@ export interface BoardArrow {
   requestId?: number;
 }
 
+export interface AnalysisSnapshot {
+  requestId: number;
+  purpose: EngineInfo['purpose'];
+  fen: string;
+  requestedLimit?: SearchLimit;
+  reportedDepth: number | null;
+  selectiveDepth: number | null;
+  multiPv: number;
+  lines: PVLine[];
+  status: 'live' | 'finalized';
+  createdAt: number;
+}
+
+export interface AnalysisDisplayState {
+  live: AnalysisSnapshot | null;
+  finalized: AnalysisSnapshot | null;
+}
+
 export interface ComposeBoardArrowsInput {
   mode: GameMode;
   trainingState?: TrainingState;
   currentFen: string;
   engineInfo?: EngineInfo | null;
+  analysis?: AnalysisDisplayState;
   hintView?: ProgressiveHintView | null;
 }
 
@@ -65,6 +85,20 @@ export function toChessboardArrows(arrows: readonly BoardArrow[]): Arrow[] {
 }
 
 function composeAnalysisArrows(input: ComposeBoardArrowsInput): BoardArrow[] {
+  const snapshots = [
+    input.analysis?.live,
+    input.analysis?.finalized,
+  ].filter((snapshot): snapshot is AnalysisSnapshot => snapshot !== null && snapshot !== undefined);
+
+  if (snapshots.length > 0) {
+    return snapshots.flatMap(snapshot => {
+      if (snapshot.fen !== input.currentFen) return [];
+      if (input.mode === 'training' && !trainingAllowsSnapshot(input.trainingState, snapshot)) return [];
+      if (snapshot.purpose === 'training-hint') return [];
+      return pvArrows(snapshot.lines, snapshot.requestId, snapshot.purpose === 'training-result-review' ? 'bestmove' : 'analysis');
+    });
+  }
+
   const info = input.engineInfo;
   if (!info || info.rootFen !== input.currentFen) return [];
   if (input.mode === 'training' && !trainingAllowsInfo(input.trainingState, info)) return [];
@@ -80,7 +114,20 @@ function trainingAllowsInfo(trainingState: TrainingState | undefined, info: Engi
   return info.purpose === 'training-root-review';
 }
 
-function pvArrows(pvs: PVLine[] | undefined, requestId: number | undefined): BoardArrow[] {
+function trainingAllowsSnapshot(trainingState: TrainingState | undefined, snapshot: AnalysisSnapshot): boolean {
+  if (!trainingState) return false;
+  if (snapshot.purpose === 'training-root-review') {
+    return trainingState.status === 'waiting-player';
+  }
+  if (snapshot.purpose === 'training-result-review') {
+    return trainingState.status === 'reviewing-player-move' ||
+      trainingState.status === 'showing-feedback' ||
+      trainingState.status === 'waiting-player';
+  }
+  return false;
+}
+
+function pvArrows(pvs: PVLine[] | undefined, requestId: number | undefined, kind: ArrowKind = 'analysis'): BoardArrow[] {
   if (!pvs || pvs.length === 0) return [];
 
   const sorted = [...pvs].sort((a, b) => a.multipv - b.multipv).slice(0, 3);
@@ -90,7 +137,7 @@ function pvArrows(pvs: PVLine[] | undefined, requestId: number | undefined): Boa
     const converted = convertUciToArrow(uciMove, ANALYSIS_COLORS[index] ?? ANALYSIS_COLORS[ANALYSIS_COLORS.length - 1]);
     if (!converted) return [];
     return [makeArrow({
-      kind: 'analysis',
+      kind,
       from: converted[0],
       to: converted[1],
       color: converted[2],

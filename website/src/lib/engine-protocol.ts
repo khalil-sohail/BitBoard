@@ -68,6 +68,7 @@ export interface AnalyzeMessage {
   moves: string[];
   depth?: number;
   multiPv?: number;
+  searchLimit?: SearchLimit;
 }
 
 export interface StopMessage {
@@ -282,6 +283,51 @@ function optionalInteger(value: unknown, field: string, min: number, max: number
   return validateInteger(value, field, min, max);
 }
 
+function validateSearchLimit(value: unknown): ParseResult<SearchLimit | undefined> {
+  if (value === undefined) {
+    return ok(undefined);
+  }
+
+  if (!isRecord(value)) {
+    return err('INVALID_MESSAGE', 'searchLimit must be an object.');
+  }
+
+  if (value.mode === 'depth') {
+    const depth = validateInteger(value.depth, 'searchLimit.depth', 1, MAX_DEPTH);
+    if (depth.ok === false) return err(depth.error.code, depth.error.message);
+    return ok({ mode: 'depth', depth: depth.value });
+  }
+
+  if (value.mode === 'movetime') {
+    const movetimeMs = validateInteger(value.movetimeMs, 'searchLimit.movetimeMs', 1, MAX_TIME_MS);
+    if (movetimeMs.ok === false) return err(movetimeMs.error.code, movetimeMs.error.message);
+    return ok({ mode: 'movetime', movetimeMs: movetimeMs.value });
+  }
+
+  if (value.mode === 'clock') {
+    const wtime = validateInteger(value.wtime, 'searchLimit.wtime', 0, MAX_TIME_MS);
+    if (wtime.ok === false) return wtime;
+    const btime = validateInteger(value.btime, 'searchLimit.btime', 0, MAX_TIME_MS);
+    if (btime.ok === false) return btime;
+    const winc = validateInteger(value.winc, 'searchLimit.winc', 0, MAX_INCREMENT_MS);
+    if (winc.ok === false) return winc;
+    const binc = validateInteger(value.binc, 'searchLimit.binc', 0, MAX_INCREMENT_MS);
+    if (binc.ok === false) return binc;
+    const movestogo = optionalInteger(value.movestogo, 'searchLimit.movestogo', 1, MAX_MOVES);
+    if (movestogo.ok === false) return movestogo;
+    return ok({
+      mode: 'clock',
+      wtime: wtime.value,
+      btime: btime.value,
+      winc: winc.value,
+      binc: binc.value,
+      ...(movestogo.value !== undefined ? { movestogo: movestogo.value } : {}),
+    });
+  }
+
+  return err('INVALID_MESSAGE', 'searchLimit mode is invalid.');
+}
+
 function validateDifficulty(value: unknown): ParseResult<EngineDifficulty> {
   if (!isEngineDifficulty(value)) {
     return err('INVALID_MESSAGE', 'difficulty is invalid.');
@@ -363,11 +409,15 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
   const movestogo = optionalInteger(record.movestogo, 'movestogo', 1, MAX_MOVES);
   if (movestogo.ok === false) return movestogo;
 
+  const explicitSearchLimit = validateSearchLimit(record.searchLimit);
+  if (explicitSearchLimit.ok === false) return explicitSearchLimit;
+
   const hasPositiveClock = wtime.value > 0 || btime.value > 0;
   const explicitLimitCount =
     (hasPositiveClock ? 1 : 0) +
     (depth.value !== undefined ? 1 : 0) +
-    (movetime.value !== undefined ? 1 : 0);
+    (movetime.value !== undefined ? 1 : 0) +
+    (explicitSearchLimit.value !== undefined ? 1 : 0);
 
   if (explicitLimitCount > 1) {
     return err('INVALID_MESSAGE', 'Search request must specify exactly one timing mode.');
@@ -383,13 +433,13 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
   const difficulty = validateDifficulty(record.difficulty);
   if (difficulty.ok === false) return difficulty;
 
-  const searchLimit: SearchLimit | undefined = hasPositiveClock
+  const searchLimit: SearchLimit | undefined = explicitSearchLimit.value ?? (hasPositiveClock
     ? { mode: 'clock', wtime: wtime.value, btime: btime.value, winc: winc.value, binc: binc.value, ...(movestogo.value !== undefined ? { movestogo: movestogo.value } : {}) }
     : depth.value !== undefined
       ? { mode: 'depth', depth: depth.value }
       : movetime.value !== undefined
         ? { mode: 'movetime', movetimeMs: movetime.value }
-        : undefined;
+        : undefined);
 
   return ok({
     type: 'move',
@@ -440,6 +490,13 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
   const multiPv = optionalInteger(record.multiPv, 'multiPv', 1, MAX_MULTIPV);
   if (multiPv.ok === false) return multiPv;
 
+  const searchLimit = validateSearchLimit(record.searchLimit);
+  if (searchLimit.ok === false) return searchLimit;
+
+  if (depth.value !== undefined && searchLimit.value !== undefined) {
+    return err('INVALID_MESSAGE', 'Analyze request must not specify both depth and searchLimit.');
+  }
+
   return ok({
     type: 'analyze',
     requestId: requestId.value,
@@ -448,6 +505,7 @@ function validateAnalyzeMessage(record: Record<string, unknown>): ParseResult<An
     moves: positionResult.value.moves,
     depth: depth.value,
     multiPv: multiPv.value,
+    searchLimit: searchLimit.value,
   });
 }
 

@@ -75,6 +75,9 @@ interface ActiveSearch {
   ponderAllowed: boolean;
   ponderContext: PonderSearchContext | null;
   searchLimit: SearchLimit;
+  generatedGoCommand?: string;
+  startedAt: number;
+  deadlineAt?: number;
 }
 
 interface ActiveSearchWatchdog {
@@ -434,6 +437,24 @@ export class EnginePoolManager {
 
     const parsedInfo = parseUciInfo(trimmed);
     if (parsedInfo && parsedInfo.depth) {
+      if (session.activeSearch.searchLimit.mode === 'depth' && parsedInfo.depth > session.activeSearch.searchLimit.depth) {
+        if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development') {
+          console.warn('[engine-search-diagnostic]', {
+            requestId: session.activeSearch.requestId,
+            purpose: session.activeSearch.purpose,
+            fen: session.startFen,
+            requestedLimit: session.activeSearch.searchLimit,
+            generatedGoCommand: session.activeSearch.generatedGoCommand,
+            reportedDepth: parsedInfo.depth,
+            selectiveDepth: parsedInfo.selectiveDepth ?? null,
+            snapshotType: 'live',
+            ponderState: session.ponderState.status,
+            accepted: false,
+            rejectionReason: 'nominal-depth-exceeds-depth-limit',
+          });
+        }
+        return;
+      }
       if (parsedInfo.depth !== session.currentDepth) {
         session.currentDepth = parsedInfo.depth;
         session.pvs = [];
@@ -459,6 +480,8 @@ export class EnginePoolManager {
         type: 'info',
         requestId: session.activeSearch.requestId,
         depth: session.currentDepth,
+        selectiveDepth: parsedInfo.selectiveDepth ?? null,
+        requestedLimit: session.activeSearch.searchLimit,
         nodes: parsedInfo.nodes,
         time: parsedInfo.time,
         pvs: session.pvs,
@@ -507,6 +530,7 @@ export class EnginePoolManager {
 
     // ── Normal thinking result ────────────────────────────────────────────
     if (activeSearch.state === 'running') {
+      const receivedAt = Date.now();
       this.clearWatchdog(session, 'search');
       const { bestMove, ponderMove } = parsed;
       const terminal = bestMove === '0000'
@@ -516,19 +540,25 @@ export class EnginePoolManager {
       const ponderPlan = move && activeSearch.ponderAllowed && activeSearch.ponderContext
         ? buildValidatedPonderPlan(session.startFen, session.uciMoves, move, ponderMove, activeSearch.ponderContext)
         : null;
+      const bookResult = session.pendingBookResult;
+
+      session.activeSearch = null;
+      session.pendingBookResult = null;
 
       // Send best move to the frontend
       session.ws.send(JSON.stringify({
         type: 'bestmove',
         requestId: activeSearch.requestId,
         move,
-        ...(session.pendingBookResult && session.pendingBookResult.move === bestMove
+        receivedAt,
+        ...(activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: activeSearch.deadlineAt } : {}),
+        ...(bookResult && bookResult.move === bestMove
           ? {
               source: 'book',
               book: {
-                candidateCount: session.pendingBookResult.candidateCount,
-                ...(session.pendingBookResult.selectedWeight !== undefined
-                  ? { selectedWeight: session.pendingBookResult.selectedWeight }
+                candidateCount: bookResult.candidateCount,
+                ...(bookResult.selectedWeight !== undefined
+                  ? { selectedWeight: bookResult.selectedWeight }
                   : {}),
               },
             }
@@ -537,8 +567,6 @@ export class EnginePoolManager {
         ...(terminal ? { terminal } : {}),
       }));
       console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderPlan?.expectedPlayerMove ?? 'none'}`);
-      session.activeSearch = null;
-      session.pendingBookResult = null;
 
       if (ponderPlan && session.process.stdin) {
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderPlan.expectedPlayerMove}`);
@@ -589,11 +617,9 @@ export class EnginePoolManager {
     // ── move (time-controlled game) ────────────────────────────────────────
     if (data.type === 'move') {
       const moves = data.moves;
-      const opponentProfile = data.searchLimit
-        ? { multiPv: data.multiPv }
-        : getDifficultyProfile(data.difficulty, 'opponent');
+      const opponentProfile = getDifficultyProfile(data.difficulty, 'opponent');
       const searchLimit = data.searchLimit ?? searchLimitFromProfile(opponentProfile);
-      const targetMultiPv = opponentProfile.multiPv;
+      const targetMultiPv = data.searchLimit ? data.multiPv : opponentProfile.multiPv;
       const openingSelection = opponentProfile.openingSelection;
       const ponderContext = getPonderSearchContext(searchLimit);
       const ponderAllowed = data.ponder === true && ponderContext !== null;
@@ -642,6 +668,9 @@ export class EnginePoolManager {
             ponderAllowed,
             ponderContext,
             searchLimit: ps.searchContext,
+            generatedGoCommand: buildGoCommand(ps.searchContext, { ponder: true }),
+            startedAt: Date.now(),
+            deadlineAt: deadlineAtForSearch(session.startFen, ps.expectedMoves, ps.searchContext),
           };
           session.currentDepth = 0;
           session.pvs = [];
@@ -654,7 +683,12 @@ export class EnginePoolManager {
             searchContext: ps.searchContext,
           };
           writeUciCommand(session.process.stdin, 'ponderhit');
-          this.sendIfOpen(session.ws, JSON.stringify({ type: 'search-started', requestId: data.requestId }));
+          this.sendIfOpen(session.ws, JSON.stringify({
+            type: 'search-started',
+            requestId: data.requestId,
+            startedAt: session.activeSearch.startedAt,
+            ...(session.activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: session.activeSearch.deadlineAt } : {}),
+          }));
           this.armSearchWatchdog(session, data.requestId, ps.searchContext, ps.expectedMoves);
         } else {
           console.log(`[Ponder ${id}] MISS — expected ${ps.expectedPlayerMove}, got ${userMove}`);
@@ -708,6 +742,7 @@ export class EnginePoolManager {
         depth: data.depth,
         multiPv: data.multiPv,
       });
+      const searchLimit = data.searchLimit ?? searchLimitFromProfile(profile);
       this.enqueueSearch(session, {
         type: 'search',
         requestId: data.requestId,
@@ -715,7 +750,7 @@ export class EnginePoolManager {
         purpose: data.purpose,
         startFen,
         moves,
-        searchLimit: searchLimitFromProfile(profile),
+        searchLimit,
         multiPv: profile.multiPv,
         ponderAllowed: false,
         ponderContext: null,
@@ -915,8 +950,11 @@ export class EnginePoolManager {
   ) {
     if (!session.process.stdin) return;
 
-    writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
-    writeUciCommand(session.process.stdin, buildGoCommand(searchLimit));
+    const positionCommand = buildPositionCommand(startFen, moves);
+    const goCommand = buildGoCommand(searchLimit);
+    writeUciCommand(session.process.stdin, positionCommand);
+    writeUciCommand(session.process.stdin, goCommand);
+    const startedAt = Date.now();
     session.searchGeneration += 1;
     session.activeSearch = {
       requestId,
@@ -927,6 +965,9 @@ export class EnginePoolManager {
       ponderAllowed,
       ponderContext,
       searchLimit,
+      generatedGoCommand: goCommand,
+      startedAt,
+      deadlineAt: deadlineAtForSearch(startFen, moves, searchLimit),
     };
     session.currentDepth = 0;
     session.pvs = [];
@@ -934,7 +975,28 @@ export class EnginePoolManager {
     session.ponderState = { status: 'idle' };
     session.startFen = startFen;
     session.uciMoves = moves;
-    this.sendIfOpen(session.ws, JSON.stringify({ type: 'search-started', requestId }));
+    this.sendIfOpen(session.ws, JSON.stringify({
+      type: 'search-started',
+      requestId,
+      startedAt,
+      requestedLimit: searchLimit,
+      generatedGoCommand: goCommand,
+      ...(session.activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: session.activeSearch.deadlineAt } : {}),
+    }));
+    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development') {
+      console.log('[engine-search-diagnostic]', {
+        requestId,
+        purpose,
+        mode: searchMode,
+        fen: startFen,
+        requestedLimit: searchLimit,
+        resolvedLimit: searchLimit,
+        generatedGoCommand: goCommand,
+        snapshotType: 'live',
+        ponderState: session.ponderState.status,
+        accepted: true,
+      });
+    }
     this.armSearchWatchdog(session, requestId, searchLimit, moves);
   }
 
@@ -1204,6 +1266,17 @@ function replayPosition(startFen: string, moves: readonly string[]): Chess | nul
   }
 
   return chess;
+}
+
+function deadlineAtForSearch(startFen: string, moves: readonly string[], limit: SearchLimit): number | undefined {
+  if (limit.mode !== 'clock') {
+    return undefined;
+  }
+
+  const position = replayPosition(startFen, moves);
+  const sideToMove = position?.turn() ?? 'w';
+  const remaining = sideToMove === 'w' ? limit.wtime : limit.btime;
+  return Date.now() + Math.max(0, remaining);
 }
 
 function searchLimitFromProfile(profile: { depth?: number; movetimeMs?: number }): SearchLimit {

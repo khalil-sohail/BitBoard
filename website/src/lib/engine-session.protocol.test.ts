@@ -20,6 +20,9 @@ interface ServerMessage {
   message?: string;
   requestId?: number;
   move?: string | null;
+  startedAt?: number;
+  receivedAt?: number;
+  engineDeadlineAt?: number;
   ponder?: string | null;
   source?: 'search' | 'book';
   book?: {
@@ -31,6 +34,9 @@ interface ServerMessage {
     winner?: string;
   };
   depth?: number;
+  selectiveDepth?: number | null;
+  requestedLimit?: unknown;
+  generatedGoCommand?: string;
   pvs?: unknown[];
 }
 
@@ -511,6 +517,24 @@ async function testInfoCarriesRequestId(): Promise<void> {
   assert.equal(infos.length, 2);
   assert.equal(infos[0].requestId, 10);
   assert.equal(infos[1].requestId, 10);
+  assert.deepEqual(infos[1].requestedLimit, { mode: 'depth', depth: 2 });
+
+  socket.close();
+}
+
+async function testDepthLimitedSearchSuppressesNominalDepthViolation(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 11, depth: 2, multiPv: 1 })));
+  await flushEvents();
+  engine.emitInfo('info depth 3 seldepth 8 score cp 20 nodes 2 time 2 pv d2d4');
+  engine.emitInfo('info depth 2 seldepth 8 score cp 20 nodes 2 time 2 pv d2d4');
+  await flushEvents();
+
+  const infos = messagesOfType(socket, 'info');
+  assert.equal(infos.length, 1);
+  assert.equal(infos[0].depth, 2);
+  assert.equal(infos[0].selectiveDepth, 8);
 
   socket.close();
 }
@@ -939,6 +963,30 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
   socket.close();
 }
 
+async function testResolvedSearchLimitObjectDrivesCommands(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({
+    requestId: 64,
+    difficulty: 'standard',
+    multiPv: 3,
+    searchLimit: { mode: 'depth', depth: 4 },
+  })));
+  await flushEvents();
+
+  assert.deepEqual(engine.writes.slice(0, 5), [
+    'setoption name MultiPV value 3',
+    'setoption name OwnBook value true',
+    'setoption name BookSelection value top-n-weighted',
+    'setoption name BookSelectionTopN value 4',
+    'position startpos',
+  ]);
+  assert.equal(engine.writes[5], 'go depth 4');
+  assert.deepEqual(messagesOfType(socket, 'search-started')[0].requestedLimit, { mode: 'depth', depth: 4 });
+
+  socket.close();
+}
+
 async function testClockBasedOpponentKeepsClockCommand(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
@@ -1304,6 +1352,48 @@ async function testSearchResultJustBeforeWatchdogClearsTimer(): Promise<void> {
   socket.close();
 }
 
+async function testDuplicateBestMoveLineCompletesOnce(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 206, movetime: 100, multiPv: 1 })));
+  await waitForMessage(socket, 'search-started');
+  engine.emitBestMove('bestmove e2e4');
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 206);
+
+  socket.close();
+}
+
+async function testClockSearchLifecycleCarriesBackendTiming(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({
+    requestId: 207,
+    wtime: 60_000,
+    btime: 60_000,
+    winc: 0,
+    binc: 0,
+    multiPv: 1,
+  })));
+  const started = await waitForMessage(socket, 'search-started');
+  assert.equal(typeof started.startedAt, 'number');
+  assert.equal(typeof started.engineDeadlineAt, 'number');
+
+  engine.emitBestMove('bestmove e2e4');
+  await flushEvents();
+
+  const bestMove = messagesOfType(socket, 'bestmove')[0];
+  assert.equal(bestMove.requestId, 207);
+  assert.equal(typeof bestMove.receivedAt, 'number');
+  assert.equal(bestMove.engineDeadlineAt, started.engineDeadlineAt);
+
+  socket.close();
+}
+
 async function testStopAckWatchdogRecoversUnresponsiveEngine(): Promise<void> {
   const { engines, socket } = await createManualSessionFactory({
     searchWatchdogToleranceMs: 5_000,
@@ -1376,6 +1466,7 @@ async function run(): Promise<void> {
   testUciBuilders();
   await testInvalidInputDoesNotWriteToEngine();
   await testInfoCarriesRequestId();
+  await testDepthLimitedSearchSuppressesNominalDepthViolation();
   await testBookBestMoveCarriesExplicitMetadata();
   await testStopSwallowsTrailingBestMove();
   await testNewerSearchSupersedesOlderSearch();
@@ -1391,6 +1482,7 @@ async function run(): Promise<void> {
   await testNewGameDoesNotResetOwnBookOption();
   await testDifficultyProfilesGenerateDistinctOpponentCommands();
   await testReviewAndAnalysisProfilesGenerateStableCommands();
+  await testResolvedSearchLimitObjectDrivesCommands();
   await testClockBasedOpponentKeepsClockCommand();
   await testPonderStartsFromPredictedReplyWithClockContext();
   await testPonderHitUsesPonderhitAndRequestOwnership();
@@ -1402,6 +1494,8 @@ async function run(): Promise<void> {
   await testDifficultyChangeAffectsNextSearchOnly();
   await testSearchWatchdogRecoversHungEngine();
   await testSearchResultJustBeforeWatchdogClearsTimer();
+  await testDuplicateBestMoveLineCompletesOnce();
+  await testClockSearchLifecycleCarriesBackendTiming();
   await testStopAckWatchdogRecoversUnresponsiveEngine();
   await testPonderMissStopWatchdogRecovers();
 

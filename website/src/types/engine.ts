@@ -1,5 +1,6 @@
 import type { NormalizedEvaluation } from '../lib/engine-evaluation';
 import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
+import type { SearchLimit } from '../lib/engine-protocol';
 
 export interface PVLine {
   multipv: number;
@@ -15,6 +16,9 @@ export interface EngineInfo {
   purpose?: SearchPurpose;
   source?: 'search' | 'book';
   depth: number;
+  reportedDepth?: number;
+  selectiveDepth?: number | null;
+  requestedLimit?: SearchLimit;
   nodes?: number;
   time?: number; // ms
   pvs: PVLine[];
@@ -30,6 +34,15 @@ export interface EngineTerminalCompletion {
   rootFen?: string;
   purpose?: string;
   terminal: EngineTerminalResult;
+}
+
+export interface EngineBestMoveResult {
+  requestId: number;
+  rootFen?: string;
+  purpose?: SearchPurpose;
+  move: string | null;
+  receivedAt?: number;
+  engineDeadlineAt?: number;
 }
 
 export interface BestMoveBookMetadata {

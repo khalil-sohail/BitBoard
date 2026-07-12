@@ -6,6 +6,7 @@
  *
  * Recognised `info` tokens (in any order on the line):
  *   depth <n>
+ *   seldepth <n>
  *   score cp <n>
  *   score mate <n>   (n is negative when the engine is getting mated)
  *   nodes <n>
@@ -15,6 +16,7 @@
 
 export interface ParsedInfo {
   depth?: number;
+  selectiveDepth?: number;
   multipv?: number;
   score?: number;
   mate?: number;
@@ -43,6 +45,9 @@ export function parseUciInfo(line: string): ParsedInfo | null {
 
     if (token === 'depth' && i + 1 < parts.length) {
       result.depth = parseInt(parts[i + 1], 10);
+
+    } else if (token === 'seldepth' && i + 1 < parts.length) {
+      result.selectiveDepth = parseInt(parts[i + 1], 10);
 
     } else if (token === 'multipv' && i + 1 < parts.length) {
       result.multipv = parseInt(parts[i + 1], 10);

@@ -17,6 +17,8 @@ interface EngineToggleProps {
   ownBook: boolean;
   optionsDisabled: boolean;
   onOwnBookChange: (enabled: boolean) => void;
+  trainingPonderEnabled: boolean;
+  onTrainingPonderChange: (enabled: boolean) => void;
 }
 
 export function EngineToggle({
@@ -31,6 +33,8 @@ export function EngineToggle({
   ownBook,
   optionsDisabled,
   onOwnBookChange,
+  trainingPonderEnabled,
+  onTrainingPonderChange,
 }: EngineToggleProps) {
   const { addToast } = useToast();
 
@@ -46,10 +50,16 @@ export function EngineToggle({
     onOwnBookChange(!ownBook);
   };
 
+  const handleToggleTrainingPonder = () => {
+    onTrainingPonderChange(!trainingPonderEnabled);
+  };
+
   const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
     onDepthChange(val);
   };
+
+  const depthLabel = gameMode === 'training' ? 'Review Depth' : 'Analysis Depth';
 
   return (
     <div className="grid grid-cols-[5fr_3fr] gap-6 bg-surface-elevated border border-white/10 rounded-xl p-5 shadow-md relative">
@@ -130,7 +140,7 @@ export function EngineToggle({
             {/* Max Depth Slider Controls */}
             <div className="flex w-full items-center justify-between gap-3 mb-2">
               <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-                Max Depth
+                {depthLabel}
               </label>
               
               <input
@@ -171,22 +181,41 @@ export function EngineToggle({
             </div>
 
             {gameMode === 'training' && (
-              <div className="flex w-full items-center bg-background border border-white/5 rounded-lg p-1 mt-3">
-                {DIFFICULTY_OPTIONS.map((opt) => (
+              <>
+                <div className="flex w-full items-center bg-background border border-white/5 rounded-lg p-1 mt-3">
+                  {DIFFICULTY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => onDifficultyChange(opt.id)}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded-md shadow-sm font-semibold whitespace-nowrap transition-colors ${
+                        difficulty === opt.id
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground'
+                      }`}
+                      title={`Opponent: ${opt.sublabel}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-start justify-between gap-3 mt-3">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                      Pondering
+                    </label>
+                    <p className="text-[10px] text-muted/60 mt-0.5">
+                      Allow the Training opponent to think during your turn.
+                    </p>
+                  </div>
                   <button
-                    key={opt.id}
-                    onClick={() => onDifficultyChange(opt.id)}
-                    className={`flex-1 px-2 py-1.5 text-xs rounded-md shadow-sm font-semibold whitespace-nowrap transition-colors ${
-                      difficulty === opt.id
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground'
-                    }`}
-                    title={`Opponent: ${opt.sublabel}`}
+                    onClick={handleToggleTrainingPonder}
+                    disabled={optionsDisabled}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${trainingPonderEnabled ? 'bg-primary' : 'bg-white/10'}`}
                   >
-                    {opt.label}
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${trainingPonderEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
-                ))}
-              </div>
+                </div>
+              </>
             )}
           </div>
         </div>

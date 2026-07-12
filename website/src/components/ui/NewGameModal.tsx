@@ -130,11 +130,11 @@ function NewGameModalContent({
             </div>
           </div>
 
-          {/* Training Mode: Max Depth Slider */}
+          {/* Training Mode: Review Depth Slider */}
           {gameMode === 'training' && (
             <div>
               <label className="text-[10px] font-semibold text-muted/70 uppercase tracking-widest block mb-2 flex justify-between">
-                <span>Max Depth</span>
+                <span>Training Review Depth</span>
                 <span className="text-primary">{maxDepth}</span>
               </label>
               <input
@@ -146,7 +146,7 @@ function NewGameModalContent({
                 className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-primary"
               />
               <p className="text-[9px] text-muted/50 mt-1.5 text-center">
-                Engine strictly evaluates to this depth and ignores the clock.
+                Review, result, and hint searches are capped by this depth.
               </p>
             </div>
           )}

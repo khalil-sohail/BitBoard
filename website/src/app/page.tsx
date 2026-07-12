@@ -37,9 +37,12 @@ import {
 } from "@/lib/training-machine";
 import { hintLevelUsedForMove } from "@/lib/training-hint";
 import { composeBoardArrows, toChessboardArrows } from "@/lib/board-arrows";
+import { resolveSearchPolicy } from "@/lib/search-policy";
 import { TrainingHintPanel } from "@/components/panels/TrainingHintPanel";
 import type { GameResult } from "@/lib/training-machine";
 import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
+import type { AnalysisDisplayState, AnalysisSnapshot } from "@/lib/board-arrows";
+import type { SearchPurpose } from "@/lib/engine-difficulty";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,13 +60,56 @@ interface PendingMoveReview {
   resultRequestStarted: boolean;
 }
 
+type AnalysisDisplayAction =
+  | { type: 'INFO'; snapshot: AnalysisSnapshot }
+  | { type: 'COMPLETE'; requestId: number }
+  | { type: 'FEN_CHANGED'; fen: string }
+  | { type: 'CLEAR' };
+
+function analysisDisplayReducer(state: AnalysisDisplayState, action: AnalysisDisplayAction): AnalysisDisplayState {
+  switch (action.type) {
+    case 'INFO': {
+      const newerRequest = state.finalized !== null && action.snapshot.requestId > state.finalized.requestId;
+      return {
+        live: action.snapshot,
+        finalized: newerRequest ? null : state.finalized,
+      };
+    }
+    case 'COMPLETE': {
+      if (!state.live || state.live.requestId !== action.requestId) return state;
+      return {
+        live: null,
+        finalized: {
+          ...state.live,
+          lines: state.live.lines.map(line => ({ ...line, pv: [...line.pv] })),
+          status: 'finalized',
+          createdAt: Date.now(),
+        },
+      };
+    }
+    case 'FEN_CHANGED': {
+      if (state.live?.fen === action.fen || state.finalized?.fen === action.fen) {
+        return {
+          live: state.live?.fen === action.fen ? state.live : null,
+          finalized: state.finalized?.fen === action.fen ? state.finalized : null,
+        };
+      }
+      if (!state.live && !state.finalized) return state;
+      return { live: null, finalized: null };
+    }
+    case 'CLEAR':
+      if (!state.live && !state.finalized) return state;
+      return { live: null, finalized: null };
+  }
+}
+
 // Default time control: 3+0
 const DEFAULT_TC = TIME_CONTROLS[2];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, terminalCompletion, queuePosition, searchStartedRequestId, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
+  const { status, engineInfo, bestMove, bestMoveResult, terminalCompletion, queuePosition, searchStartedRequestId, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -78,14 +124,34 @@ export default function Home() {
   const [maxDepth, setMaxDepth] = useState(10);
   const [multiPv, setMultiPv] = useState(3);
   const [ownBook, setOwnBook] = useState(true);
+  const [trainingPonderEnabled, setTrainingPonderEnabled] = useState(false);
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const [promotionResetKey, setPromotionResetKey] = useState(0);
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
+  const [analysisDisplay, dispatchAnalysisDisplay] = useReducer(analysisDisplayReducer, { live: null, finalized: null });
   const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const appliedOwnBookRef = useRef<boolean | null>(null);
   const lastClockSearchStartRef = useRef<number | null>(null);
+  const appliedBestMoveRequestRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    queueMicrotask(() => {
+      setTrainingPonderEnabled(window.localStorage.getItem('bitboard.trainingPonderEnabled') === 'true');
+    });
+  }, []);
+
+  const handleTrainingPonderChange = useCallback((enabled: boolean) => {
+    setTrainingPonderEnabled(enabled);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('bitboard.trainingPonderEnabled', String(enabled));
+    }
+    if (!enabled && gameMode === 'training') {
+      stopEngine();
+    }
+  }, [gameMode, stopEngine]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -142,6 +208,36 @@ export default function Home() {
     status === 'thinking' ||
     status === 'analyzing' ||
     (isTraining && !canChangeTrainingSettings(trainingState));
+
+  const resolvePolicy = useCallback((purpose: SearchPurpose, overrides: { multiPv?: number } = {}) => {
+    return resolveSearchPolicy({
+      mode: gameMode,
+      purpose,
+      difficulty,
+      userMaxDepth: maxDepth,
+      multiPv: overrides.multiPv ?? multiPv,
+      trainingPonderEnabled,
+      fairPonderEnabled: gameMode === 'fair',
+      clock: hasTC
+        ? {
+            wtime: clock.whiteMs,
+            btime: clock.blackMs,
+            winc: timeControl.incMs,
+            binc: timeControl.incMs,
+          }
+        : undefined,
+    });
+  }, [clock.blackMs, clock.whiteMs, difficulty, gameMode, hasTC, maxDepth, multiPv, timeControl.incMs, trainingPonderEnabled]);
+
+  const startResolvedAnalysis = useCallback((
+    rootFen: string,
+    moves: string[],
+    purpose: Exclude<SearchPurpose, 'opponent'>,
+    requestedMultiPv = multiPv,
+  ) => {
+    const policy = resolvePolicy(purpose, { multiPv: requestedMultiPv });
+    return startAnalysis(rootFen, moves, undefined, policy.multiPv, purpose, policy.limit, policy.source, gameMode);
+  }, [gameMode, multiPv, resolvePolicy, startAnalysis]);
 
   useEffect(() => {
     if (
@@ -237,26 +333,19 @@ export default function Home() {
       if (gameMode === 'training') {
         dispatchTraining({ type: 'ENGINE_SEARCH_STARTED' });
       }
-      if (hasTC) {
-        sendMove(fen, uciHistory, {
-          wtime: clock.whiteMs,
-          btime: clock.blackMs,
-          winc:  timeControl.incMs,
-          binc:  timeControl.incMs,
-          difficulty,
-          multiPv: multiPv,
-          ponder: gameMode === 'fair',
-        });
-      } else {
-        sendMove(fen, uciHistory, {
-          difficulty,
-          multiPv: multiPv,
-          ponder: gameMode === 'fair',
-        });
-      }
+      const policy = resolvePolicy('opponent');
+      sendMove(fen, uciHistory, {
+        difficulty,
+        searchLimit: policy.limit,
+        multiPv: policy.multiPv,
+        ponder: policy.ponder,
+        policySource: policy.source,
+        mode: gameMode,
+        trainingPonderEnabled,
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop, trainingState.status]);
+  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop, trainingState.status, resolvePolicy, trainingPonderEnabled]);
 
   // Queue/reconnect policy: the engine clock is paused until the backend
   // confirms that the matching UCI search actually started.
@@ -283,10 +372,10 @@ export default function Home() {
 
     // Immediately send the current position to the engine
     const timer = setTimeout(() => {
-      startAnalysis(fen, uciHistory, maxDepth, multiPv, 'analysis');
+      startResolvedAnalysis(fen, uciHistory, 'analysis');
     }, 100);
     return () => clearTimeout(timer);
-  }, [fen, uciHistory, gameMode, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
+  }, [fen, uciHistory, gameMode, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Training Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -295,11 +384,11 @@ export default function Home() {
     if (trainingState.status !== 'waiting-player') return;
     if (turn !== engineColor) {
       const timer = setTimeout(() => {
-        startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-root-review');
+        startResolvedAnalysis(fen, uciHistory, 'training-root-review');
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv, trainingState.status]);
+  }, [fen, uciHistory, gameMode, turn, engineColor, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv, trainingState.status]);
 
   // ── Apply engine best move + clock management ────────────────────────────
   const normalizedInfo = useMemo(() => normalizeEngineInfo(engineInfo), [engineInfo]);
@@ -311,15 +400,47 @@ export default function Home() {
     }
   }, [normalizedInfo]);
 
+  useEffect(() => {
+    if (!normalizedInfo?.requestId || !normalizedInfo.rootFen || normalizedInfo.purpose === 'training-hint') return;
+    if (normalizedInfo.pvs.length === 0) return;
+
+    const snapshot: AnalysisSnapshot = {
+      requestId: normalizedInfo.requestId,
+      purpose: normalizedInfo.purpose,
+      fen: normalizedInfo.rootFen,
+      lines: normalizedInfo.pvs.map(line => ({ ...line, pv: [...line.pv] })),
+      requestedLimit: normalizedInfo.requestedLimit,
+      reportedDepth: normalizedInfo.reportedDepth ?? normalizedInfo.depth ?? null,
+      selectiveDepth: normalizedInfo.selectiveDepth ?? null,
+      multiPv: normalizedInfo.pvs.length,
+      status: 'live',
+      createdAt: Date.now(),
+    };
+
+    dispatchAnalysisDisplay({ type: 'INFO', snapshot });
+  }, [normalizedInfo]);
+
+  useEffect(() => {
+    if (!bestMoveResult || bestMoveResult.purpose === 'opponent') return;
+    dispatchAnalysisDisplay({ type: 'COMPLETE', requestId: bestMoveResult.requestId });
+  }, [bestMoveResult]);
+
+  useEffect(() => {
+    dispatchAnalysisDisplay({ type: 'FEN_CHANGED', fen });
+  }, [fen]);
+
+  useEffect(() => {
+    dispatchAnalysisDisplay({ type: 'CLEAR' });
+  }, [gameMode, gameStatus]);
+
   const trainingHint = useTrainingHint({
     fen,
     uciHistory,
-    maxDepth,
     engineStatus: status,
     trainingState,
     engineInfo: normalizedInfo,
     dispatchTraining,
-    startAnalysis,
+    startHintAnalysis: (rootFen, moves = []) => startResolvedAnalysis(rootFen, moves, 'training-hint', 1),
   });
 
   const boardArrows = useMemo(() => toChessboardArrows(composeBoardArrows({
@@ -327,8 +448,9 @@ export default function Home() {
     trainingState,
     currentFen: fen,
     engineInfo: displayEngineInfo,
+    analysis: analysisDisplay,
     hintView: isTraining ? trainingHint.hintView : null,
-  })), [displayEngineInfo, fen, gameMode, isTraining, trainingHint.hintView, trainingState]);
+  })), [analysisDisplay, displayEngineInfo, fen, gameMode, isTraining, trainingHint.hintView, trainingState]);
 
   const hintRequestAvailable = canRequestHint(trainingState, status, {
     isTraining,
@@ -354,8 +476,8 @@ export default function Home() {
     if (pendingReview.resultRequestStarted) return;
 
     pendingReview.resultRequestStarted = true;
-    startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-result-review');
-  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startAnalysis, status, trainingState.status, uciHistory]);
+    startResolvedAnalysis(fen, uciHistory, 'training-result-review');
+  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startResolvedAnalysis, status, trainingState.status, uciHistory]);
 
   useEffect(() => {
     const pendingReview = pendingMoveReviewRef.current;
@@ -411,13 +533,41 @@ export default function Home() {
   }, [gameMode, trainingState.status]);
 
   useEffect(() => {
-    if (gameStatus === 'completed') return;
     let isMounted = true;
 
     if (!engineAutoEnabled) return;
-    if (!isGameActive) return;
-    if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor })) return;
-    if (bestMove && turn === engineColor) {
+    const moveResult = bestMoveResult;
+    const backendTimed = moveResult?.receivedAt !== undefined && moveResult.engineDeadlineAt !== undefined;
+    const backendTimely = !backendTimed || moveResult.receivedAt! <= moveResult.engineDeadlineAt!;
+    const timeoutOnlyCompletion = gameStatus === 'completed' && timeoutColor !== null;
+    if (!isGameActive && !timeoutOnlyCompletion) return;
+    if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor }) && !(timeoutOnlyCompletion && backendTimely)) return;
+    if (moveResult?.move && turn === engineColor) {
+      const rejectionReason =
+        appliedBestMoveRequestRef.current === moveResult.requestId ? 'duplicate-request' :
+        !backendTimely ? 'flag-fell-before-backend-result' :
+        moveResult.rootFen !== undefined && moveResult.rootFen !== fen ? 'fen-mismatch' :
+        null;
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[engine-bestmove-decision]', {
+          requestId: moveResult.requestId,
+          currentRequestId: appliedBestMoveRequestRef.current,
+          move: moveResult.move,
+          receivedAt: moveResult.receivedAt,
+          currentFen: fen,
+          expectedFen: moveResult.rootFen,
+          clockExpired: timeoutColor !== null || !backendTimely,
+          gameOver: effectiveGameOver,
+          accepted: rejectionReason === null,
+          rejectionReason,
+        });
+      }
+
+      if (rejectionReason !== null) return;
+      appliedBestMoveRequestRef.current = moveResult.requestId;
+      const acceptedMove = moveResult.move;
+
       if (ignoreStaleBestMoveRef.current) {
         ignoreStaleBestMoveRef.current = false;
         return;
@@ -437,11 +587,11 @@ export default function Home() {
 
       queueMicrotask(() => {
         if (!isMounted) return;
-        if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor })) return;
+        if (!backendTimely) return;
 
-        const from      = bestMove.substring(0, 2);
-        const to        = bestMove.substring(2, 4);
-        const promotion = bestMove.length === 5 ? bestMove[4] : undefined;
+        const from      = acceptedMove.substring(0, 2);
+        const to        = acceptedMove.substring(2, 4);
+        const promotion = acceptedMove.length === 5 ? acceptedMove[4] : undefined;
         let terminalAfterMove = false;
         try {
           const preview = new Chess(fen);
@@ -453,6 +603,10 @@ export default function Home() {
         const success   = makeMove({ from, to, promotion });
 
         if (success) {
+          setTimeoutColor(null);
+          if (timeoutOnlyCompletion) {
+            setGameStatus('active');
+          }
           if (gameMode === 'training') {
             dispatchTraining({ type: 'ENGINE_MOVE_RECEIVED' });
           }
@@ -485,7 +639,7 @@ export default function Home() {
 
     return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
+  }, [bestMoveResult, bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
       setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus, gameMode, timeoutColor, fen]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
@@ -615,7 +769,7 @@ export default function Home() {
       resetGrades();
       pendingMoveReviewRef.current = null;
       if (gameMode === 'analysis') {
-        startAnalysis(fenStr, [], maxDepth, multiPv, 'analysis');
+        startResolvedAnalysis(fenStr, [], 'analysis');
       }
     }
   };
@@ -857,7 +1011,7 @@ export default function Home() {
                   resetGrades();
                   pendingMoveReviewRef.current = null;
                   if (gameMode === 'analysis') {
-                    startAnalysis(finalFen, [], maxDepth, multiPv, 'analysis');
+                    startResolvedAnalysis(finalFen, [], 'analysis');
                   }
                 }}
               />
@@ -876,6 +1030,8 @@ export default function Home() {
                 ownBook={ownBook}
                 optionsDisabled={engineOptionsUnavailable}
                 onOwnBookChange={handleOwnBookChange}
+                trainingPonderEnabled={trainingPonderEnabled}
+                onTrainingPonderChange={handleTrainingPonderChange}
               />
             )}
 

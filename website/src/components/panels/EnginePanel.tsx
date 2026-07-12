@@ -59,7 +59,7 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
         
         {/* ── LEFT COLUMN: STATS ─────────────────────────────────────────── */}
         <div className="flex flex-col justify-between gap-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
               <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Engine Evaluation: positive means white is better, negative means black is better. Measured in pawns.">Eval</span>
               <span className={`text-xl font-bold font-mono ${isMate ? 'text-accent' : 'text-foreground'}`}>
@@ -67,9 +67,15 @@ export function EnginePanel({ info, status, queuePosition }: EnginePanelProps) {
               </span>
             </div>
             <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
-              <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Search Depth: how many moves ahead the engine has fully analyzed.">Depth</span>
+              <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Nominal UCI depth completed by the engine.">Depth</span>
               <span className="text-xl font-bold font-mono text-foreground">
-                {info?.depth ?? '-'}
+                {info?.reportedDepth ?? info?.depth ?? '-'}
+              </span>
+            </div>
+            <div className="bg-background rounded p-3 border border-border flex flex-col justify-center items-center">
+              <span className="text-xs text-muted mb-1 uppercase cursor-help" title="Selective depth reached inside tactical and quiescence search. It may exceed nominal depth.">Sel</span>
+              <span className="text-xl font-bold font-mono text-foreground">
+                {info?.selectiveDepth ?? '-'}
               </span>
             </div>
           </div>

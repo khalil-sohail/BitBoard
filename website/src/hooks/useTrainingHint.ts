@@ -12,29 +12,24 @@ import {
 interface UseTrainingHintInput {
   fen: string;
   uciHistory: string[];
-  maxDepth: number;
   engineStatus: string;
   trainingState: TrainingState;
   engineInfo: EngineInfo | null;
   dispatchTraining: (event: TrainingEvent) => void;
-  startAnalysis: (
+  startHintAnalysis: (
     fen: string,
     moves?: string[],
-    depth?: number,
-    multiPv?: number,
-    purpose?: 'training-root-review' | 'training-result-review' | 'training-hint' | 'analysis',
   ) => EngineRequestId | null;
 }
 
 export function useTrainingHint({
   fen,
   uciHistory,
-  maxDepth,
   engineStatus,
   trainingState,
   engineInfo,
   dispatchTraining,
-  startAnalysis,
+  startHintAnalysis,
 }: UseTrainingHintInput) {
   const pendingRequestRef = useRef<{ requestId: EngineRequestId; fen: string } | null>(null);
   const consumedInfoRef = useRef<string | null>(null);
@@ -67,7 +62,7 @@ export function useTrainingHint({
       return;
     }
 
-    const requestId = startAnalysis(fen, uciHistory, maxDepth, 1, 'training-hint');
+    const requestId = startHintAnalysis(fen, uciHistory);
     if (requestId === null) {
       dispatchTraining({ type: 'HINT_FAILED', fen, message: 'Hint analysis is unavailable.' });
       return;
@@ -76,7 +71,7 @@ export function useTrainingHint({
     pendingRequestRef.current = { requestId, fen };
     consumedInfoRef.current = null;
     dispatchTraining({ type: 'HINT_SEARCH_STARTED', fen, requestId });
-  }, [dispatchTraining, engineInfo, fen, maxDepth, startAnalysis, trainingState, uciHistory]);
+  }, [dispatchTraining, engineInfo, fen, startHintAnalysis, trainingState, uciHistory]);
 
   useEffect(() => {
     if (shouldClearHintForFen(trainingState, fen)) {
