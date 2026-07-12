@@ -41,6 +41,7 @@ export interface MoveMessage {
   type: 'move';
   requestId: number;
   purpose: 'opponent';
+  ponder: boolean;
   fen: string;
   moves: string[];
   wtime: number;
@@ -303,6 +304,10 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
   const purpose = validateSearchPurpose(record.purpose, ['opponent']);
   if (purpose.ok === false) return purpose;
 
+  if (record.ponder !== undefined && typeof record.ponder !== 'boolean') {
+    return err('INVALID_MESSAGE', 'ponder must be a boolean.');
+  }
+
   const positionResult = validateCommonPositionFields(record);
   if (positionResult.ok === false) {
     return positionResult;
@@ -333,6 +338,7 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
     type: 'move',
     requestId: requestId.value,
     purpose: 'opponent',
+    ponder: record.ponder === true,
     fen: positionResult.value.fen,
     moves: positionResult.value.moves,
     wtime: wtime.value,
@@ -542,6 +548,29 @@ export function buildGoCommand(params: {
   }
 
   return 'go movetime 3000';
+}
+
+export function buildGoPonderCommand(params: {
+  depth?: number;
+  movetimeMs?: number;
+  wtime?: number;
+  btime?: number;
+  winc?: number;
+  binc?: number;
+}): string | null {
+  if (params.depth !== undefined) {
+    return `go ponder depth ${params.depth}`;
+  }
+
+  if (params.movetimeMs !== undefined) {
+    return `go ponder movetime ${params.movetimeMs}`;
+  }
+
+  if (params.wtime !== undefined && params.btime !== undefined && params.winc !== undefined && params.binc !== undefined) {
+    return `go ponder wtime ${params.wtime} btime ${params.btime} winc ${params.winc} binc ${params.binc}`;
+  }
+
+  return null;
 }
 
 export function buildSetOptionCommand(name: EngineOptionName, value: number | boolean | string): string {

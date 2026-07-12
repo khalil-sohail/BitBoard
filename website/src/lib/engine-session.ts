@@ -1,5 +1,6 @@
 import { spawn, ChildProcess, SpawnOptions } from 'child_process';
 import { RawData, WebSocket } from 'ws';
+import { Chess } from 'chess.js';
 import path from 'path';
 import fs from 'fs';
 import { parseUciInfo, parseBestMove } from './uci-parser';
@@ -9,6 +10,7 @@ import {
   ClientMessage,
   DEFAULT_START_FEN,
   buildGoCommand,
+  buildGoPonderCommand,
   buildPositionCommand,
   buildSetOptionCommand,
   parseClientMessage,
@@ -27,27 +29,40 @@ interface SessionPv {
 
 // ── Ponder state machine ──────────────────────────────────────────────────────
 
-type PonderPhase =
-  | { phase: 'idle' }
-  | { phase: 'thinking'; requestId: number; purpose: SearchPurpose; searchMode: 'tc' | 'analysis'; wtime: number; btime: number; winc: number; binc: number; depth?: number; movetimeMs?: number }
+type PonderSearchContext =
+  | { mode: 'clock'; wtime: number; btime: number; winc: number; binc: number }
+  | { mode: 'movetime'; movetimeMs: number }
+  | { mode: 'depth'; depth: number };
+
+type PonderStopReason =
+  | 'miss'
+  | 'reset'
+  | 'newgame'
+  | 'mode-switch'
+  | 'option-change'
+  | 'disconnect'
+  | 'release';
+
+type PonderState =
+  | { status: 'idle' }
   | {
-      phase: 'pondering';
-      ponderPly: number;        // ply count at the moment pondering starts
-      ponderMove: string;       // the move the engine predicted the opponent plays
-      baseFen: string;          // the startFen of the current game
-      baseMoves: string[];      // full moves list up to (and including) the engine's reply
-      awaitingStopAck: boolean; // true after we sent 'stop', waiting for dummy bestmove
-      pendingUserMove: string;  // user's actual move — buffered until stop-ack arrives
-      pendingWtime: number;
-      pendingBtime: number;
-      pendingWinc: number;
-      pendingBinc: number;
-      pendingDepth?: number;
-      pendingMovetimeMs?: number;
-      pendingMultiPv: number;
-      pendingRequestId?: number;
-      pendingPurpose?: SearchPurpose;
-      pendingOpeningSelection?: OpeningSelectionConfiguration;
+      status: 'pondering';
+      parentRequestId: number;
+      expectedPlayerMove: string;
+      expectedMoves: string[];
+      searchContext: PonderSearchContext;
+    }
+  | {
+      status: 'hit';
+      nextRequestId: number;
+      expectedPlayerMove: string;
+      expectedMoves: string[];
+      searchContext: PonderSearchContext;
+    }
+  | {
+      status: 'stopping';
+      reason: PonderStopReason;
+      pendingFreshSearch?: Extract<PendingOperation, { type: 'search' }>;
     };
 
 type ActiveSearchState = 'running' | 'stopping';
@@ -58,6 +73,8 @@ interface ActiveSearch {
   state: ActiveSearchState;
   purpose: SearchPurpose;
   searchMode: 'tc' | 'analysis';
+  ponderAllowed: boolean;
+  ponderContext: PonderSearchContext | null;
 }
 
 interface PendingBookResult {
@@ -82,6 +99,8 @@ type PendingOperation =
       movetimeMs?: number;
       multiPv: number;
       openingSelection?: OpeningSelectionConfiguration;
+      ponderAllowed: boolean;
+      ponderContext: PonderSearchContext | null;
     }
   | { type: 'newgame' }
   | { type: 'position'; startFen: string; moves: string[] }
@@ -100,7 +119,7 @@ interface EngineSession {
   // Position tracking (shadow of what the engine has been told)
   startFen: string;
   uciMoves: string[];
-  ponderState: PonderPhase;
+  ponderState: PonderState;
   activeSearch: ActiveSearch | null;
   pendingOperation: PendingOperation | null;
   requestedOwnBook: boolean;
@@ -289,7 +308,7 @@ export class EnginePoolManager {
       pvs: [],
       startFen: DEFAULT_START_FEN,
       uciMoves: [],
-      ponderState: { phase: 'idle' },
+      ponderState: { status: 'idle' },
       activeSearch: null,
       pendingOperation: null,
       requestedOwnBook: true,
@@ -379,9 +398,9 @@ export class EnginePoolManager {
     const session = this.active.get(id);
     if (!session) return;
 
-    // Suppress info lines while we're waiting for the stop-ack dummy bestmove
+    // Ponder info is backend-internal until a verified ponderhit adopts it.
     const ps = session.ponderState;
-    if (ps.phase === 'pondering' && ps.awaitingStopAck) return;
+    if (ps.status === 'pondering' || ps.status === 'stopping') return;
     if (!session.activeSearch || session.activeSearch.state !== 'running') return;
 
     const bookResult = parseBookInfo(trimmed);
@@ -434,52 +453,43 @@ export class EnginePoolManager {
     const ps = session.ponderState;
     const activeSearch = session.activeSearch;
 
-    // ── Stop-ack discard ─────────────────────────────────────────────────
-    // We sent 'stop' to the ponder search; this dummy bestmove is the engine
-    // confirming the ponder search is dead.  Issue the real timed search now.
-    if (ps.phase === 'pondering' && ps.awaitingStopAck) {
-      if (ps.pendingUserMove === '') {
-        session.ponderState = { phase: 'idle' };
+    if (ps.status === 'stopping') {
+      const pendingFreshSearch = ps.pendingFreshSearch;
+      session.ponderState = { status: 'idle' };
+      if (pendingFreshSearch) {
+        console.log(`[Ponder ${id}] Stop-ack received — issuing fresh search`);
+        this.startSearch(session, pendingFreshSearch);
+      } else {
         this.runPendingOperation(session);
-        return;
       }
-      console.log(`[Ponder ${id}] Stop-ack received — issuing real 'go' command`);
-      const { pendingUserMove, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMovetimeMs, pendingMultiPv,
-              pendingRequestId, pendingPurpose, pendingOpeningSelection, baseFen, baseMoves } = ps;
-      if (pendingRequestId === undefined) {
-        session.ponderState = { phase: 'idle' };
-        this.runPendingOperation(session);
-        return;
-      }
-
-      // Build the real position (opponent played pendingUserMove)
-      const realMoves = [...baseMoves, pendingUserMove];
-      writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', pendingMultiPv));
-      this.applyBookOptions(session, pendingPurpose ?? 'opponent', pendingOpeningSelection);
-      this.sendPositionAndGo(session, pendingRequestId, pendingPurpose ?? 'opponent', 'tc', baseFen, realMoves, pendingWtime, pendingBtime, pendingWinc, pendingBinc, pendingDepth, pendingMovetimeMs);
       return;
     }
 
     if (!activeSearch) {
-      session.ponderState = { phase: 'idle' };
+      if (ps.status !== 'pondering') {
+        session.ponderState = { status: 'idle' };
+      }
       this.runPendingOperation(session);
       return;
     }
 
     if (activeSearch.state === 'stopping') {
       session.activeSearch = null;
-      session.ponderState = { phase: 'idle' };
+      session.ponderState = { status: 'idle' };
       this.runPendingOperation(session);
       return;
     }
 
     // ── Normal thinking result ────────────────────────────────────────────
-    if (ps.phase === 'thinking' && ps.requestId === activeSearch.requestId) {
+    if (activeSearch.state === 'running') {
       const { bestMove, ponderMove } = parsed;
       const terminal = bestMove === '0000'
         ? classifyTerminalPosition(session.startFen, session.uciMoves)
         : undefined;
       const move = bestMove === '0000' ? null : bestMove;
+      const ponderPlan = move && activeSearch.ponderAllowed && activeSearch.ponderContext
+        ? buildValidatedPonderPlan(session.startFen, session.uciMoves, move, ponderMove, activeSearch.ponderContext)
+        : null;
 
       // Send best move to the frontend
       session.ws.send(JSON.stringify({
@@ -497,44 +507,33 @@ export class EnginePoolManager {
               },
             }
           : { source: 'search' }),
-        ...(ponderMove ? { ponder: ponderMove } : {}),
+        ...(ponderPlan ? { ponder: ponderPlan.expectedPlayerMove } : {}),
         ...(terminal ? { terminal } : {}),
       }));
-      console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderMove ?? 'none'}`);
+      console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderPlan?.expectedPlayerMove ?? 'none'}`);
       session.activeSearch = null;
       session.pendingBookResult = null;
 
-      // Start pondering if we have a ponder move
-      if (move && ponderMove && session.process.stdin && ps.searchMode === 'tc') {
-        const ponderMoves = [...session.uciMoves, move];
-
-        console.log(`[Ponder ${id}] Starting ponder on move: ${ponderMove}`);
-        writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderMoves));
-        writeUciCommand(session.process.stdin, 'go ponder');
-
+      if (ponderPlan && session.process.stdin) {
+        console.log(`[Ponder ${id}] Starting ponder on move: ${ponderPlan.expectedPlayerMove}`);
+        writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderPlan.expectedMoves));
+        writeUciCommand(session.process.stdin, buildPonderGoCommand(ponderPlan.searchContext));
         session.ponderState = {
-          phase: 'pondering',
-          ponderPly: ponderMoves.length,
-          ponderMove,
-          baseFen: session.startFen,
-          baseMoves: ponderMoves,
-          awaitingStopAck: false,
-          pendingUserMove: '',
-          pendingWtime: 0,
-          pendingBtime: 0,
-          pendingWinc: 0,
-          pendingBinc: 0,
-          pendingMultiPv: 1,
+          status: 'pondering',
+          parentRequestId: activeSearch.requestId,
+          expectedPlayerMove: ponderPlan.expectedPlayerMove,
+          expectedMoves: ponderPlan.expectedMoves,
+          searchContext: ponderPlan.searchContext,
         };
       } else {
-        session.ponderState = { phase: 'idle' };
+        session.ponderState = { status: 'idle' };
       }
       this.runPendingOperation(session);
       return;
     }
 
     // ── Idle / unexpected bestmove — stale search output, swallow it. ─────
-    session.ponderState = { phase: 'idle' };
+    session.ponderState = { status: 'idle' };
     session.activeSearch = null;
     this.runPendingOperation(session);
   }
@@ -576,6 +575,8 @@ export class EnginePoolManager {
       const movetimeMs = hasClock ? undefined : opponentProfile.movetimeMs;
       const targetMultiPv = opponentProfile.multiPv;
       const openingSelection = opponentProfile.openingSelection;
+      const ponderContext = getPonderSearchContext({ depth, movetimeMs, wtime, btime, winc, binc });
+      const ponderAllowed = data.ponder === true && ponderContext !== null;
 
       // Update position shadow
       const startFen = data.fen;
@@ -584,38 +585,79 @@ export class EnginePoolManager {
 
       const ps = session.ponderState;
 
-      if (ps.phase === 'pondering') {
+      if (ps.status === 'pondering') {
         // The user has made a move while the engine is pondering.
         // Determine the last move the user played (last element of data.moves).
         const userMove = moves.length > 0
           ? moves[moves.length - 1]
           : null;
-        const incomingPly = moves.length;
 
         if (!userMove) {
           // Can't determine user's move — fall back to stop + resync
-          this.stopPonderAndGo(session, data.requestId, 'opponent', openingSelection, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs);
+          this.stopPonderAndGo(session, 'miss', {
+            type: 'search',
+            requestId: data.requestId,
+            searchMode: 'tc',
+            purpose: 'opponent',
+            startFen,
+            moves,
+            wtime,
+            btime,
+            winc,
+            binc,
+            depth,
+            movetimeMs,
+            multiPv: targetMultiPv,
+            openingSelection,
+            ponderAllowed,
+            ponderContext,
+          });
           return;
         }
 
-        if (incomingPly > ps.ponderPly && userMove === ps.ponderMove) {
-          // ── Ponder HIT ─────────────────────────────────────────────────
-          // The opponent played exactly the move we were pondering.
-          // Stop the ponder search, then issue a timed go on the same position.
+        if (userMove === ps.expectedPlayerMove && sameMoveList(moves, ps.expectedMoves)) {
           console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
-          this.stopPonderAndGo(session, data.requestId, 'opponent', openingSelection, ps.baseFen, ps.baseMoves.concat(userMove), wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
-        } else if (incomingPly > ps.ponderPly) {
-          // ── Ponder MISS ────────────────────────────────────────────────
-          // Opponent played a different move — stop and resync.
-          console.log(`[Ponder ${id}] MISS — expected ${ps.ponderMove}, got ${userMove}`);
-          this.stopPonderAndGo(session, data.requestId, 'opponent', openingSelection, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
+          session.searchGeneration += 1;
+          session.activeSearch = {
+            requestId: data.requestId,
+            generation: session.searchGeneration,
+            state: 'running',
+            purpose: 'opponent',
+            searchMode: 'tc',
+            ponderAllowed,
+            ponderContext,
+          };
+          session.currentDepth = 0;
+          session.pvs = [];
+          session.pendingBookResult = null;
+          session.ponderState = {
+            status: 'hit',
+            nextRequestId: data.requestId,
+            expectedPlayerMove: ps.expectedPlayerMove,
+            expectedMoves: ps.expectedMoves,
+            searchContext: ps.searchContext,
+          };
+          writeUciCommand(session.process.stdin, 'ponderhit');
         } else {
-          // ── Ponder RESYNC ──────────────────────────────────────────────
-          // Same or fewer moves than when pondering started.
-          // Do not treat this as a HIT.
-          // Stop/resync safely.
-          console.log(`[Ponder ${id}] RESYNC — incomingPly=${incomingPly} <= ponderPly=${ps.ponderPly}`);
-          this.stopPonderAndGo(session, data.requestId, 'opponent', openingSelection, startFen, moves, wtime, btime, winc, binc, depth, movetimeMs, targetMultiPv);
+          console.log(`[Ponder ${id}] MISS — expected ${ps.expectedPlayerMove}, got ${userMove}`);
+          this.stopPonderAndGo(session, 'miss', {
+            type: 'search',
+            requestId: data.requestId,
+            searchMode: 'tc',
+            purpose: 'opponent',
+            startFen,
+            moves: [...moves],
+            wtime,
+            btime,
+            winc,
+            binc,
+            depth,
+            movetimeMs,
+            multiPv: targetMultiPv,
+            openingSelection,
+            ponderAllowed,
+            ponderContext,
+          });
         }
         return;
       }
@@ -636,6 +678,8 @@ export class EnginePoolManager {
         movetimeMs,
         multiPv: targetMultiPv,
         openingSelection,
+        ponderAllowed,
+        ponderContext,
       });
       return;
     }
@@ -670,6 +714,8 @@ export class EnginePoolManager {
         depth: profile.depth,
         movetimeMs: profile.movetimeMs,
         multiPv: profile.multiPv,
+        ponderAllowed: false,
+        ponderContext: null,
       });
       return;
     }
@@ -710,7 +756,7 @@ export class EnginePoolManager {
   private enqueueSearch(session: EngineSession, operation: Extract<PendingOperation, { type: 'search' }>) {
     if (!session.process.stdin) return;
 
-    if (session.activeSearch || session.ponderState.phase === 'pondering') {
+    if (session.activeSearch || session.ponderState.status === 'pondering' || session.ponderState.status === 'hit') {
       session.pendingOperation = operation;
       this.invalidateActiveSearch(session);
       return;
@@ -722,7 +768,7 @@ export class EnginePoolManager {
   private enqueueControlOperation(session: EngineSession, operation: Exclude<PendingOperation, { type: 'search' }>) {
     if (!session.process.stdin) return;
 
-    if (session.activeSearch || session.ponderState.phase === 'pondering') {
+    if (session.activeSearch || session.ponderState.status === 'pondering' || session.ponderState.status === 'hit') {
       session.pendingOperation = operation;
       this.invalidateActiveSearch(session);
       return;
@@ -747,20 +793,8 @@ export class EnginePoolManager {
       return;
     }
 
-    if (ps.phase === 'pondering') {
-      session.ponderState = {
-        ...ps,
-        awaitingStopAck: true,
-        pendingUserMove: '',
-        pendingWtime: 0,
-        pendingBtime: 0,
-        pendingWinc: 0,
-        pendingBinc: 0,
-        pendingMultiPv: 1,
-        pendingRequestId: undefined,
-        pendingPurpose: undefined,
-        pendingOpeningSelection: undefined,
-      };
+    if (ps.status === 'pondering') {
+      session.ponderState = { status: 'stopping', reason: 'reset' };
       writeUciCommand(session.process.stdin, 'stop');
     }
   }
@@ -784,7 +818,7 @@ export class EnginePoolManager {
     session.currentDepth = 0;
     session.pvs = [];
     session.pendingBookResult = null;
-    session.ponderState = { phase: 'idle' };
+    session.ponderState = { status: 'idle' };
 
     if (operation.type === 'newgame') {
       writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
@@ -826,6 +860,8 @@ export class EnginePoolManager {
       operation.binc,
       operation.depth,
       operation.movetimeMs,
+      operation.ponderAllowed,
+      operation.ponderContext,
     );
   }
 
@@ -850,103 +886,21 @@ export class EnginePoolManager {
     }
   }
 
-  /**
-   * Stop the ponder search, buffer the pending user move + TC, and wait for
-   * the dummy bestmove stop-ack before issuing the real go command.
-   */
   private stopPonderAndGo(
     session: EngineSession,
-    requestId: number,
-    purpose: SearchPurpose,
-    openingSelection: OpeningSelectionConfiguration | undefined,
-    startFen: string,
-    moves: string[],
-    wtime: number,
-    btime: number,
-    winc: number,
-    binc: number,
-    depth?: number,
-    movetimeMs?: number,
-    targetMultiPv: number = 1,
+    reason: PonderStopReason,
+    pendingFreshSearch?: Extract<PendingOperation, { type: 'search' }>,
   ) {
     if (!session.process.stdin) return;
 
     const ps = session.ponderState;
-    const userMove = moves.length > 0 ? moves[moves.length - 1] : '';
 
-    if (ps.phase === 'pondering') {
-      // Mark that we're waiting for the stop-ack dummy bestmove
-      session.ponderState = {
-        ...ps,
-        awaitingStopAck: true,
-        pendingUserMove: userMove,
-        pendingWtime: wtime,
-        pendingBtime: btime,
-        pendingWinc: winc,
-        pendingBinc: binc,
-        pendingDepth: depth,
-        pendingMovetimeMs: movetimeMs,
-        pendingMultiPv: targetMultiPv,
-        pendingRequestId: requestId,
-        pendingPurpose: purpose,
-        pendingOpeningSelection: openingSelection,
-        baseFen:   startFen,
-        baseMoves: moves,
-      };
+    if (ps.status === 'pondering') {
+      session.ponderState = { status: 'stopping', reason, pendingFreshSearch };
       writeUciCommand(session.process.stdin, 'stop');
-    } else {
-      // Not pondering — issue immediately
-      this.enqueueSearch(session, {
-        type: 'search',
-        requestId,
-        searchMode: 'tc',
-        purpose,
-        startFen,
-        moves,
-        wtime,
-        btime,
-        winc,
-        binc,
-        depth,
-        movetimeMs,
-        multiPv: targetMultiPv,
-        openingSelection,
-      });
     }
   }
 
-  /**
-   * Stop a ponder search without transitioning to thinking (used on newgame,
-   * analysis switch, etc.).  The dummy bestmove will be swallowed by
-   * awaitingStopAck without triggering a new go.
-   */
-  private stopPonderSilently(session: EngineSession) {
-    if (!session.process.stdin) return;
-    const ps = session.ponderState;
-    if (ps.phase === 'pondering') {
-      session.ponderState = {
-        ...ps,
-        awaitingStopAck: true,
-        pendingUserMove: '',
-        pendingWtime: 0,
-        pendingBtime: 0,
-        pendingWinc: 0,
-        pendingBinc: 0,
-        pendingMovetimeMs: undefined,
-        pendingMultiPv: 1,
-        pendingRequestId: undefined,
-        pendingPurpose: undefined,
-        pendingOpeningSelection: undefined,
-      };
-      writeUciCommand(session.process.stdin, 'stop');
-    } else if (ps.phase === 'thinking') {
-      this.invalidateActiveSearch(session);
-    }
-  }
-
-  /**
-   * Send a position + timed go command. Updates ponderState to 'thinking'.
-   */
   private sendPositionAndGo(
     session: EngineSession,
     requestId: number,
@@ -960,6 +914,8 @@ export class EnginePoolManager {
     binc: number,
     depth?: number,
     movetimeMs?: number,
+    ponderAllowed: boolean = false,
+    ponderContext: PonderSearchContext | null = null,
   ) {
     if (!session.process.stdin) return;
 
@@ -972,11 +928,13 @@ export class EnginePoolManager {
       state: 'running',
       purpose,
       searchMode,
+      ponderAllowed,
+      ponderContext,
     };
     session.currentDepth = 0;
     session.pvs = [];
     session.pendingBookResult = null;
-    session.ponderState = { phase: 'thinking', requestId, purpose, searchMode, wtime, btime, winc, binc, depth, movetimeMs };
+    session.ponderState = { status: 'idle' };
     session.startFen = startFen;
     session.uciMoves = moves;
   }
@@ -1091,6 +1049,133 @@ function parseBookInfo(line: string): PendingBookResult | null {
     candidateCount,
     selectedWeight,
   };
+}
+
+function isCanonicalUciMove(move: string | null | undefined): move is string {
+  return typeof move === 'string' &&
+    move !== '0000' &&
+    /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move);
+}
+
+function applyUciMove(chess: Chess, move: string): boolean {
+  if (!isCanonicalUciMove(move)) {
+    return false;
+  }
+
+  try {
+    const applied = chess.move({
+      from: move.slice(0, 2),
+      to: move.slice(2, 4),
+      promotion: move.length === 5 ? move[4] : undefined,
+    });
+    return applied !== null;
+  } catch {
+    return false;
+  }
+}
+
+function replayPosition(startFen: string, moves: readonly string[]): Chess | null {
+  let chess: Chess;
+  try {
+    chess = new Chess(startFen);
+  } catch {
+    return null;
+  }
+
+  for (const move of moves) {
+    if (!applyUciMove(chess, move)) {
+      return null;
+    }
+  }
+
+  return chess;
+}
+
+function getPonderSearchContext(params: {
+  depth?: number;
+  movetimeMs?: number;
+  wtime: number;
+  btime: number;
+  winc: number;
+  binc: number;
+}): PonderSearchContext | null {
+  if (params.depth !== undefined) {
+    return { mode: 'depth', depth: params.depth };
+  }
+
+  if (params.movetimeMs !== undefined) {
+    return { mode: 'movetime', movetimeMs: params.movetimeMs };
+  }
+
+  if (params.wtime > 0 || params.btime > 0) {
+    return {
+      mode: 'clock',
+      wtime: params.wtime,
+      btime: params.btime,
+      winc: params.winc,
+      binc: params.binc,
+    };
+  }
+
+  return null;
+}
+
+function buildPonderGoCommand(context: PonderSearchContext): string {
+  const command = context.mode === 'clock'
+    ? buildGoPonderCommand({
+        wtime: context.wtime,
+        btime: context.btime,
+        winc: context.winc,
+        binc: context.binc,
+      })
+    : context.mode === 'movetime'
+      ? buildGoPonderCommand({ movetimeMs: context.movetimeMs })
+      : buildGoPonderCommand({ depth: context.depth });
+
+  if (!command) {
+    throw new Error('Missing safe ponder search context.');
+  }
+
+  return command;
+}
+
+function buildValidatedPonderPlan(
+  startFen: string,
+  priorMoves: readonly string[],
+  bestMove: string,
+  ponderMove: string | null,
+  searchContext: PonderSearchContext,
+): { expectedPlayerMove: string; expectedMoves: string[]; searchContext: PonderSearchContext } | null {
+  if (!isCanonicalUciMove(bestMove) || !isCanonicalUciMove(ponderMove)) {
+    return null;
+  }
+
+  const chess = replayPosition(startFen, priorMoves);
+  if (!chess) {
+    return null;
+  }
+
+  if (!applyUciMove(chess, bestMove)) {
+    return null;
+  }
+
+  if (chess.isGameOver()) {
+    return null;
+  }
+
+  if (!applyUciMove(chess, ponderMove)) {
+    return null;
+  }
+
+  return {
+    expectedPlayerMove: ponderMove,
+    expectedMoves: [...priorMoves, bestMove, ponderMove],
+    searchContext,
+  };
+}
+
+function sameMoveList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((move, index) => move === b[index]);
 }
 
 export const enginePool = new EnginePoolManager();

@@ -21,6 +21,8 @@ export interface SendMoveOptions {
   depth?: number;
   /** Number of principal variations to calculate (1-3). */
   multiPv?: number;
+  /** Explicitly allow backend-managed pondering for fair engine games only. */
+  ponder?: boolean;
 }
 
 export function useEngine() {
@@ -203,6 +205,7 @@ export function useEngine() {
         depth:      options.depth,
         multiPv:    options.multiPv ?? 1,
         difficulty: options.difficulty,
+        ponder:     options.ponder === true,
       }));
     }
   }, [activateRequest, allocateRequestId, setStatus]);

@@ -20,6 +20,7 @@ interface ServerMessage {
   message?: string;
   requestId?: number;
   move?: string | null;
+  ponder?: string | null;
   source?: 'search' | 'book';
   book?: {
     candidateCount: number;
@@ -260,6 +261,10 @@ function opponentSearch(overrides: Record<string, unknown> = {}): Record<string,
     moves: [],
     ...overrides,
   };
+}
+
+function fairPonderSearch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return opponentSearch({ ponder: true, ...overrides });
 }
 
 function analysisSearch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -920,6 +925,276 @@ async function testClockBasedOpponentKeepsClockCommand(): Promise<void> {
   socket.close();
 }
 
+async function testPonderStartsFromPredictedReplyWithClockContext(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 100,
+    difficulty: 'blitz',
+    wtime: 120000,
+    btime: 118000,
+    winc: 1000,
+    binc: 1000,
+    multiPv: 1,
+  })));
+  await flushEvents();
+  engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+
+  assert.ok(engine.writes.includes('position startpos moves d2d4 g8f6'));
+  assert.ok(engine.writes.includes('go ponder wtime 120000 btime 118000 winc 1000 binc 1000'));
+  assert.equal(engine.writes.includes('position startpos moves d2d4'), false);
+  assert.equal(engine.writes.includes('go ponder'), false);
+
+  socket.close();
+}
+
+async function testPonderHitUsesPonderhitAndRequestOwnership(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 101,
+    difficulty: 'deep',
+    wtime: 60000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+  await flushEvents();
+  engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+
+  engine.writes.length = 0;
+  socket.sent.length = 0;
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 102,
+    difficulty: 'deep',
+    fen: DEFAULT_START_FEN,
+    moves: ['d2d4', 'g8f6'],
+    wtime: 59000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+  await flushEvents();
+
+  assert.deepEqual(engine.writes, ['ponderhit']);
+  const writesAtHit = [...engine.writes];
+
+  engine.emitInfo('info depth 9 score cp 44 nodes 10 time 20 pv g1f3');
+  engine.emitBestMove('bestmove g1f3 ponder b8c6');
+  await flushEvents();
+
+  const infos = messagesOfType(socket, 'info');
+  const bestMoves = messagesOfType(socket, 'bestmove');
+  assert.equal(infos.length, 1);
+  assert.equal(infos[0].requestId, 102);
+  assert.equal(bestMoves.length, 1);
+  assert.equal(bestMoves[0].requestId, 102);
+  assert.equal(bestMoves[0].move, 'g1f3');
+  assert.equal(writesAtHit.includes('stop'), false);
+  assert.equal(writesAtHit.some(line => line.startsWith('position ')), false);
+  assert.equal(writesAtHit.some(line => line.startsWith('go ')), false);
+
+  socket.close();
+}
+
+async function testPonderMissStopsSwallowsAndStartsFreshWithoutDuplication(): Promise<void> {
+  const { engine, socket } = await createManualSession();
+
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 103,
+    difficulty: 'deep',
+    wtime: 60000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+  await flushEvents();
+  engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+
+  engine.writes.length = 0;
+  socket.sent.length = 0;
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 104,
+    difficulty: 'deep',
+    fen: DEFAULT_START_FEN,
+    moves: ['d2d4', 'e7e6'],
+    wtime: 59000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+  await flushEvents();
+
+  assert.deepEqual(engine.writes, ['stop']);
+
+  engine.emitBestMove('bestmove c1f4 ponder g8f6');
+  await flushEvents();
+
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+  assert.ok(engine.writes.includes('position startpos moves d2d4 e7e6'));
+  assert.equal(engine.writes.includes('position startpos moves d2d4 e7e6 e7e6'), false);
+  assert.equal(engine.writes.filter(line => line.startsWith('go ')).length, 1);
+
+  engine.emitBestMove('bestmove c1f4 ponder g8f6');
+  await flushEvents();
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 104);
+
+  socket.close();
+}
+
+async function testPonderTimingProfiles(): Promise<void> {
+  const blitz = await createManualSession();
+  blitz.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 105, difficulty: 'blitz' })));
+  await flushEvents();
+  blitz.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  assert.ok(blitz.engine.writes.includes('go ponder movetime 1000'));
+  blitz.socket.close();
+
+  const deep = await createManualSession();
+  deep.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 106, difficulty: 'deep' })));
+  await flushEvents();
+  deep.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  assert.ok(deep.engine.writes.includes('go ponder depth 8'));
+  deep.socket.close();
+
+  const clocked = await createManualSession();
+  clocked.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 107,
+    difficulty: 'standard',
+    wtime: 90000,
+    btime: 88000,
+    winc: 2000,
+    binc: 2000,
+  })));
+  await flushEvents();
+  clocked.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  assert.ok(clocked.engine.writes.includes('go ponder wtime 90000 btime 88000 winc 2000 binc 2000'));
+  clocked.socket.close();
+}
+
+async function testInvalidIllegalAndUngatedPonderAreIgnored(): Promise<void> {
+  const invalid = await createManualSession();
+  invalid.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 108, difficulty: 'deep' })));
+  await flushEvents();
+  invalid.engine.emitBestMove('bestmove d2d4 ponder notauci');
+  await flushEvents();
+  assert.equal(messagesOfType(invalid.socket, 'bestmove')[0].ponder, undefined);
+  assert.equal(invalid.engine.writes.some(line => line.startsWith('go ponder')), false);
+  invalid.socket.close();
+
+  const illegal = await createManualSession();
+  illegal.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 109, difficulty: 'deep' })));
+  await flushEvents();
+  illegal.engine.emitBestMove('bestmove d2d4 ponder d2d4');
+  await flushEvents();
+  assert.equal(messagesOfType(illegal.socket, 'bestmove')[0].ponder, undefined);
+  assert.equal(illegal.engine.writes.some(line => line.startsWith('go ponder')), false);
+  illegal.socket.close();
+
+  const trainingLike = await createManualSession();
+  trainingLike.socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 110, difficulty: 'deep' })));
+  await flushEvents();
+  trainingLike.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  assert.equal(trainingLike.engine.writes.some(line => line.startsWith('go ponder')), false);
+  trainingLike.socket.close();
+
+  const analysis = await createManualSession();
+  analysis.socket.emitRawMessage(JSON.stringify(analysisSearch({ requestId: 111, purpose: 'training-hint', depth: 8, multiPv: 1 })));
+  await flushEvents();
+  analysis.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  assert.equal(analysis.engine.writes.some(line => line.startsWith('go ponder')), false);
+  analysis.socket.close();
+}
+
+async function testPonderCancellationControlOperations(): Promise<void> {
+  const reset = await createManualSession();
+  reset.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 112, difficulty: 'deep' })));
+  await flushEvents();
+  reset.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  reset.engine.writes.length = 0;
+  reset.socket.emitRawMessage(JSON.stringify({ type: 'newgame' }));
+  await flushEvents();
+  assert.deepEqual(reset.engine.writes, ['stop']);
+  reset.engine.emitBestMove('bestmove c1f4 ponder e7e6');
+  await flushEvents();
+  assert.ok(reset.engine.writes.includes('ucinewgame'));
+  assert.equal(messagesOfType(reset.socket, 'bestmove').length, 1);
+  reset.socket.close();
+
+  const option = await createManualSession();
+  option.socket.emitRawMessage(JSON.stringify(fairPonderSearch({ requestId: 113, difficulty: 'deep' })));
+  await flushEvents();
+  option.engine.emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  option.engine.writes.length = 0;
+  option.socket.emitRawMessage(JSON.stringify({ type: 'setoption', name: 'OwnBook', value: false }));
+  await flushEvents();
+  assert.deepEqual(option.engine.writes, ['stop']);
+  option.engine.emitBestMove('bestmove c1f4 ponder e7e6');
+  await flushEvents();
+  assert.ok(option.engine.writes.includes('setoption name OwnBook value false'));
+  option.socket.close();
+}
+
+async function testPonderSpecialMoveValidationAndMatching(): Promise<void> {
+  const promotionFen = '4k3/6P1/8/8/8/8/8/4K3 b - - 0 1';
+  const promotion = await createManualSession();
+  promotion.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 114,
+    difficulty: 'deep',
+    fen: promotionFen,
+  })));
+  await flushEvents();
+  promotion.engine.emitBestMove('bestmove e8d7 ponder g7g8n');
+  await flushEvents();
+  assert.ok(promotion.engine.writes.includes('position fen 4k3/6P1/8/8/8/8/8/4K3 b - - 0 1 moves e8d7 g7g8n'));
+  promotion.engine.writes.length = 0;
+  promotion.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 115,
+    difficulty: 'deep',
+    fen: promotionFen,
+    moves: ['e8d7', 'g7g8q'],
+  })));
+  await flushEvents();
+  assert.deepEqual(promotion.engine.writes, ['stop']);
+  promotion.socket.close();
+
+  const castlingFen = 'r3k2r/p7/8/8/8/8/8/R3K2R b KQkq - 0 1';
+  const castling = await createManualSession();
+  castling.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 116,
+    difficulty: 'deep',
+    fen: castlingFen,
+  })));
+  await flushEvents();
+  castling.engine.emitBestMove('bestmove a7a6 ponder e1g1');
+  await flushEvents();
+  assert.ok(castling.engine.writes.includes('position fen r3k2r/p7/8/8/8/8/8/R3K2R b KQkq - 0 1 moves a7a6 e1g1'));
+  castling.socket.close();
+
+  const enPassantFen = '4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1';
+  const enPassant = await createManualSession();
+  enPassant.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 117,
+    difficulty: 'deep',
+    fen: enPassantFen,
+  })));
+  await flushEvents();
+  enPassant.engine.emitBestMove('bestmove d7d5 ponder e5d6');
+  await flushEvents();
+  assert.ok(enPassant.engine.writes.includes('position fen 4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1 moves d7d5 e5d6'));
+  enPassant.socket.close();
+}
+
 async function testDifficultyChangeAffectsNextSearchOnly(): Promise<void> {
   const { engine, socket } = await createManualSession();
 
@@ -971,6 +1246,13 @@ async function run(): Promise<void> {
   await testDifficultyProfilesGenerateDistinctOpponentCommands();
   await testReviewAndAnalysisProfilesGenerateStableCommands();
   await testClockBasedOpponentKeepsClockCommand();
+  await testPonderStartsFromPredictedReplyWithClockContext();
+  await testPonderHitUsesPonderhitAndRequestOwnership();
+  await testPonderMissStopsSwallowsAndStartsFreshWithoutDuplication();
+  await testPonderTimingProfiles();
+  await testInvalidIllegalAndUngatedPonderAreIgnored();
+  await testPonderCancellationControlOperations();
+  await testPonderSpecialMoveValidationAndMatching();
   await testDifficultyChangeAffectsNextSearchOnly();
 
   console.log('engine-session protocol tests passed');

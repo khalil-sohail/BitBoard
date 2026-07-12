@@ -226,11 +226,13 @@ export default function Home() {
           binc:  timeControl.incMs,
           difficulty,
           multiPv: multiPv,
+          ponder: gameMode === 'fair',
         });
       } else {
         sendMove(fen, uciHistory, {
           difficulty,
           multiPv: multiPv,
+          ponder: gameMode === 'fair',
         });
       }
     }
