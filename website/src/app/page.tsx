@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { Chess } from "chess.js";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -21,6 +21,15 @@ import { useChessClock } from "@/hooks/useChessClock";
 import { useMoveReview } from "@/hooks/useMoveReview";
 import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
 import { NormalizedEvaluation, gradeMove, normalizeEngineInfo } from "@/lib/engine-evaluation";
+import {
+  canChangeTrainingSettings,
+  canPlayerMove,
+  initialTrainingState,
+  resultFromTerminal,
+  trainingReducer,
+} from "@/lib/training-machine";
+import type { GameResult } from "@/lib/training-machine";
+import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +70,7 @@ export default function Home() {
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const [promotionResetKey, setPromotionResetKey] = useState(0);
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
+  const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const appliedOwnBookRef = useRef<boolean | null>(null);
@@ -118,7 +128,8 @@ export default function Home() {
     status === 'session_expired' ||
     status === 'error' ||
     status === 'thinking' ||
-    status === 'analyzing';
+    status === 'analyzing' ||
+    (isTraining && !canChangeTrainingSettings(trainingState));
 
   useEffect(() => {
     if (
@@ -152,14 +163,55 @@ export default function Home() {
   // ── Effective game-over (board or resign) ────────────────────────────────
   const effectiveGameOver = (gameStatus === 'active' && isGameOver) || gameStatus === 'completed';
 
+  const trainingBoardInteractive =
+    isTraining &&
+    gameStatus === 'active' &&
+    canPlayerMove(trainingState) &&
+    !effectiveGameOver &&
+    status !== 'connecting' &&
+    status !== 'queued' &&
+    status !== 'disconnected' &&
+    status !== 'session_expired' &&
+    status !== 'error';
+
+  useEffect(() => {
+    if (!isTraining || gameStatus !== 'active') return;
+    if (trainingState.status === 'initializing' && status === 'idle') {
+      dispatchTraining({ type: 'READY', turn });
+    } else if (trainingState.status === 'resetting' && status === 'idle') {
+      dispatchTraining({ type: 'RESET_COMPLETED', playerColor: orientation, turn });
+    }
+  }, [gameStatus, isTraining, orientation, status, trainingState.status, turn]);
+
+  useEffect(() => {
+    if (!isTraining || gameStatus !== 'active') return;
+    if (status === 'disconnected' || status === 'session_expired') {
+      pendingMoveReviewRef.current = null;
+      dispatchTraining({ type: 'DISCONNECTED' });
+    } else if (status === 'error') {
+      pendingMoveReviewRef.current = null;
+      dispatchTraining({ type: 'ENGINE_FAILED', message: 'Engine connection failed' });
+    } else if (status === 'idle' && trainingState.status === 'connection-lost') {
+      dispatchTraining({ type: 'RECONNECTED', turn });
+    }
+  }, [gameStatus, isTraining, status, trainingState.status, turn]);
+
+  useEffect(() => {
+    if (!isTraining || !effectiveGameOver) return;
+    dispatchTraining({ type: 'TERMINAL', result: currentGameResult(game, turn, timeoutColor, resignedBy) });
+  }, [effectiveGameOver, game, isTraining, resignedBy, timeoutColor, turn]);
+
   // ── Engine auto-trigger ──────────────────────────────────────────────────
   useEffect(() => {
     if (!engineAutoEnabled) return;
     // ONLY fire when the game is actively running
     if (!isGameActive) return;
     if (isWaitingForStop) return;
-    if (gameMode === 'training' && pendingMoveReviewRef.current) return;
+    if (gameMode === 'training' && trainingState.status !== 'waiting-engine-move') return;
     if (turn === engineColor && status === 'idle' && !effectiveGameOver) {
+      if (gameMode === 'training') {
+        dispatchTraining({ type: 'ENGINE_SEARCH_STARTED' });
+      }
       if (hasTC) {
         sendMove(fen, uciHistory, {
           wtime: clock.whiteMs,
@@ -177,7 +229,7 @@ export default function Home() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop]);
+  }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop, trainingState.status]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -195,13 +247,14 @@ export default function Home() {
   useEffect(() => {
     if (gameStatus !== 'active' || gameMode !== 'training') return;
     if (effectiveGameOver) return;
+    if (trainingState.status !== 'waiting-player') return;
     if (turn !== engineColor) {
       const timer = setTimeout(() => {
         startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-root-review');
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
+  }, [fen, uciHistory, gameMode, turn, engineColor, startAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv, trainingState.status]);
 
   // ── Apply engine best move + clock management ────────────────────────────
   const normalizedInfo = useMemo(() => normalizeEngineInfo(engineInfo), [engineInfo]);
@@ -219,12 +272,13 @@ export default function Home() {
     const pendingReview = pendingMoveReviewRef.current;
     if (!pendingReview) return;
     if (gameMode !== 'training' || gameStatus !== 'active') return;
+    if (trainingState.status !== 'reviewing-player-move') return;
     if (status !== 'idle' || fen !== pendingReview.resultFen) return;
     if (pendingReview.resultRequestStarted) return;
 
     pendingReview.resultRequestStarted = true;
     startAnalysis(fen, uciHistory, maxDepth, multiPv, 'training-result-review');
-  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startAnalysis, status, uciHistory]);
+  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startAnalysis, status, trainingState.status, uciHistory]);
 
   useEffect(() => {
     const pendingReview = pendingMoveReviewRef.current;
@@ -250,6 +304,7 @@ export default function Home() {
       setMoveGrade(pendingReview.moveIndex, review.grade, review.loss);
     }
     recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
+    dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: resultEvaluation !== null });
     pendingMoveReviewRef.current = null;
   }, [normalizedInfo, recordPositionEval, setMoveGrade, status]);
 
@@ -260,8 +315,23 @@ export default function Home() {
     if (terminalCompletion.purpose !== 'training-result-review') return;
 
     recordPositionEval(null, pendingReview.moveIndex + 1);
+    dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: false });
     pendingMoveReviewRef.current = null;
   }, [recordPositionEval, terminalCompletion]);
+
+  useEffect(() => {
+    if (gameMode !== 'training') return;
+    if (terminalCompletion?.purpose !== 'opponent') return;
+    dispatchTraining({ type: 'TERMINAL', result: resultFromTerminal(terminalCompletion.terminal) });
+    queueMicrotask(() => setGameStatus('completed'));
+  }, [gameMode, terminalCompletion]);
+
+  useEffect(() => {
+    if (gameMode !== 'training') return;
+    if (trainingState.status === 'showing-feedback') {
+      dispatchTraining({ type: 'FEEDBACK_SHOWN' });
+    }
+  }, [gameMode, trainingState.status]);
 
   useEffect(() => {
     if (gameStatus === 'completed') return;
@@ -296,6 +366,9 @@ export default function Home() {
         const success   = makeMove({ from, to, promotion });
 
         if (success) {
+          if (gameMode === 'training') {
+            dispatchTraining({ type: 'ENGINE_MOVE_RECEIVED' });
+          }
           if (hasTC) {
             clock.stopClock();
             clock.applyIncrement(engineColor);
@@ -312,7 +385,7 @@ export default function Home() {
     return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
-      setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus]);
+      setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus, gameMode]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
@@ -327,6 +400,7 @@ export default function Home() {
 
   // ── User move handler ────────────────────────────────────────────────────
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
+    if (isTraining && !canPlayerMove(trainingState)) return false;
     if (!isAnalysis && turn === engineColor) return false;
     // Block moves if game not started or already over
     if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
@@ -341,10 +415,16 @@ export default function Home() {
     const rootEvaluation = bestPv?.evaluation ?? null;
     const legalMoveCount = game.moves({ verbose: true }).length;
     let resultFen: string | null = null;
+    let terminalAfterMove: GameResult | null = null;
     try {
       const preview = new Chess(fen);
       const applied = preview.move(move);
-      if (applied) resultFen = preview.fen();
+      if (applied) {
+        resultFen = preview.fen();
+        if (preview.isGameOver()) {
+          terminalAfterMove = currentGameResult(preview, preview.turn() as PlayerColor, null, null);
+        }
+      }
     } catch {
       resultFen = null;
     }
@@ -353,6 +433,7 @@ export default function Home() {
 
     if (result) {
       if (gameMode === 'training' && resultFen) {
+        const reviewId = nextReviewIdRef.current++;
         const uciMove = `${move.from}${move.to}${move.promotion ?? ''}`;
         const isLikelyBook =
           moveIndex < 10 &&
@@ -361,7 +442,7 @@ export default function Home() {
           rootEvaluation.value === 0 &&
           rootBestMove === uciMove;
         pendingMoveReviewRef.current = {
-          reviewId: nextReviewIdRef.current++,
+          reviewId,
           moveIndex,
           resultFen,
           playerColor,
@@ -370,6 +451,10 @@ export default function Home() {
           isBook: isLikelyBook,
           resultRequestStarted: false,
         };
+        dispatchTraining({ type: 'REVIEW_STARTED', reviewId });
+        if (terminalAfterMove) {
+          dispatchTraining({ type: 'TERMINAL', result: terminalAfterMove });
+        }
       }
       if (hasTC && !effectiveGameOver) {
         clock.stopClock();
@@ -380,6 +465,24 @@ export default function Home() {
       }
     }
     return result;
+  };
+
+  const handlePromotionPending = (promotion: PendingPromotion) => {
+    if (gameMode === 'training') {
+      dispatchTraining({ type: 'PROMOTION_REQUIRED', promotion });
+    }
+  };
+
+  const handlePromotionSelected = (piece: PromotionPiece) => {
+    if (gameMode === 'training') {
+      dispatchTraining({ type: 'PROMOTION_SELECTED', piece });
+    }
+  };
+
+  const handlePromotionCancelled = () => {
+    if (gameMode === 'training') {
+      dispatchTraining({ type: 'PROMOTION_CANCELLED' });
+    }
   };
 
   // ── Resign ───────────────────────────────────────────────────────────────
@@ -439,6 +542,12 @@ export default function Home() {
     setResignedBy(null);
     setTimeoutColor(null);
     setGameStatus('active');
+    if (gameMode === 'training') {
+      dispatchTraining({ type: 'RESET_REQUESTED', reason: 'new-game', playerColor: resolvedColor });
+      dispatchTraining({ type: 'ENTER', playerColor: resolvedColor });
+    } else {
+      dispatchTraining({ type: 'EXIT' });
+    }
 
     analysisFenRef.current = null;
     setPromotionResetKey(value => value + 1);
@@ -465,6 +574,12 @@ export default function Home() {
   // ── Mode change ──────────────────────────────────────────────────────────
   const handleModeChange = (newMode: GameMode) => {
     stopEngine();
+    if (gameMode === 'training') {
+      dispatchTraining({ type: 'RESET_REQUESTED', reason: 'mode-switch', playerColor: orientation });
+    }
+    if (newMode !== 'training') {
+      dispatchTraining({ type: 'EXIT' });
+    }
     setPromotionResetKey(value => value + 1);
     pendingMoveReviewRef.current = null;
     resetGrades();
@@ -534,6 +649,10 @@ export default function Home() {
                 fen={fen}
                 pvs={showEnginePanel ? normalizedInfo?.pvs : undefined}
                 onMove={handleUserMove}
+                onPromotionPending={handlePromotionPending}
+                onPromotionSelected={handlePromotionSelected}
+                onPromotionCancelled={handlePromotionCancelled}
+                disabled={isTraining ? !trainingBoardInteractive : false}
                 orientation={orientation === 'w' ? 'white' : 'black'}
                 checkSquare={checkSquare}
                 lastMove={lastMove}
@@ -685,4 +804,28 @@ export default function Home() {
       />
     </div>
   );
+}
+
+function currentGameResult(
+  game: Chess,
+  turn: PlayerColor,
+  timeoutColor: PlayerColor | null,
+  resignedBy: PlayerColor | null,
+): GameResult {
+  if (timeoutColor !== null) {
+    return { reason: 'timeout', winner: timeoutColor === 'w' ? 'black' : 'white' };
+  }
+  if (resignedBy !== null) {
+    return { reason: 'resignation', winner: resignedBy === 'w' ? 'black' : 'white' };
+  }
+  if (game.isCheckmate()) {
+    return { reason: 'checkmate', winner: turn === 'w' ? 'black' : 'white' };
+  }
+  if (game.isStalemate()) {
+    return { reason: 'stalemate' };
+  }
+  if (game.isDraw()) {
+    return { reason: 'draw' };
+  }
+  return { reason: 'unknown' };
 }

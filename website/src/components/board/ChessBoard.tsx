@@ -23,6 +23,10 @@ interface BoardProps {
   fen: string;
   pvs: PVLine[] | undefined;
   onMove: (move: { from: string; to: string; promotion?: string }) => boolean;
+  onPromotionPending?: (promotion: PendingPromotion) => void;
+  onPromotionSelected?: (piece: PromotionPiece) => void;
+  onPromotionCancelled?: () => void;
+  disabled?: boolean;
   orientation?: 'white' | 'black';
   checkSquare?: string | null;
   lastMove?: { from: string; to: string } | null;
@@ -40,7 +44,18 @@ const PROMOTION_SYMBOLS: Record<'w' | 'b', Record<PromotionPiece, string>> = {
   b: { q: '♛', r: '♜', b: '♝', n: '♞' },
 };
 
-export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', checkSquare, lastMove }: BoardProps) {
+export function ChessBoardComponent({
+  fen,
+  pvs,
+  onMove,
+  onPromotionPending,
+  onPromotionSelected,
+  onPromotionCancelled,
+  disabled = false,
+  orientation = 'white',
+  checkSquare,
+  lastMove,
+}: BoardProps) {
   const [moveFrom, setMoveFrom] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<PendingPromotion | null>(null);
   const [rightClickedSquares, setRightClickedSquares] = useState<Record<string, CSSProperties>>({});
@@ -74,6 +89,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
   }, [pvs]);
 
   function onSquareClick({ square }: SquareHandlerArgs) {
+    if (disabled || pendingPromotion) return;
     setRightClickedSquares({});
 
     // From square
@@ -84,6 +100,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
 
     const promotion = isPromotionCandidate(fen, moveFrom, square);
     if (promotion) {
+      onPromotionPending?.(promotion);
       setPendingPromotion(promotion);
       return;
     }
@@ -112,10 +129,12 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
   }
 
   function onDrop({ sourceSquare, targetSquare }: PieceDropHandlerArgs) {
+    if (disabled || pendingPromotion) return false;
     if (!targetSquare) return false;
 
     const promotion = isPromotionCandidate(fen, sourceSquare, targetSquare);
     if (promotion) {
+      onPromotionPending?.(promotion);
       setPendingPromotion(promotion);
       setMoveFrom(null);
       setRightClickedSquares({});
@@ -136,6 +155,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
   function choosePromotion(piece: PromotionPiece) {
     if (!pendingPromotion) return;
 
+    onPromotionSelected?.(piece);
     const isValidMove = onMove(buildPromotionMove(pendingPromotion, piece));
     if (isValidMove) {
       setMoveFrom(null);
@@ -145,6 +165,7 @@ export function ChessBoardComponent({ fen, pvs, onMove, orientation = 'white', c
   }
 
   function cancelPromotion() {
+    onPromotionCancelled?.();
     setPendingPromotion(null);
   }
 

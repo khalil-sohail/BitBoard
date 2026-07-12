@@ -177,6 +177,9 @@ Training Mode supports three opponent-strength profiles: Blitz (`go movetime
 1000`), Standard (`go movetime 3000`), and Deep (`go depth 8`). These profiles
 only affect opponent move selection. Training feedback uses separate review
 searches so move grading is not weakened by the selected opponent difficulty.
+If the engine connection is lost during Training, in-flight review/search work
+is invalidated; reconnect resumes from the current board turn instead of
+reusing an unknown old request.
 
 ## Docker Setup
 

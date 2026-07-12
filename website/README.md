@@ -119,6 +119,10 @@ Deep      -> go depth 8
 Training move feedback uses separate review searches, so lower difficulty does
 not weaken the grading analysis.
 
+If the engine connection drops during Training, in-flight review/search work is
+discarded. After reconnect, Training resumes from the current board turn rather
+than applying or waiting for the old request.
+
 ## Tests
 
 ```bash
