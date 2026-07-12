@@ -51,6 +51,7 @@ export interface MoveMessage {
   depth?: number;
   multiPv: number;
   difficulty: EngineDifficulty;
+  searchLimit?: SearchLimit;
 }
 
 export interface PositionMessage {
@@ -98,6 +99,24 @@ export type ClientMessage =
   | NewGameMessage
   | ReleaseSessionMessage
   | SetOptionMessage;
+
+export type SearchLimit =
+  | {
+      mode: 'clock';
+      wtime: number;
+      btime: number;
+      winc: number;
+      binc: number;
+      movestogo?: number;
+    }
+  | {
+      mode: 'movetime';
+      movetimeMs: number;
+    }
+  | {
+      mode: 'depth';
+      depth: number;
+    };
 
 function protocolError(code: ProtocolErrorCode, message: string): ProtocolError {
   return { code, message };
@@ -313,6 +332,16 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
     return positionResult;
   }
 
+  const hasClockField = record.wtime !== undefined ||
+    record.btime !== undefined ||
+    record.winc !== undefined ||
+    record.binc !== undefined ||
+    record.movestogo !== undefined;
+  const hasClockTimes = record.wtime !== undefined || record.btime !== undefined;
+  if (hasClockField && (!hasClockTimes || record.wtime === undefined || record.btime === undefined)) {
+    return err('INVALID_MESSAGE', 'Clock mode requires both wtime and btime.');
+  }
+
   const wtime = validateInteger(record.wtime ?? 0, 'wtime', 0, MAX_TIME_MS);
   if (wtime.ok === false) return wtime;
 
@@ -328,11 +357,39 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
   const depth = optionalInteger(record.depth, 'depth', 1, MAX_DEPTH);
   if (depth.ok === false) return depth;
 
+  const movetime = optionalInteger(record.movetime ?? record.movetimeMs, 'movetime', 1, MAX_TIME_MS);
+  if (movetime.ok === false) return movetime;
+
+  const movestogo = optionalInteger(record.movestogo, 'movestogo', 1, MAX_MOVES);
+  if (movestogo.ok === false) return movestogo;
+
+  const hasPositiveClock = wtime.value > 0 || btime.value > 0;
+  const explicitLimitCount =
+    (hasPositiveClock ? 1 : 0) +
+    (depth.value !== undefined ? 1 : 0) +
+    (movetime.value !== undefined ? 1 : 0);
+
+  if (explicitLimitCount > 1) {
+    return err('INVALID_MESSAGE', 'Search request must specify exactly one timing mode.');
+  }
+
+  if (movestogo.value !== undefined && !hasPositiveClock) {
+    return err('INVALID_MESSAGE', 'movestogo is only valid with clock mode.');
+  }
+
   const multiPv = validateInteger(record.multiPv ?? 1, 'multiPv', 1, MAX_MULTIPV);
   if (multiPv.ok === false) return multiPv;
 
   const difficulty = validateDifficulty(record.difficulty);
   if (difficulty.ok === false) return difficulty;
+
+  const searchLimit: SearchLimit | undefined = hasPositiveClock
+    ? { mode: 'clock', wtime: wtime.value, btime: btime.value, winc: winc.value, binc: binc.value, ...(movestogo.value !== undefined ? { movestogo: movestogo.value } : {}) }
+    : depth.value !== undefined
+      ? { mode: 'depth', depth: depth.value }
+      : movetime.value !== undefined
+        ? { mode: 'movetime', movetimeMs: movetime.value }
+        : undefined;
 
   return ok({
     type: 'move',
@@ -348,6 +405,7 @@ function validateMoveMessage(record: Record<string, unknown>): ParseResult<MoveM
     depth: depth.value,
     multiPv: multiPv.value,
     difficulty: difficulty.value,
+    searchLimit,
   });
 }
 
@@ -526,51 +584,18 @@ export function buildPositionCommand(fen: string, moves: readonly string[]): str
     : `position fen ${fen}${movesStr}`;
 }
 
-export function buildGoCommand(params: {
-  depth?: number;
-  movetimeMs?: number;
-  wtime: number;
-  btime: number;
-  winc: number;
-  binc: number;
-}): string {
-  if (params.depth !== undefined) {
-    return `go depth ${params.depth}`;
+export function buildGoCommand(limit: SearchLimit, options: { ponder?: boolean } = {}): string {
+  const prefix = options.ponder === true ? 'go ponder' : 'go';
+  if (limit.mode === 'depth') {
+    return `${prefix} depth ${limit.depth}`;
   }
 
-  if (params.movetimeMs !== undefined) {
-    return `go movetime ${params.movetimeMs}`;
+  if (limit.mode === 'movetime') {
+    return `${prefix} movetime ${limit.movetimeMs}`;
   }
 
-  const hasTC = params.wtime > 0 || params.btime > 0;
-  if (hasTC) {
-    return `go wtime ${params.wtime} btime ${params.btime} winc ${params.winc} binc ${params.binc}`;
-  }
-
-  return 'go movetime 3000';
-}
-
-export function buildGoPonderCommand(params: {
-  depth?: number;
-  movetimeMs?: number;
-  wtime?: number;
-  btime?: number;
-  winc?: number;
-  binc?: number;
-}): string | null {
-  if (params.depth !== undefined) {
-    return `go ponder depth ${params.depth}`;
-  }
-
-  if (params.movetimeMs !== undefined) {
-    return `go ponder movetime ${params.movetimeMs}`;
-  }
-
-  if (params.wtime !== undefined && params.btime !== undefined && params.winc !== undefined && params.binc !== undefined) {
-    return `go ponder wtime ${params.wtime} btime ${params.btime} winc ${params.winc} binc ${params.binc}`;
-  }
-
-  return null;
+  const movestogo = limit.movestogo !== undefined ? ` movestogo ${limit.movestogo}` : '';
+  return `${prefix} wtime ${limit.wtime} btime ${limit.btime} winc ${limit.winc} binc ${limit.binc}${movestogo}`;
 }
 
 export function buildSetOptionCommand(name: EngineOptionName, value: number | boolean | string): string {

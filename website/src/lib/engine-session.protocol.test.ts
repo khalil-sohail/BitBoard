@@ -247,6 +247,34 @@ async function createManualSession(): Promise<{ pool: EnginePoolManager; engine:
   return { pool, engine, socket };
 }
 
+async function createManualSessionFactory(options: Partial<ConstructorParameters<typeof EnginePoolManager>[0]> = {}): Promise<{
+  pool: EnginePoolManager;
+  engines: ManualEngineProcess[];
+  socket: MockSocket;
+}> {
+  const engines: ManualEngineProcess[] = [];
+  const pool = new EnginePoolManager({
+    maxConcurrent: 1,
+    enginePath: process.execPath,
+    idleTimeoutMs: 30_000,
+    sessionMaxMs: 30_000,
+    ...options,
+    spawnEngineProcess: () => {
+      const engine = new ManualEngineProcess();
+      engines.push(engine);
+      return engine.asChildProcess();
+    },
+  });
+  const socket = new MockSocket();
+
+  pool.handleConnection(socket.asWebSocket(), 'watchdog-session');
+  await waitForMessage(socket, 'ready');
+  engines[0].writes.length = 0;
+  socket.sent.length = 0;
+
+  return { pool, engines, socket };
+}
+
 function parsePayload(payload: unknown) {
   return parseClientMessage(Buffer.from(JSON.stringify(payload)));
 }
@@ -345,9 +373,16 @@ function testNumericValidation(): void {
     btime: 180000,
     winc: 2000,
     binc: 2000,
-    depth: 10,
     multiPv: 3,
   });
+  assertValid(opponentSearch({ depth: 10 }));
+  assertValid(opponentSearch({ movetime: 1000 }));
+  assertValid(opponentSearch({ wtime: 180000, btime: 180000, winc: 0, binc: 0 }));
+  assertInvalid(opponentSearch({ wtime: 180000, btime: 180000, depth: 10 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ wtime: 180000, btime: 180000, movetime: 1000 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ depth: 10, movetime: 1000 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ wtime: 180000 }), 'INVALID_MESSAGE');
+  assertInvalid(opponentSearch({ winc: 1000 }), 'INVALID_MESSAGE');
 
   assertInvalid(opponentSearch({ depth: -1 }), 'INVALID_NUMBER');
   assertInvalid(opponentSearch({ depth: 0 }), 'INVALID_NUMBER');
@@ -358,7 +393,7 @@ function testNumericValidation(): void {
   assert.equal(nanResult.ok, false);
   if (!nanResult.ok) assert.equal(nanResult.error.code, 'INVALID_NUMBER');
 
-  const infinityResult = validateClientMessage(opponentSearch({ wtime: Infinity }));
+  const infinityResult = validateClientMessage(opponentSearch({ wtime: Infinity, btime: 1000 }));
   assert.equal(infinityResult.ok, false);
   if (!infinityResult.ok) assert.equal(infinityResult.error.code, 'INVALID_NUMBER');
 }
@@ -398,15 +433,19 @@ function testUciBuilders(): void {
     'position fen 8/8/8/8/8/8/8/K6k w - - 0 1',
   );
   assert.equal(
-    buildGoCommand({ wtime: 180000, btime: 180000, winc: 2000, binc: 2000 }),
+    buildGoCommand({ mode: 'clock', wtime: 180000, btime: 180000, winc: 2000, binc: 2000 }),
     'go wtime 180000 btime 180000 winc 2000 binc 2000',
   );
   assert.equal(
-    buildGoCommand({ depth: 10, wtime: 0, btime: 0, winc: 0, binc: 0 }),
+    buildGoCommand({ mode: 'clock', wtime: 180000, btime: 180000, winc: 0, binc: 0, movestogo: 20 }, { ponder: true }),
+    'go ponder wtime 180000 btime 180000 winc 0 binc 0 movestogo 20',
+  );
+  assert.equal(
+    buildGoCommand({ mode: 'depth', depth: 10 }),
     'go depth 10',
   );
   assert.equal(
-    buildGoCommand({ movetimeMs: 1000, wtime: 0, btime: 0, winc: 0, binc: 0 }),
+    buildGoCommand({ mode: 'movetime', movetimeMs: 1000 }),
     'go movetime 1000',
   );
   assert.equal(buildSetOptionCommand('OwnBook', false), 'setoption name OwnBook value false');
@@ -1219,6 +1258,113 @@ async function testDifficultyChangeAffectsNextSearchOnly(): Promise<void> {
   socket.close();
 }
 
+async function testSearchWatchdogRecoversHungEngine(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({
+    searchWatchdogToleranceMs: 20,
+    stopAckTimeoutMs: 20,
+  });
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 200, movetime: 1, multiPv: 1 })));
+  await waitForMessage(socket, 'search-started');
+  const error = await waitForMessage(socket, 'error');
+  assert.equal(error.code, 'ENGINE_SEARCH_TIMEOUT');
+  assert.equal(error.requestId, 200);
+
+  const ready = await waitForMessage(socket, 'ready');
+  assert.equal(ready.type, 'ready');
+  assert.equal(engines.length, 2);
+  assert.ok(engines[0].signalCode !== null || engines[0].exitCode !== null);
+
+  socket.sent.length = 0;
+  engines[1].writes.length = 0;
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 201, movetime: 100, multiPv: 1 })));
+  await waitForMessage(socket, 'search-started');
+  engines[1].emitBestMove('bestmove e2e4');
+  await flushEvents();
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 201);
+
+  socket.close();
+}
+
+async function testSearchResultJustBeforeWatchdogClearsTimer(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({
+    searchWatchdogToleranceMs: 50,
+    stopAckTimeoutMs: 20,
+  });
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 202, movetime: 20, multiPv: 1 })));
+  await waitForMessage(socket, 'search-started');
+  engines[0].emitBestMove('bestmove e2e4');
+  await flushEvents();
+  await new Promise(resolve => setTimeout(resolve, 90));
+  assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 202);
+  assert.equal(messagesOfType(socket, 'error').length, 0);
+  assert.equal(engines.length, 1);
+
+  socket.close();
+}
+
+async function testStopAckWatchdogRecoversUnresponsiveEngine(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({
+    searchWatchdogToleranceMs: 5_000,
+    stopAckTimeoutMs: 20,
+  });
+
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 203, movetime: 5000, multiPv: 1 })));
+  await waitForMessage(socket, 'search-started');
+  socket.emitRawMessage(JSON.stringify({ type: 'stop', requestId: 203 }));
+  const error = await waitForMessage(socket, 'error');
+  assert.equal(error.code, 'ENGINE_STOP_TIMEOUT');
+  assert.equal(error.requestId, 203);
+  await waitForMessage(socket, 'ready');
+  assert.equal(engines.length, 2);
+
+  engines[0].emitBestMove('bestmove e2e4');
+  await flushEvents();
+  assert.equal(messagesOfType(socket, 'bestmove').length, 0);
+
+  socket.close();
+}
+
+async function testPonderMissStopWatchdogRecovers(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({
+    searchWatchdogToleranceMs: 5_000,
+    stopAckTimeoutMs: 20,
+  });
+
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 204,
+    difficulty: 'deep',
+    wtime: 60000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+  await waitForMessage(socket, 'search-started');
+  engines[0].emitBestMove('bestmove d2d4 ponder g8f6');
+  await flushEvents();
+  socket.sent.length = 0;
+
+  socket.emitRawMessage(JSON.stringify(fairPonderSearch({
+    requestId: 205,
+    difficulty: 'deep',
+    fen: DEFAULT_START_FEN,
+    moves: ['d2d4', 'e7e6'],
+    wtime: 59000,
+    btime: 60000,
+    winc: 0,
+    binc: 0,
+  })));
+
+  const error = await waitForMessage(socket, 'error');
+  assert.equal(error.code, 'ENGINE_STOP_TIMEOUT');
+  assert.equal(error.requestId, 204);
+  await waitForMessage(socket, 'ready');
+  assert.equal(engines.length, 2);
+
+  socket.close();
+}
+
 async function run(): Promise<void> {
   testJsonBoundary();
   testFenValidation();
@@ -1254,6 +1400,10 @@ async function run(): Promise<void> {
   await testPonderCancellationControlOperations();
   await testPonderSpecialMoveValidationAndMatching();
   await testDifficultyChangeAffectsNextSearchOnly();
+  await testSearchWatchdogRecoversHungEngine();
+  await testSearchResultJustBeforeWatchdogClearsTimer();
+  await testStopAckWatchdogRecoversUnresponsiveEngine();
+  await testPonderMissStopWatchdogRecovers();
 
   console.log('engine-session protocol tests passed');
 }

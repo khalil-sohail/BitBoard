@@ -84,41 +84,58 @@ export function useChessClock({
     setIsRunning(false);
   }, [clearTick]);
 
+  const runTick = useCallback(() => {
+    const now = Date.now();
+    const elapsed = now - lastTickRef.current;
+    lastTickRef.current = now;
+
+    if (elapsed <= 0) {
+      return;
+    }
+
+    if (activeSideRef.current === 'w') {
+      const previousMs = whiteMsRef.current;
+      const newMs = Math.max(0, previousMs - elapsed);
+      whiteMsRef.current = newMs;
+      setWhiteMs(newMs);
+      if (newMs <= 0 && previousMs > 0) {
+        clearTick();
+        activeSideRef.current = null;
+        setActiveSide(null);
+        setIsRunning(false);
+        onTimeout?.('w');
+      }
+    } else if (activeSideRef.current === 'b') {
+      const previousMs = blackMsRef.current;
+      const newMs = Math.max(0, previousMs - elapsed);
+      blackMsRef.current = newMs;
+      setBlackMs(newMs);
+      if (newMs <= 0 && previousMs > 0) {
+        clearTick();
+        activeSideRef.current = null;
+        setActiveSide(null);
+        setIsRunning(false);
+        onTimeout?.('b');
+      }
+    }
+  }, [clearTick, onTimeout]);
+
   const startTick = useCallback(() => {
     clearTick();
     lastTickRef.current = Date.now();
-    intervalRef.current = setInterval(() => {
-      const now = Date.now();
-      const elapsed = now - lastTickRef.current;
-      lastTickRef.current = now;
+    intervalRef.current = setInterval(runTick, TICK_MS);
+  }, [clearTick, runTick]);
 
-      if (activeSideRef.current === 'w') {
-        const previousMs = whiteMsRef.current;
-        const newMs = Math.max(0, previousMs - elapsed);
-        whiteMsRef.current = newMs;
-        setWhiteMs(newMs);
-        if (newMs <= 0 && previousMs > 0) {
-          clearTick();
-          activeSideRef.current = null;
-          setActiveSide(null);
-          setIsRunning(false);
-          onTimeout?.('w');
-        }
-      } else if (activeSideRef.current === 'b') {
-        const previousMs = blackMsRef.current;
-        const newMs = Math.max(0, previousMs - elapsed);
-        blackMsRef.current = newMs;
-        setBlackMs(newMs);
-        if (newMs <= 0 && previousMs > 0) {
-          clearTick();
-          activeSideRef.current = null;
-          setActiveSide(null);
-          setIsRunning(false);
-          onTimeout?.('b');
-        }
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && intervalRef.current !== null) {
+        runTick();
       }
-    }, TICK_MS);
-  }, [clearTick, onTimeout]);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [runTick]);
 
   const startClock = useCallback((side: PlayerColor) => {
     if (gameRef.current && side !== gameRef.current.turn()) {

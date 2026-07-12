@@ -23,6 +23,11 @@ import { useTrainingHint } from "@/hooks/useTrainingHint";
 import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
 import { NormalizedEvaluation, gradeMove, normalizeEngineInfo } from "@/lib/engine-evaluation";
 import {
+  clockTransitionAfterLegalMove,
+  shouldAcceptEngineBestMove,
+  shouldStartEngineClockForSearch,
+} from "@/lib/time-management-policy";
+import {
   canChangeTrainingSettings,
   canPlayerMove,
   canRequestHint,
@@ -58,7 +63,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, terminalCompletion, queuePosition, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
+  const { status, engineInfo, bestMove, terminalCompletion, queuePosition, searchStartedRequestId, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -80,6 +85,7 @@ export default function Home() {
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const appliedOwnBookRef = useRef<boolean | null>(null);
+  const lastClockSearchStartRef = useRef<number | null>(null);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -148,6 +154,19 @@ export default function Home() {
       appliedOwnBookRef.current = null;
     }
   }, [status]);
+
+  useEffect(() => {
+    if (!hasTC) return;
+    if (
+      status === 'queued' ||
+      status === 'disconnected' ||
+      status === 'session_expired' ||
+      status === 'error'
+    ) {
+      clock.stopClock();
+      lastClockSearchStartRef.current = null;
+    }
+  }, [clock, hasTC, status]);
 
   useEffect(() => {
     if (status !== 'idle') return;
@@ -238,6 +257,24 @@ export default function Home() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turn, status, fen, uciHistory, difficulty, effectiveGameOver, engineColor, engineAutoEnabled, isGameActive, maxDepth, multiPv, gameMode, isWaitingForStop, trainingState.status]);
+
+  // Queue/reconnect policy: the engine clock is paused until the backend
+  // confirms that the matching UCI search actually started.
+  useEffect(() => {
+    if (!shouldStartEngineClockForSearch({
+      hasTimeControl: hasTC,
+      gameStatus,
+      isTerminal: effectiveGameOver,
+      timeoutColor,
+      turn,
+      engineColor,
+      searchStartedRequestId,
+      lastStartedRequestId: lastClockSearchStartRef.current,
+    })) return;
+
+    lastClockSearchStartRef.current = searchStartedRequestId;
+    clock.startClock(engineColor);
+  }, [clock, effectiveGameOver, engineColor, gameStatus, hasTC, searchStartedRequestId, timeoutColor, turn]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -379,6 +416,7 @@ export default function Home() {
 
     if (!engineAutoEnabled) return;
     if (!isGameActive) return;
+    if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor })) return;
     if (bestMove && turn === engineColor) {
       if (ignoreStaleBestMoveRef.current) {
         ignoreStaleBestMoveRef.current = false;
@@ -399,23 +437,46 @@ export default function Home() {
 
       queueMicrotask(() => {
         if (!isMounted) return;
+        if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor })) return;
 
         const from      = bestMove.substring(0, 2);
         const to        = bestMove.substring(2, 4);
         const promotion = bestMove.length === 5 ? bestMove[4] : undefined;
+        let terminalAfterMove = false;
+        try {
+          const preview = new Chess(fen);
+          const applied = preview.move({ from, to, promotion });
+          terminalAfterMove = Boolean(applied && preview.isGameOver());
+        } catch {
+          terminalAfterMove = false;
+        }
         const success   = makeMove({ from, to, promotion });
 
         if (success) {
           if (gameMode === 'training') {
             dispatchTraining({ type: 'ENGINE_MOVE_RECEIVED' });
           }
-          if (hasTC) {
+          const transition = clockTransitionAfterLegalMove({
+            hasTimeControl: hasTC,
+            mover: engineColor,
+            nextSide: orientation,
+            isTerminal: terminalAfterMove,
+          });
+
+          if (transition.stopClock) {
             clock.stopClock();
-            clock.applyIncrement(engineColor);
+            if (transition.incrementSide) {
+              clock.applyIncrement(transition.incrementSide);
+            }
           }
 
-          if (hasTC && !effectiveGameOver) {
-            clock.startClock(orientation);
+          if (transition.completeGame) {
+            setGameStatus('completed');
+            return;
+          }
+
+          if (transition.nextActiveSide) {
+            clock.startClock(transition.nextActiveSide);
           }
 
         }
@@ -425,7 +486,7 @@ export default function Home() {
     return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
-      setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus, gameMode]);
+      setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus, gameMode, timeoutColor, fen]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
@@ -499,12 +560,22 @@ export default function Home() {
           dispatchTraining({ type: 'TERMINAL', result: terminalAfterMove });
         }
       }
-      if (hasTC && !effectiveGameOver) {
+      const transition = clockTransitionAfterLegalMove({
+        hasTimeControl: hasTC,
+        mover: orientation,
+        nextSide: engineColor,
+        isTerminal: terminalAfterMove !== null,
+      });
+
+      if (transition.stopClock) {
         clock.stopClock();
-        clock.applyIncrement(orientation);
-        
-        // Only start the engine clock if the move successfully applied
-        clock.startClock(engineColor);
+        if (transition.incrementSide) {
+          clock.applyIncrement(transition.incrementSide);
+        }
+      }
+
+      if (transition.completeGame) {
+        setGameStatus('completed');
       }
     }
     return result;

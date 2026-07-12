@@ -8,13 +8,18 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <charconv>
 #include <cctype>
+#include <cstdint>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace AppUci {
@@ -26,6 +31,190 @@ std::atomic<bool> g_hasTwoScores{false};
 
 static long long g_ponderHitTimeLimitMs = 0;
 static std::atomic<bool> g_isPondering{false};
+
+enum class SearchLimitMode {
+    Clock,
+    MoveTime,
+    Depth,
+    Infinite,
+};
+
+struct ParsedGoCommand {
+    SearchLimitMode mode = SearchLimitMode::Infinite;
+    std::optional<std::int64_t> whiteTimeMs;
+    std::optional<std::int64_t> blackTimeMs;
+    std::optional<std::int64_t> whiteIncrementMs;
+    std::optional<std::int64_t> blackIncrementMs;
+    std::optional<int> movesToGo;
+    std::optional<std::int64_t> moveTimeMs;
+    std::optional<int> depth;
+    bool ponder = false;
+};
+
+struct ParseGoResult {
+    std::optional<ParsedGoCommand> command;
+    std::string error;
+};
+
+template <typename Integer>
+static std::optional<Integer> parseStrictInteger(std::string_view value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    Integer parsed{};
+    const char* first = value.data();
+    const char* last = value.data() + value.size();
+    const auto result = std::from_chars(first, last, parsed, 10);
+    if (result.ec != std::errc{} || result.ptr != last) {
+        return std::nullopt;
+    }
+
+    return parsed;
+}
+
+static bool nextToken(std::istringstream& iss, std::string& value) {
+    return static_cast<bool>(iss >> value);
+}
+
+static ParseGoResult parseGoCommand(const std::string& input) {
+    ParsedGoCommand command;
+    std::istringstream iss(input);
+    std::string token;
+    iss >> token; // "go"
+
+    bool sawClock = false;
+    bool sawMoveTime = false;
+    bool sawDepth = false;
+    bool sawInfinite = false;
+    std::unordered_set<std::string> seenTokens;
+
+    auto reject = [](std::string reason) -> ParseGoResult {
+        return { std::nullopt, std::move(reason) };
+    };
+
+    auto markToken = [&](const std::string& key) -> bool {
+        return seenTokens.insert(key).second;
+    };
+
+    auto readIntegerToken = [&]() -> std::optional<std::int64_t> {
+        std::string value;
+        if (!nextToken(iss, value)) {
+            return std::nullopt;
+        }
+        return parseStrictInteger<std::int64_t>(value);
+    };
+
+    while (iss >> token) {
+        if (token == "ponder") {
+            if (!markToken(token)) {
+                return reject("duplicate ponder token");
+            }
+            command.ponder = true;
+            continue;
+        }
+
+        if (token == "infinite") {
+            if (!markToken(token)) {
+                return reject("duplicate infinite token");
+            }
+            sawInfinite = true;
+            continue;
+        }
+
+        if (token == "wtime" || token == "btime" || token == "winc" || token == "binc" ||
+            token == "movetime" || token == "depth" || token == "movestogo") {
+            if (!markToken(token)) {
+                return reject("duplicate " + token + " token");
+            }
+            const auto parsed = readIntegerToken();
+            if (!parsed.has_value()) {
+                return reject("invalid integer for " + token);
+            }
+
+            if (*parsed < 0) {
+                return reject("negative value for " + token);
+            }
+
+            if (token == "wtime") {
+                command.whiteTimeMs = *parsed;
+                sawClock = true;
+            } else if (token == "btime") {
+                command.blackTimeMs = *parsed;
+                sawClock = true;
+            } else if (token == "winc") {
+                command.whiteIncrementMs = *parsed;
+            } else if (token == "binc") {
+                command.blackIncrementMs = *parsed;
+            } else if (token == "movetime") {
+                if (*parsed <= 0) {
+                    return reject("movetime must be positive");
+                }
+                command.moveTimeMs = *parsed;
+                sawMoveTime = true;
+            } else if (token == "depth") {
+                if (*parsed <= 0 || *parsed > std::numeric_limits<int>::max()) {
+                    return reject("depth must be positive");
+                }
+                command.depth = static_cast<int>(*parsed);
+                sawDepth = true;
+            } else if (token == "movestogo") {
+                if (*parsed <= 0 || *parsed > std::numeric_limits<int>::max()) {
+                    return reject("movestogo must be positive");
+                }
+                command.movesToGo = static_cast<int>(*parsed);
+            }
+            continue;
+        }
+    }
+
+    if (command.whiteIncrementMs.has_value() != command.blackIncrementMs.has_value()) {
+        return reject("winc and binc must be provided together");
+    }
+
+    if ((command.whiteTimeMs.has_value() || command.blackTimeMs.has_value()) &&
+        !(command.whiteTimeMs.has_value() && command.blackTimeMs.has_value())) {
+        return reject("wtime and btime must be provided together");
+    }
+
+    if ((command.whiteIncrementMs.has_value() || command.blackIncrementMs.has_value()) &&
+        !(command.whiteTimeMs.has_value() && command.blackTimeMs.has_value())) {
+        return reject("increments require clock mode");
+    }
+
+    sawClock = command.whiteTimeMs.has_value() && command.blackTimeMs.has_value();
+
+    int limitCount = 0;
+    if (sawClock) ++limitCount;
+    if (sawMoveTime) ++limitCount;
+    if (sawDepth) ++limitCount;
+    if (sawInfinite) ++limitCount;
+
+    if (limitCount == 0) {
+        return reject("missing search limit");
+    }
+    if (limitCount > 1) {
+        return reject("conflicting search limits");
+    }
+    if (command.movesToGo.has_value() && !sawClock) {
+        return reject("movestogo requires clock mode");
+    }
+
+    command.whiteIncrementMs = command.whiteIncrementMs.value_or(0);
+    command.blackIncrementMs = command.blackIncrementMs.value_or(0);
+
+    if (sawClock) {
+        command.mode = SearchLimitMode::Clock;
+    } else if (sawMoveTime) {
+        command.mode = SearchLimitMode::MoveTime;
+    } else if (sawDepth) {
+        command.mode = SearchLimitMode::Depth;
+    } else {
+        command.mode = SearchLimitMode::Infinite;
+    }
+
+    return { command, "" };
+}
 
 // ── Background search thread management ──────────────────────────────────────
 // The search runs in g_searchThread so that the main UCI loop can keep reading
@@ -279,29 +468,15 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
         // ── go ───────────────────────────────────────────────────────────────
         else if (input.rfind("go", 0) == 0) {
-            ensureOpeningBookLoaded();
-
-            int wtime     = 0;
-            int btime     = 0;
-            int winc      = 0;
-            int binc      = 0;
-            int movetime  = 0;
-            int parsedDepth = 0;
-            int movestogo = 0;
-            bool localPonder = false;
-
-            std::istringstream iss(input);
-            std::string token;
-            while (iss >> token) {
-                if      (token == "wtime")    { iss >> wtime; }
-                else if (token == "btime")    { iss >> btime; }
-                else if (token == "winc")     { iss >> winc; }
-                else if (token == "binc")     { iss >> binc; }
-                else if (token == "movetime") { iss >> movetime; }
-                else if (token == "depth")    { iss >> parsedDepth; }
-                else if (token == "movestogo"){ iss >> movestogo; }
-                else if (token == "ponder")   { localPonder = true; }
+            const ParseGoResult parsedGo = parseGoCommand(input);
+            if (!parsedGo.command.has_value()) {
+                std::cout << "info string error invalid go command: " << parsedGo.error << std::endl;
+                continue;
             }
+            const ParsedGoCommand goCommand = *parsedGo.command;
+            const bool localPonder = goCommand.ponder;
+
+            ensureOpeningBookLoaded();
 
             // Stop any previous search (ponder or timed) before launching a
             // new one.  timeAborted will be cleared inside the new thread
@@ -338,25 +513,29 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
             // ── Compute time budget ────────────────────────────────────────
             const bool whiteToMove = board.sideToMove() == Color::White;
-            const long long timeLeft  = whiteToMove ? wtime : btime;
-            const long long increment = whiteToMove ? winc  : binc;
-            const bool hasTime = (input.find("wtime") != std::string::npos ||
-                                  input.find("btime") != std::string::npos);
+            const long long timeLeft  = whiteToMove
+                ? goCommand.whiteTimeMs.value_or(0)
+                : goCommand.blackTimeMs.value_or(0);
+            const long long increment = whiteToMove
+                ? goCommand.whiteIncrementMs.value_or(0)
+                : goCommand.blackIncrementMs.value_or(0);
 
             long long timeLimitMs = 2000;
-            if (!hasTime && movetime <= 0) {
+            if (goCommand.mode == SearchLimitMode::Infinite) {
                 timeLimitMs = 999'999'999LL;
-            } else if (movetime > 0) {
-                timeLimitMs = std::max(10LL, static_cast<long long>(movetime));
-            } else if (timeLeft > 0) {
+            } else if (goCommand.mode == SearchLimitMode::MoveTime) {
+                timeLimitMs = std::max(10LL, static_cast<long long>(*goCommand.moveTimeMs));
+            } else if (goCommand.mode == SearchLimitMode::Depth) {
+                timeLimitMs = 999'999'999LL;
+            } else if (goCommand.mode == SearchLimitMode::Clock && timeLeft > 0) {
                 // Subtract a flat network RTT buffer upfront so that the
                 // bestmove response reaches the server before the flag falls.
                 const long long safeTimeLeft = std::max(1LL, timeLeft - 30LL);
                 
                 int move_number = base_fullmove + (board.sanHistory().size() / 2);
                 int expected_moves_remaining = std::max(20, 40 - move_number);
-                if (movestogo > 0) {
-                    expected_moves_remaining = movestogo;
+                if (goCommand.movesToGo.has_value()) {
+                    expected_moves_remaining = *goCommand.movesToGo;
                 }
 
                 long long allocated_time = (safeTimeLeft / expected_moves_remaining) + increment;
@@ -380,15 +559,19 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 }
             }
 
+            const long long realTimeLimitMs = timeLimitMs;
             if (localPonder) {
-                AppUci::g_ponderHitTimeLimitMs = timeLimitMs; // Save the real time limit
-                timeLimitMs = 999'999'999LL;                  // Override for infinite ponder
+                // Ponder elapsed time is intentionally counted from the
+                // original go ponder command.  ponderhit restores this real
+                // budget instead of granting a fresh post-hit budget.
+                AppUci::g_ponderHitTimeLimitMs = realTimeLimitMs;
+                timeLimitMs = 999'999'999LL;                      // Override for infinite ponder
                 g_isPondering.store(true, std::memory_order_relaxed);
             } else {
                 g_isPondering.store(false, std::memory_order_relaxed);
             }
 
-            const int maxDepthToSearch = (parsedDepth > 0) ? parsedDepth : 64;
+            const int maxDepthToSearch = goCommand.depth.value_or(64);
 
             // ── Launch search in background thread ─────────────────────────
             // Board is captured by VALUE so the main thread can safely receive
@@ -397,9 +580,15 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
             g_searchThread = std::thread([boardCopy = std::move(boardCopy),
                                           maxDepthToSearch,
-                                          timeLimitMs]() mutable {
+                                          timeLimitMs,
+                                          realTimeLimitMs,
+                                          localPonder]() mutable {
                 int searchScore = 0;
-                auto [bestMove, ponderMove] = findBestMove(boardCopy, maxDepthToSearch, timeLimitMs, &searchScore);
+                const long long effectiveTimeLimitMs =
+                    (localPonder && !g_isPondering.load(std::memory_order_relaxed))
+                        ? realTimeLimitMs
+                        : timeLimitMs;
+                auto [bestMove, ponderMove] = findBestMove(boardCopy, maxDepthToSearch, effectiveTimeLimitMs, &searchScore);
 
                 if (!g_isPondering.load(std::memory_order_relaxed)) {
                     if (g_hasOneScore.load(std::memory_order_relaxed)) {

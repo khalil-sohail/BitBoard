@@ -3,6 +3,7 @@ import { RawData, WebSocket } from 'ws';
 import { Chess } from 'chess.js';
 import path from 'path';
 import fs from 'fs';
+import { performance } from 'perf_hooks';
 import { parseUciInfo, parseBestMove } from './uci-parser';
 import { classifyTerminalPosition } from './engine-terminal';
 import {
@@ -10,13 +11,12 @@ import {
   ClientMessage,
   DEFAULT_START_FEN,
   buildGoCommand,
-  buildGoPonderCommand,
   buildPositionCommand,
   buildSetOptionCommand,
   parseClientMessage,
   writeUciCommand,
 } from './engine-protocol';
-import type { EngineOptionName } from './engine-protocol';
+import type { EngineOptionName, SearchLimit } from './engine-protocol';
 import { getDifficultyProfile } from './engine-difficulty';
 import type { OpeningSelectionConfiguration, SearchPurpose } from './engine-difficulty';
 
@@ -29,10 +29,7 @@ interface SessionPv {
 
 // ── Ponder state machine ──────────────────────────────────────────────────────
 
-type PonderSearchContext =
-  | { mode: 'clock'; wtime: number; btime: number; winc: number; binc: number }
-  | { mode: 'movetime'; movetimeMs: number }
-  | { mode: 'depth'; depth: number };
+type PonderSearchContext = SearchLimit;
 
 type PonderStopReason =
   | 'miss'
@@ -67,6 +64,8 @@ type PonderState =
 
 type ActiveSearchState = 'running' | 'stopping';
 
+type WatchdogPhase = 'search' | 'stop-ack';
+
 interface ActiveSearch {
   requestId: number;
   generation: number;
@@ -75,6 +74,15 @@ interface ActiveSearch {
   searchMode: 'tc' | 'analysis';
   ponderAllowed: boolean;
   ponderContext: PonderSearchContext | null;
+  searchLimit: SearchLimit;
+}
+
+interface ActiveSearchWatchdog {
+  requestId?: number;
+  timer: NodeJS.Timeout;
+  startedAt: number;
+  timeoutMs: number;
+  phase: WatchdogPhase;
 }
 
 interface PendingBookResult {
@@ -91,12 +99,7 @@ type PendingOperation =
       purpose: SearchPurpose;
       startFen: string;
       moves: string[];
-      wtime: number;
-      btime: number;
-      winc: number;
-      binc: number;
-      depth?: number;
-      movetimeMs?: number;
+      searchLimit: SearchLimit;
       multiPv: number;
       openingSelection?: OpeningSelectionConfiguration;
       ponderAllowed: boolean;
@@ -126,6 +129,8 @@ interface EngineSession {
   pendingBookResult: PendingBookResult | null;
   searchGeneration: number;
   lineBuffer: string;
+  watchdog: ActiveSearchWatchdog | null;
+  suppressExitError: boolean;
 }
 
 interface QueuedClient {
@@ -140,6 +145,9 @@ interface EnginePoolOptions {
   enginePath?: string;
   idleTimeoutMs?: number;
   sessionMaxMs?: number;
+  searchWatchdogToleranceMs?: number;
+  stopAckTimeoutMs?: number;
+  depthSearchWatchdogMs?: number;
   spawnEngineProcess?: (enginePath: string, args: string[], options?: SpawnOptions) => ChildProcess;
 }
 
@@ -147,6 +155,9 @@ const DEFAULT_MAX_CONCURRENT = 10;
 const IDLE_TIMEOUT_MS = 2 * 60_000;
 const SESSION_MAX_MS = 2 * 60 * 60_000;
 const HASH_SIZE_MB = 32;
+const SEARCH_WATCHDOG_TOLERANCE_MS = 5_000;
+const STOP_ACK_TIMEOUT_MS = 2_000;
+const DEPTH_SEARCH_WATCHDOG_MS = 60_000;
 
 export class EnginePoolManager {
   private active = new Map<string, EngineSession>();
@@ -155,6 +166,9 @@ export class EnginePoolManager {
   private enginePathOverride?: string;
   private idleTimeoutMs: number;
   private sessionMaxMs: number;
+  private searchWatchdogToleranceMs: number;
+  private stopAckTimeoutMs: number;
+  private depthSearchWatchdogMs: number;
   private spawnEngineProcess: (enginePath: string, args: string[], options?: SpawnOptions) => ChildProcess;
 
   public constructor(options: EnginePoolOptions = {}) {
@@ -162,6 +176,9 @@ export class EnginePoolManager {
     this.enginePathOverride = options.enginePath;
     this.idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.sessionMaxMs = options.sessionMaxMs ?? SESSION_MAX_MS;
+    this.searchWatchdogToleranceMs = options.searchWatchdogToleranceMs ?? SEARCH_WATCHDOG_TOLERANCE_MS;
+    this.stopAckTimeoutMs = options.stopAckTimeoutMs ?? STOP_ACK_TIMEOUT_MS;
+    this.depthSearchWatchdogMs = options.depthSearchWatchdogMs ?? DEPTH_SEARCH_WATCHDOG_MS;
     this.spawnEngineProcess = options.spawnEngineProcess ?? ((enginePath, args, spawnOptions) => (
       spawn(enginePath, args, spawnOptions ?? {})
     ));
@@ -278,7 +295,7 @@ export class EnginePoolManager {
     return process.env.ENGINE_PATH || path.join(process.cwd(), '../engine/chess-engine');
   }
 
-  private spawnEngine(ws: WebSocket, id: string) {
+  private spawnEngine(ws: WebSocket, id: string, attachSocketHandlers = true) {
     if (!this.isSocketOpen(ws)) {
       return;
     }
@@ -315,6 +332,8 @@ export class EnginePoolManager {
       pendingBookResult: null,
       searchGeneration: 0,
       lineBuffer: '',
+      watchdog: null,
+      suppressExitError: false,
     };
 
     this.active.set(id, session);
@@ -337,6 +356,7 @@ export class EnginePoolManager {
           if (process.env.DEBUG === 'true') {
             console.log(`[Engine ${id}] ${trimmed}`);
           }
+          if (this.active.get(id) !== session) continue;
           this.updateActivity(id);
 
           if (!isReady) {
@@ -366,6 +386,7 @@ export class EnginePoolManager {
       });
 
       engineProcess.on('error', (err) => {
+        if (this.active.get(id) !== session) return;
         console.error(`Engine error (Session ${id}):`, err);
         this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Engine process error' }));
         this.terminateSession(id, 'error');
@@ -373,7 +394,7 @@ export class EnginePoolManager {
 
       engineProcess.on('exit', (code) => {
         console.log(`Engine exited (Session ${id}) with code ${code}`);
-        if (this.active.has(id)) {
+        if (this.active.get(id) === session && !session.suppressExitError) {
           this.sendIfOpen(ws, JSON.stringify({ type: 'error', message: 'Engine crashed unexpectedly' }));
           this.terminateSession(id, 'error');
         }
@@ -383,13 +404,15 @@ export class EnginePoolManager {
       this.terminateSession(id, 'error');
     }
 
-    ws.on('message', (message) => {
-      this.handleRawClientMessage(id, ws, message);
-    });
+    if (attachSocketHandlers) {
+      ws.on('message', (message) => {
+        this.handleRawClientMessage(id, ws, message);
+      });
 
-    ws.on('close', () => {
-      this.terminateSession(id, 'disconnected');
-    });
+      ws.on('close', () => {
+        this.terminateSession(id, 'disconnected');
+      });
+    }
   }
 
   // ── Engine stdout handlers ──────────────────────────────────────────────────
@@ -455,6 +478,7 @@ export class EnginePoolManager {
 
     if (ps.status === 'stopping') {
       const pendingFreshSearch = ps.pendingFreshSearch;
+      this.clearWatchdog(session, 'stop-ack');
       session.ponderState = { status: 'idle' };
       if (pendingFreshSearch) {
         console.log(`[Ponder ${id}] Stop-ack received — issuing fresh search`);
@@ -474,6 +498,7 @@ export class EnginePoolManager {
     }
 
     if (activeSearch.state === 'stopping') {
+      this.clearWatchdog(session, 'stop-ack');
       session.activeSearch = null;
       session.ponderState = { status: 'idle' };
       this.runPendingOperation(session);
@@ -482,6 +507,7 @@ export class EnginePoolManager {
 
     // ── Normal thinking result ────────────────────────────────────────────
     if (activeSearch.state === 'running') {
+      this.clearWatchdog(session, 'search');
       const { bestMove, ponderMove } = parsed;
       const terminal = bestMove === '0000'
         ? classifyTerminalPosition(session.startFen, session.uciMoves)
@@ -517,7 +543,7 @@ export class EnginePoolManager {
       if (ponderPlan && session.process.stdin) {
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderPlan.expectedPlayerMove}`);
         writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderPlan.expectedMoves));
-        writeUciCommand(session.process.stdin, buildPonderGoCommand(ponderPlan.searchContext));
+        writeUciCommand(session.process.stdin, buildGoCommand(ponderPlan.searchContext, { ponder: true }));
         session.ponderState = {
           status: 'pondering',
           parentRequestId: activeSearch.requestId,
@@ -563,19 +589,13 @@ export class EnginePoolManager {
     // ── move (time-controlled game) ────────────────────────────────────────
     if (data.type === 'move') {
       const moves = data.moves;
-      const wtime = data.wtime;
-      const btime = data.btime;
-      const winc  = data.winc;
-      const binc  = data.binc;
-      const hasClock = wtime > 0 || btime > 0;
-      const opponentProfile = hasClock
-        ? { depth: data.depth, multiPv: data.multiPv }
+      const opponentProfile = data.searchLimit
+        ? { multiPv: data.multiPv }
         : getDifficultyProfile(data.difficulty, 'opponent');
-      const depth = opponentProfile.depth;
-      const movetimeMs = hasClock ? undefined : opponentProfile.movetimeMs;
+      const searchLimit = data.searchLimit ?? searchLimitFromProfile(opponentProfile);
       const targetMultiPv = opponentProfile.multiPv;
       const openingSelection = opponentProfile.openingSelection;
-      const ponderContext = getPonderSearchContext({ depth, movetimeMs, wtime, btime, winc, binc });
+      const ponderContext = getPonderSearchContext(searchLimit);
       const ponderAllowed = data.ponder === true && ponderContext !== null;
 
       // Update position shadow
@@ -601,12 +621,7 @@ export class EnginePoolManager {
             purpose: 'opponent',
             startFen,
             moves,
-            wtime,
-            btime,
-            winc,
-            binc,
-            depth,
-            movetimeMs,
+            searchLimit,
             multiPv: targetMultiPv,
             openingSelection,
             ponderAllowed,
@@ -626,6 +641,7 @@ export class EnginePoolManager {
             searchMode: 'tc',
             ponderAllowed,
             ponderContext,
+            searchLimit: ps.searchContext,
           };
           session.currentDepth = 0;
           session.pvs = [];
@@ -638,6 +654,8 @@ export class EnginePoolManager {
             searchContext: ps.searchContext,
           };
           writeUciCommand(session.process.stdin, 'ponderhit');
+          this.sendIfOpen(session.ws, JSON.stringify({ type: 'search-started', requestId: data.requestId }));
+          this.armSearchWatchdog(session, data.requestId, ps.searchContext, ps.expectedMoves);
         } else {
           console.log(`[Ponder ${id}] MISS — expected ${ps.expectedPlayerMove}, got ${userMove}`);
           this.stopPonderAndGo(session, 'miss', {
@@ -647,12 +665,7 @@ export class EnginePoolManager {
             purpose: 'opponent',
             startFen,
             moves: [...moves],
-            wtime,
-            btime,
-            winc,
-            binc,
-            depth,
-            movetimeMs,
+            searchLimit,
             multiPv: targetMultiPv,
             openingSelection,
             ponderAllowed,
@@ -670,12 +683,7 @@ export class EnginePoolManager {
         purpose: 'opponent',
         startFen,
         moves,
-        wtime,
-        btime,
-        winc,
-        binc,
-        depth,
-        movetimeMs,
+        searchLimit,
         multiPv: targetMultiPv,
         openingSelection,
         ponderAllowed,
@@ -707,12 +715,7 @@ export class EnginePoolManager {
         purpose: data.purpose,
         startFen,
         moves,
-        wtime: 0,
-        btime: 0,
-        winc: 0,
-        binc: 0,
-        depth: profile.depth,
-        movetimeMs: profile.movetimeMs,
+        searchLimit: searchLimitFromProfile(profile),
         multiPv: profile.multiPv,
         ponderAllowed: false,
         ponderContext: null,
@@ -789,6 +792,7 @@ export class EnginePoolManager {
         session.activeSearch = { ...session.activeSearch, state: 'stopping' };
         session.pendingBookResult = null;
         writeUciCommand(session.process.stdin, 'stop');
+        this.armStopAckWatchdog(session, session.activeSearch.requestId);
       }
       return;
     }
@@ -796,6 +800,7 @@ export class EnginePoolManager {
     if (ps.status === 'pondering') {
       session.ponderState = { status: 'stopping', reason: 'reset' };
       writeUciCommand(session.process.stdin, 'stop');
+      this.armStopAckWatchdog(session, ps.parentRequestId);
     }
   }
 
@@ -854,12 +859,7 @@ export class EnginePoolManager {
       operation.searchMode,
       operation.startFen,
       operation.moves,
-      operation.wtime,
-      operation.btime,
-      operation.winc,
-      operation.binc,
-      operation.depth,
-      operation.movetimeMs,
+      operation.searchLimit,
       operation.ponderAllowed,
       operation.ponderContext,
     );
@@ -898,6 +898,7 @@ export class EnginePoolManager {
     if (ps.status === 'pondering') {
       session.ponderState = { status: 'stopping', reason, pendingFreshSearch };
       writeUciCommand(session.process.stdin, 'stop');
+      this.armStopAckWatchdog(session, ps.parentRequestId);
     }
   }
 
@@ -908,19 +909,14 @@ export class EnginePoolManager {
     searchMode: 'tc' | 'analysis',
     startFen: string,
     moves: string[],
-    wtime: number,
-    btime: number,
-    winc: number,
-    binc: number,
-    depth?: number,
-    movetimeMs?: number,
+    searchLimit: SearchLimit,
     ponderAllowed: boolean = false,
     ponderContext: PonderSearchContext | null = null,
   ) {
     if (!session.process.stdin) return;
 
     writeUciCommand(session.process.stdin, buildPositionCommand(startFen, moves));
-    writeUciCommand(session.process.stdin, buildGoCommand({ depth, movetimeMs, wtime, btime, winc, binc }));
+    writeUciCommand(session.process.stdin, buildGoCommand(searchLimit));
     session.searchGeneration += 1;
     session.activeSearch = {
       requestId,
@@ -930,6 +926,7 @@ export class EnginePoolManager {
       searchMode,
       ponderAllowed,
       ponderContext,
+      searchLimit,
     };
     session.currentDepth = 0;
     session.pvs = [];
@@ -937,6 +934,123 @@ export class EnginePoolManager {
     session.ponderState = { status: 'idle' };
     session.startFen = startFen;
     session.uciMoves = moves;
+    this.sendIfOpen(session.ws, JSON.stringify({ type: 'search-started', requestId }));
+    this.armSearchWatchdog(session, requestId, searchLimit, moves);
+  }
+
+  private armSearchWatchdog(session: EngineSession, requestId: number, limit: SearchLimit, moves: readonly string[]) {
+    const timeoutMs = this.deriveSearchWatchdogMs(session.startFen, moves, limit);
+    this.armWatchdog(session, {
+      requestId,
+      timeoutMs,
+      phase: 'search',
+    });
+  }
+
+  private armStopAckWatchdog(session: EngineSession, requestId?: number) {
+    this.armWatchdog(session, {
+      requestId,
+      timeoutMs: this.stopAckTimeoutMs,
+      phase: 'stop-ack',
+    });
+  }
+
+  private armWatchdog(
+    session: EngineSession,
+    params: { requestId?: number; timeoutMs: number; phase: WatchdogPhase },
+  ) {
+    this.clearWatchdog(session);
+    const startedAt = performance.now();
+    const timer = setTimeout(() => {
+      this.handleWatchdogTimeout(session.id, params.phase, params.requestId, startedAt);
+    }, params.timeoutMs);
+    session.watchdog = {
+      requestId: params.requestId,
+      timer,
+      startedAt,
+      timeoutMs: params.timeoutMs,
+      phase: params.phase,
+    };
+  }
+
+  private clearWatchdog(session: EngineSession, phase?: WatchdogPhase) {
+    if (!session.watchdog) return;
+    if (phase !== undefined && session.watchdog.phase !== phase) return;
+    clearTimeout(session.watchdog.timer);
+    session.watchdog = null;
+  }
+
+  private deriveSearchWatchdogMs(startFen: string, moves: readonly string[], limit: SearchLimit): number {
+    if (limit.mode === 'movetime') {
+      return limit.movetimeMs + this.searchWatchdogToleranceMs;
+    }
+
+    if (limit.mode === 'depth') {
+      return this.depthSearchWatchdogMs;
+    }
+
+    const position = replayPosition(startFen, moves);
+    const sideToMove = position?.turn() ?? 'w';
+    const remaining = sideToMove === 'w' ? limit.wtime : limit.btime;
+    return Math.max(remaining + this.searchWatchdogToleranceMs, this.searchWatchdogToleranceMs);
+  }
+
+  private handleWatchdogTimeout(
+    id: string,
+    phase: WatchdogPhase,
+    requestId: number | undefined,
+    startedAt: number,
+  ) {
+    const session = this.active.get(id);
+    if (!session?.watchdog) return;
+    if (session.watchdog.phase !== phase || session.watchdog.requestId !== requestId || session.watchdog.startedAt !== startedAt) {
+      return;
+    }
+
+    const code = phase === 'search' ? 'ENGINE_SEARCH_TIMEOUT' : 'ENGINE_STOP_TIMEOUT';
+    this.sendIfOpen(session.ws, JSON.stringify({
+      type: 'error',
+      code,
+      ...(requestId !== undefined ? { requestId } : {}),
+      message: phase === 'search'
+        ? 'Engine search timed out.'
+        : 'Engine did not acknowledge stop.',
+    }));
+
+    this.recoverEngineSession(session);
+  }
+
+  private recoverEngineSession(session: EngineSession) {
+    const { id, ws } = session;
+    this.clearWatchdog(session);
+    clearTimeout(session.idleTimer);
+    clearTimeout(session.sessionTimer);
+    session.suppressExitError = true;
+    session.activeSearch = null;
+    session.pendingOperation = null;
+    session.pendingBookResult = null;
+    session.ponderState = { status: 'idle' };
+    this.active.delete(id);
+
+    if (session.process.stdin) {
+      try {
+        writeUciCommand(session.process.stdin, 'quit');
+      } catch {
+        // Process may already be wedged or closed; kill below is authoritative.
+      }
+    }
+    session.process.kill('SIGTERM');
+    setTimeout(() => {
+      if (session.process.exitCode === null && session.process.signalCode === null) {
+        session.process.kill('SIGKILL');
+      }
+    }, 1000);
+
+    if (this.isSocketOpen(ws)) {
+      this.spawnEngine(ws, id, false);
+    } else {
+      this.dequeueNext();
+    }
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────
@@ -980,6 +1094,7 @@ export class EnginePoolManager {
 
     clearTimeout(session.idleTimer);
     clearTimeout(session.sessionTimer);
+    this.clearWatchdog(session);
 
     this.active.delete(id);
 
@@ -1091,52 +1206,18 @@ function replayPosition(startFen: string, moves: readonly string[]): Chess | nul
   return chess;
 }
 
-function getPonderSearchContext(params: {
-  depth?: number;
-  movetimeMs?: number;
-  wtime: number;
-  btime: number;
-  winc: number;
-  binc: number;
-}): PonderSearchContext | null {
-  if (params.depth !== undefined) {
-    return { mode: 'depth', depth: params.depth };
+function searchLimitFromProfile(profile: { depth?: number; movetimeMs?: number }): SearchLimit {
+  if (profile.depth !== undefined) {
+    return { mode: 'depth', depth: profile.depth };
   }
-
-  if (params.movetimeMs !== undefined) {
-    return { mode: 'movetime', movetimeMs: params.movetimeMs };
+  if (profile.movetimeMs !== undefined) {
+    return { mode: 'movetime', movetimeMs: profile.movetimeMs };
   }
-
-  if (params.wtime > 0 || params.btime > 0) {
-    return {
-      mode: 'clock',
-      wtime: params.wtime,
-      btime: params.btime,
-      winc: params.winc,
-      binc: params.binc,
-    };
-  }
-
-  return null;
+  return { mode: 'movetime', movetimeMs: 3000 };
 }
 
-function buildPonderGoCommand(context: PonderSearchContext): string {
-  const command = context.mode === 'clock'
-    ? buildGoPonderCommand({
-        wtime: context.wtime,
-        btime: context.btime,
-        winc: context.winc,
-        binc: context.binc,
-      })
-    : context.mode === 'movetime'
-      ? buildGoPonderCommand({ movetimeMs: context.movetimeMs })
-      : buildGoPonderCommand({ depth: context.depth });
-
-  if (!command) {
-    throw new Error('Missing safe ponder search context.');
-  }
-
-  return command;
+function getPonderSearchContext(limit: SearchLimit): PonderSearchContext | null {
+  return limit;
 }
 
 function buildValidatedPonderPlan(

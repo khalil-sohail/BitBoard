@@ -35,6 +35,7 @@ export function useEngine() {
   const activeRequestIdRef = useRef<EngineRequestId | null>(null);
   const activeRootFenRef = useRef<string | null>(null);
   const activePurposeRef = useRef<SearchPurpose | null>(null);
+  const [searchStartedRequestId, setSearchStartedRequestId] = useState<EngineRequestId | null>(null);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -62,6 +63,7 @@ export function useEngine() {
     activePurposeRef.current = null;
     setBestMove(null);
     setTerminalCompletion(null);
+    setSearchStartedRequestId(null);
   }, []);
 
   const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose) => {
@@ -71,6 +73,7 @@ export function useEngine() {
     setBestMove(null);
     setEngineInfo(null);
     setTerminalCompletion(null);
+    setSearchStartedRequestId(null);
   }, []);
 
   const connect = useCallback(() => {
@@ -99,6 +102,11 @@ export function useEngine() {
           case 'queued':
             setStatus('queued');
             setQueuePosition(data.position);
+            break;
+          case 'search-started':
+            if (shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              setSearchStartedRequestId(data.requestId);
+            }
             break;
           case 'info':
             if (!stateRef.current.isWaitingForNewGameReady &&
@@ -286,6 +294,7 @@ export function useEngine() {
     bestMove,
     terminalCompletion,
     queuePosition,
+    searchStartedRequestId,
     sendMove,
     newGame,
     reconnect,
