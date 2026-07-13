@@ -69,8 +69,3 @@ website/out/
 TUNING_AUDIT.md
 TUNING_PARAMETERS.md
 /docs/TUNING_*.md
-/tuning/
-/tools/tuning/
-build_default_profile.py
-builtin-default-v1.json
-profile.schema.json
