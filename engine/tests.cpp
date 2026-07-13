@@ -2,6 +2,7 @@
 #include "eval/eval_masks.hpp"
 #include "eval/eval_tables.hpp"
 #include "eval/eval_terms.hpp"
+#include "eval/evaluation_trace.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_constants.hpp"
@@ -1771,6 +1772,54 @@ void test_phase5a_static_evaluation_baselines() {
     }
 }
 
+void test_phase14_evaluation_feature_trace_reconstruction() {
+    constexpr const char* fixtures[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r1bqk2r/pp1nb1pp/2p1p3/3p1p2/2PPnBP1/2N1PN1P/PP3P2/R2QKB1R w KQkq - 1 9",
+        "r3k2r/p1p2ppp/2ppbn2/2b5/4P2q/2NB1Q1P/PPP2PP1/R1B2RK1 b kq - 2 10",
+        "4k3/8/2p5/2P1P3/3P4/8/8/4K3 w - - 0 1",
+        "6k1/5ppp/8/8/8/5Q2/8/6K1 b - - 0 1",
+        "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+        "4k3/1P6/8/8/8/8/8/4K3 w - - 0 1",
+        "8/8/8/4k3/8/8/4K3/Q7 w - - 0 1",
+        "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+        "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+        "4k3/8/8/8/8/8/3N4/4K3 b - - 0 1",
+        "4k3/8/8/8/2B5/3N4/4R3/3QK3 w - - 0 1",
+        "4k3/8/8/8/8/8/2ppp3/2BNK2R w - - 0 1",
+        "2bqk3/8/8/8/8/8/8/2BQK3 b - - 0 1",
+        "4k3/8/8/8/8/8/4R3/4K3 w - - 0 1",
+        "4k3/8/8/8/8/8/4N3/4K3 b - - 0 1",
+    };
+    for (const char* fen : fixtures) {
+        Board board;
+        require(board.loadFEN(fen), "Failed to load Phase 14 trace fixture");
+        const auto trace = board.traceEvaluation();
+        require(trace.features.size() == 44, "Phase 14 trace must map all 44 evaluation entries");
+        require(trace.finalScore == board.evaluate(), "Phase 14 trace differs from incremental evaluation");
+        require(trace.finalScore == board.computeStaticEvaluation(), "Phase 14 trace differs from full static evaluation");
+        require(trace.sideToMoveScore == board.evaluateSideToMove(), "Phase 14 side-to-move perspective mismatch");
+        if (!trace.insufficientMaterialDraw) {
+            int mg = 0;
+            int eg = 0;
+            for (const auto& term : trace.terms) { mg += term.middlegame; eg += term.endgame; }
+            require(mg == trace.middlegameScore, "Phase 14 MG subtotal did not reconstruct");
+            require(eg == trace.endgameScore, "Phase 14 EG subtotal did not reconstruct");
+            require((mg * trace.clampedPhase + eg * (24 - trace.clampedPhase)) / 24 == trace.taperedScore,
+                    "Phase 14 taper did not reconstruct");
+        }
+    }
+
+    Board white;
+    Board black;
+    require(white.loadFEN("4k3/8/8/8/3N4/8/P7/4K3 w - - 0 1"), "White perspective fixture failed");
+    require(black.loadFEN("4k3/8/8/8/3N4/8/P7/4K3 b - - 0 1"), "Black perspective fixture failed");
+    require(white.traceEvaluation().finalScore == black.traceEvaluation().finalScore,
+            "Canonical White score must not depend on side to move");
+    require(black.traceEvaluation().sideToMoveScore == -black.traceEvaluation().finalScore,
+            "Black-to-move score must negate canonical White score");
+}
+
 } // namespace
 
 int main() {
@@ -1835,6 +1884,7 @@ int main() {
         {"Phase 5B grouped evaluation characterization", test_phase5b_grouped_evaluation_characterization},
         {"Phase 5B static evaluation baselines", test_phase5b_static_evaluation_baselines},
         {"Phase 5C PST static evaluation baselines", test_phase5c_piece_square_static_baselines},
+        {"Phase 14 evaluation feature trace reconstruction", test_phase14_evaluation_feature_trace_reconstruction},
     };
 
     int passed = 0;

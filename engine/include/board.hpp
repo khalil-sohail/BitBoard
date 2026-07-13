@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+namespace Eval { struct EvaluationFeatureTrace; }
+
 enum class Color : int {
     White = 0,
     Black = 1
@@ -100,6 +102,7 @@ public:
     [[nodiscard]] int evaluate() const;
     [[nodiscard]] int evaluateSideToMove() const;
     [[nodiscard]] int computeStaticEvaluation() const;
+    [[nodiscard]] Eval::EvaluationFeatureTrace traceEvaluation() const;
 #if !defined(NDEBUG) || defined(EVAL_TUNING_DIAGNOSTICS)
     void printEvalBreakdown() const;
 #endif

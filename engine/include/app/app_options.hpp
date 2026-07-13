@@ -9,7 +9,8 @@ namespace AppOptions {
 
 enum class ExecutionMode {
     Cli,
-    Gui
+    Gui,
+    EvalFeatures
 };
 
 struct Options {

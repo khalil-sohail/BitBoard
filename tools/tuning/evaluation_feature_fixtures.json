@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {"name": "bishop-pair", "groups": ["bishop pair", "PST"], "fen": "4k3/8/8/8/8/8/2BB4/4K3 w - - 0 1"},
+    {"name": "rook-open-file", "groups": ["rook activity"], "fen": "4k3/8/8/8/8/8/P7/4K2R w - - 0 1"},
+    {"name": "rook-semi-open-file", "groups": ["rook activity"], "fen": "4k3/7p/8/8/8/8/P7/4K2R w - - 0 1"},
+    {"name": "doubled-isolated-pawns", "groups": ["pawn structure"], "fen": "4k3/8/8/8/P7/P7/8/4K3 w - - 0 1"},
+    {"name": "pawn-islands", "groups": ["pawn islands"], "fen": "4k3/8/8/8/8/8/P1P5/4K3 w - - 0 1"},
+    {"name": "connected-pawns", "groups": ["connected passed pawns"], "fen": "4k3/8/8/8/2PP4/8/8/4K3 w - - 0 1"},
+    {"name": "candidate-pawn", "groups": ["candidate passed pawns"], "fen": "4k3/8/3p4/2P5/1P6/8/8/4K3 w - - 0 1"},
+    {"name": "backward-pawn", "groups": ["backward pawns"], "fen": "4k3/8/3p4/8/2P5/8/8/4K3 w - - 0 1"},
+    {"name": "passed-pawn-rank-2", "groups": ["passed pawns by rank"], "fen": "4k3/8/8/8/8/8/P7/4K3 w - - 0 1"},
+    {"name": "passed-pawn-rank-6", "groups": ["passed pawns by rank"], "fen": "4k3/8/P7/8/8/8/8/4K3 w - - 0 1"},
+    {"name": "mobility", "groups": ["piece mobility buckets"], "fen": "4k3/8/8/8/3Q4/2BR4/3N4/4K3 w - - 0 1"},
+    {"name": "king-shield", "groups": ["king shield"], "fen": "4k3/8/8/8/8/5PPP/8/6K1 w - - 0 1"},
+    {"name": "king-pressure", "groups": ["king attack pressure"], "fen": "6k1/8/8/8/8/3Q1BN1/8/6K1 w - - 0 1"},
+    {"name": "uncastled-development", "groups": ["uncastled king", "development penalties"], "fen": "rnbq1bnr/pppppppp/8/4k3/8/8/PPPPPPPP/RNBQKBNR b KQ - 0 1"},
+    {"name": "bad-bishop-heavy", "groups": ["development penalties"], "fen": "4k3/8/8/8/8/2P5/1B6/4K3 w - - 0 1"},
+    {"name": "bad-bishop-light", "groups": ["development penalties"], "fen": "4k3/8/8/8/8/8/3P4/2B1K3 w - - 0 1"},
+    {"name": "early-queen", "groups": ["development penalties"], "fen": "4k3/8/8/7Q/8/8/8/1NB1KBN1 w - - 0 1"},
+    {"name": "trapped-rook", "groups": ["development penalties"], "fen": "4k3/8/8/8/8/8/8/RK6 w - - 0 1"},
+    {"name": "minor-near-equal-scale", "groups": ["low-material scaling"], "fen": "4k1n1/8/8/8/8/8/3N4/2B1K3 w - - 0 1"},
+    {"name": "opposite-bishops-min-pawns", "groups": ["low-material scaling"], "fen": "2b1k3/8/8/8/8/8/P7/2B1K3 w - - 0 1"},
+    {"name": "opposite-bishops-low-pawns", "groups": ["low-material scaling"], "fen": "2b1k3/pp6/8/8/8/8/PP6/2B1K3 w - - 0 1"},
+    {"name": "mop-up", "groups": ["mop-up terms"], "fen": "8/8/8/4k3/8/8/4K3/Q7 w - - 0 1"},
+    {"name": "all-pst-types", "groups": ["all six PST piece types"], "fen": "4k3/8/8/8/2BNQR2/8/P7/4K3 w - - 0 1"},
+    {"name": "mg-heavy", "groups": ["MG-heavy phase"], "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
+    {"name": "eg-heavy", "groups": ["EG-heavy phase"], "fen": "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"}
+  ]
+}
