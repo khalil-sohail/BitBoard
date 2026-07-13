@@ -65,6 +65,7 @@ ClockBudget calculateClockBudget(
     );
 
     if (result.safeTimeLeftMs < TIME_TUNING.stopPolicy.criticalLowTimeThresholdMs) {
+        result.criticalLowTime = true;
         result.timeLimitMs = std::max(
             1LL,
             result.safeTimeLeftMs -

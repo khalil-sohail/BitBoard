@@ -12,6 +12,7 @@ struct ClockBudget {
     long long maximumCapMs = 0;
     long long timeLimitMs = 0;
     bool instabilityApplied = false;
+    bool criticalLowTime = false;
 };
 
 struct StopDeadlines {

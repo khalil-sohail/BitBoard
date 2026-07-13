@@ -1263,6 +1263,9 @@ void requireClockBudget(
     require(actual.maximumCapMs == maximumCapMs, scenario + ": maximum cap changed");
     require(actual.timeLimitMs == timeLimitMs, scenario + ": time limit changed");
     require(actual.instabilityApplied == instabilityApplied, scenario + ": instability decision changed");
+    require(actual.criticalLowTime ==
+                (safeTimeLeftMs < Tuning::Generated::VALUES.time.stopPolicy.criticalLowTimeThresholdMs),
+            scenario + ": critical-low-time decision changed");
     const auto deadlines = TimeManagement::calculateStopDeadlines(actual.timeLimitMs);
     require(deadlines.stableSoftMs == (timeLimitMs * 50) / 100,
             scenario + ": stable soft deadline changed");
@@ -1386,6 +1389,28 @@ void test_phase8_time_policy_boundaries() {
             "Polling mask check cadence changed");
     require((8193ULL & time.polling.nodeMask) != 0ULL,
             "Polling mask boundary after check changed");
+}
+
+void test_phase18_time_policy_small_clock_safety() {
+    for (long long clock = 0; clock <= 100; ++clock) {
+        const auto budget = TimeManagement::calculateClockBudget(
+            clock, 0, 30, std::nullopt, false, 0, 0
+        );
+        const auto deadlines = TimeManagement::calculateStopDeadlines(budget.timeLimitMs);
+        require(budget.safeTimeLeftMs >= 1, "Safe time must remain positive");
+        require(budget.timeLimitMs >= 1, "Allocated time must remain positive");
+        require(deadlines.stableSoftMs >= 0 && deadlines.hardMs >= 0,
+                "Deadlines must not be negative");
+        require(deadlines.stableSoftMs <= deadlines.hardMs,
+                "Effective stable soft deadline must not exceed hard deadline");
+        if (clock == 39 || clock == 40 || clock == 41 || clock == 60) {
+            require(budget.criticalLowTime, "Requested low-clock fixture must use critical mode");
+        }
+    }
+    const auto before = TimeManagement::calculateClockBudget(69, 0, 30, std::nullopt, false, 0, 0);
+    const auto at = TimeManagement::calculateClockBudget(70, 0, 30, std::nullopt, false, 0, 0);
+    require(before.criticalLowTime && !at.criticalLowTime,
+            "Reserve-adjusted critical transition must remain at raw 69/70ms");
 }
 
 void test_phase7_generated_search_defaults_match_production_baseline() {
@@ -1923,6 +1948,7 @@ int main() {
         {"Phase 8 generated time defaults match production baseline", test_phase8_generated_time_defaults_match_production_baseline},
         {"Phase 8 synthetic clock allocation baselines", test_phase8_synthetic_clock_allocation_baselines},
         {"Phase 8 time-policy boundaries", test_phase8_time_policy_boundaries},
+        {"Phase 18 time-policy small-clock safety", test_phase18_time_policy_small_clock_safety},
         {"Phase 7 generated search defaults match production baseline", test_phase7_generated_search_defaults_match_production_baseline},
         {"Phase 7 search formula characterization", test_phase7_search_formula_characterization},
         {"Phase 7 null-move exclusions remain structural", test_phase7_null_move_exclusions_remain_structural},

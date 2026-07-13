@@ -324,8 +324,8 @@ class UciEngine:
         while True:
             line=self.read();lines.append(line)
             if predicate(line):return lines
-    def search(self,board:chess.Board,depth:int)->dict[str,Any]:
-        malformed_before=self.malformed_info_lines;self.send("ucinewgame");self.send("position fen "+board.fen(en_passant="legal"));start=time.monotonic();self.send(f"go depth {depth}");lines=self._until(lambda line:line.startswith("bestmove "));elapsed=time.monotonic()-start
+    def _search_command(self,board:chess.Board,command:str)->dict[str,Any]:
+        malformed_before=self.malformed_info_lines;self.send("ucinewgame");self.send("position fen "+board.fen(en_passant="legal"));start=time.monotonic();self.send(command);lines=self._until(lambda line:line.startswith("bestmove "));elapsed=time.monotonic()-start
         info={};mate_scores=[];best_line=lines[-1]
         for line in lines:
             try:item=parse_uci_search_info(line)
@@ -340,6 +340,12 @@ class UciEngine:
         score_stm=info.get("scoreValue") if info.get("scoreType")=="cp" else None
         status="forced_legal_move" if info.get("depth") is None and board.legal_moves.count()==1 else "complete"
         return {"bestMove":move_text,"move":move,"legal":legal,"depth":info.get("depth"),"seldepth":info.get("seldepth"),"nodes":info.get("nodes"),"tbhits":info.get("tbhits",0),"pv":info.get("pv",[]),"reportedTimeMs":info.get("time"),"elapsedSeconds":elapsed,"nps":(info.get("nodes",0)/elapsed if elapsed else None),"scoreType":info.get("scoreType"),"scoreValue":info.get("scoreValue"),"scoreFromSideToMove":score_stm,"scoreWhiteCp":score_stm if board.turn else (-score_stm if score_stm is not None else None),"mateScores":mate_scores,"malformedInfoLines":self.malformed_info_lines-malformed_before,"terminationStatus":status}
+    def search(self,board:chess.Board,depth:int)->dict[str,Any]:
+        return self._search_command(board,f"go depth {depth}")
+    def search_clock(self,board:chess.Board,white_time_ms:int,black_time_ms:int,white_increment_ms:int=0,black_increment_ms:int=0,moves_to_go:int|None=None)->dict[str,Any]:
+        command=f"go wtime {white_time_ms} btime {black_time_ms} winc {white_increment_ms} binc {black_increment_ms}"
+        if moves_to_go is not None:command+=f" movestogo {moves_to_go}"
+        return self._search_command(board,command)
     def close(self)->None:
         try:
             if self.process.poll() is None:self.send("quit")

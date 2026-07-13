@@ -90,10 +90,13 @@ AppOptions::ExecutionMode parseExecutionMode(int argc, char* argv[], std::string
         if (value == "eval-features") {
             return AppOptions::ExecutionMode::EvalFeatures;
         }
+        if (value == "time-policy") {
+            return AppOptions::ExecutionMode::TimePolicy;
+        }
         if (!message.empty()) {
             message += "\n";
         }
-        message += "Invalid --mode value. Use --mode=cli, --mode=gui, or --mode=eval-features. Defaulting to cli.";
+        message += "Invalid --mode value. Use --mode=cli, --mode=gui, --mode=eval-features, or --mode=time-policy. Defaulting to cli.";
         return AppOptions::ExecutionMode::Cli;
     };
 

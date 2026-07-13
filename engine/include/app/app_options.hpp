@@ -10,7 +10,8 @@ namespace AppOptions {
 enum class ExecutionMode {
     Cli,
     Gui,
-    EvalFeatures
+    EvalFeatures,
+    TimePolicy
 };
 
 struct Options {
