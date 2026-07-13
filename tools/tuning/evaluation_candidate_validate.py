@@ -98,7 +98,7 @@ def parse_uci_search_info(line: str) -> dict[str, Any] | None:
     if tokens.count("score") != 1:
         raise ValidationError(f"Malformed UCI info line: {line}")
     item: dict[str, Any] = {}
-    for key in ("depth", "nodes", "time"):
+    for key in ("depth", "seldepth", "nodes", "time", "tbhits"):
         if key in tokens:
             index = tokens.index(key)
             if index + 1 >= len(tokens) or not _INTEGER.fullmatch(tokens[index + 1]):
@@ -339,7 +339,7 @@ class UciEngine:
         if not legal and not board.is_game_over(claim_draw=True):raise ValidationError(f"Illegal bestmove {move_text} for {board.fen()}")
         score_stm=info.get("scoreValue") if info.get("scoreType")=="cp" else None
         status="forced_legal_move" if info.get("depth") is None and board.legal_moves.count()==1 else "complete"
-        return {"bestMove":move_text,"move":move,"legal":legal,"depth":info.get("depth"),"nodes":info.get("nodes"),"reportedTimeMs":info.get("time"),"elapsedSeconds":elapsed,"nps":(info.get("nodes",0)/elapsed if elapsed else None),"scoreType":info.get("scoreType"),"scoreFromSideToMove":score_stm,"scoreWhiteCp":score_stm if board.turn else (-score_stm if score_stm is not None else None),"mateScores":mate_scores,"malformedInfoLines":self.malformed_info_lines-malformed_before,"terminationStatus":status}
+        return {"bestMove":move_text,"move":move,"legal":legal,"depth":info.get("depth"),"seldepth":info.get("seldepth"),"nodes":info.get("nodes"),"tbhits":info.get("tbhits",0),"pv":info.get("pv",[]),"reportedTimeMs":info.get("time"),"elapsedSeconds":elapsed,"nps":(info.get("nodes",0)/elapsed if elapsed else None),"scoreType":info.get("scoreType"),"scoreValue":info.get("scoreValue"),"scoreFromSideToMove":score_stm,"scoreWhiteCp":score_stm if board.turn else (-score_stm if score_stm is not None else None),"mateScores":mate_scores,"malformedInfoLines":self.malformed_info_lines-malformed_before,"terminationStatus":status}
     def close(self)->None:
         try:
             if self.process.poll() is None:self.send("quit")
