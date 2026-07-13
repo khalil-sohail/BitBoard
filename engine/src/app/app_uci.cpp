@@ -22,11 +22,29 @@
 #include <string_view>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
 
 constexpr const auto& TIME_TUNING = Tuning::Generated::VALUES.time;
+constexpr const auto& OPENING_TUNING = Tuning::Generated::VALUES.opening;
+
+static_assert(static_cast<int>(BookSelectionMode::Weighted) ==
+              static_cast<int>(Tuning::BookSelectionMode::Weighted));
+static_assert(static_cast<int>(BookSelectionMode::Best) ==
+              static_cast<int>(Tuning::BookSelectionMode::Best));
+static_assert(static_cast<int>(BookSelectionMode::TopNWeighted) ==
+              static_cast<int>(Tuning::BookSelectionMode::TopNWeighted));
+
+constexpr const char* openingSelectionModeName(Tuning::BookSelectionMode mode) {
+    switch (mode) {
+        case Tuning::BookSelectionMode::Weighted: return "weighted";
+        case Tuning::BookSelectionMode::Best: return "best";
+        case Tuning::BookSelectionMode::TopNWeighted: return "top-n-weighted";
+    }
+    std::unreachable();
+}
 
 }
 
@@ -254,8 +272,11 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 
     std::optional<OpeningBook> openingBook;
     bool openingBookStatusPrinted = false;
-    BookSelectionMode bookSelectionMode = BookSelectionMode::Weighted;
-    size_t bookSelectionTopN = 4;
+    bool useOpeningBook = OPENING_TUNING.enabled;
+    int maximumBookDepth = OPENING_TUNING.depthPlies;
+    BookSelectionMode bookSelectionMode =
+        static_cast<BookSelectionMode>(OPENING_TUNING.selectionMode);
+    size_t bookSelectionTopN = OPENING_TUNING.selectionTopN;
     auto ensureOpeningBookLoaded = [&]() {
         if (!openingBook.has_value()) {
             openingBook.emplace(options.bookPath);
@@ -286,11 +307,17 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             std::cout << "id author Khalil" << std::endl;
             std::cout << "option name Hash type spin default 16 min 1 max 32768" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name OwnBook type check default true" << std::endl;
-            std::cout << "option name BookDepth type spin default 30 min 0 max 100" << std::endl;
-            std::cout << "option name BookSelection type combo default weighted var best var weighted var top-n-weighted" << std::endl;
-            std::cout << "option name BookSelectionTopN type spin default 4 min 1 max 32" << std::endl;
-            std::cout << "option name BookSeed type spin default 1592594996 min 0 max 2147483647" << std::endl;
+            std::cout << "option name OwnBook type check default "
+                      << (OPENING_TUNING.enabled ? "true" : "false") << std::endl;
+            std::cout << "option name BookDepth type spin default "
+                      << OPENING_TUNING.depthPlies << " min 0 max 100" << std::endl;
+            std::cout << "option name BookSelection type combo default "
+                      << openingSelectionModeName(OPENING_TUNING.selectionMode)
+                      << " var best var weighted var top-n-weighted" << std::endl;
+            std::cout << "option name BookSelectionTopN type spin default "
+                      << OPENING_TUNING.selectionTopN << " min 1 max 32" << std::endl;
+            std::cout << "option name BookSeed type spin default "
+                      << OPENING_TUNING.seed << " min 0 max 2147483647" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min 1 max 8" << std::endl;
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "uciok" << std::endl;
@@ -355,13 +382,13 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 SearchInternal::clearTT();
                 std::cout << "info string Transposition table cleared" << std::endl;
             } else if (optName == "OwnBook") {
-                if (optValue == "true")  SearchConstants::USE_OPENING_BOOK = true;
-                else if (optValue == "false") SearchConstants::USE_OPENING_BOOK = false;
-                std::cout << "info string OwnBook set to " << (SearchConstants::USE_OPENING_BOOK ? "true" : "false") << std::endl;
+                if (optValue == "true")  useOpeningBook = true;
+                else if (optValue == "false") useOpeningBook = false;
+                std::cout << "info string OwnBook set to " << (useOpeningBook ? "true" : "false") << std::endl;
             } else if (optName == "BookDepth") {
                 try {
-                    SearchConstants::MAX_BOOK_DEPTH = std::stoi(optValue);
-                    std::cout << "info string BookDepth set to " << SearchConstants::MAX_BOOK_DEPTH << std::endl;
+                    maximumBookDepth = std::stoi(optValue);
+                    std::cout << "info string BookDepth set to " << maximumBookDepth << std::endl;
                 } catch (...) {
                     std::cout << "info string Invalid BookDepth value: " << optValue << std::endl;
                 }
@@ -495,9 +522,13 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             // ── Opening book (synchronous, instantaneous) ─────────────────
             // The book check is decoupled from parsedDepth so that Training
             // Mode (which always sends a depth cap) still consults the book.
-            if (!localPonder && openingBook.has_value() && SearchConstants::USE_OPENING_BOOK &&
-                board.sanHistory().size() <
-                    static_cast<size_t>(SearchConstants::MAX_BOOK_DEPTH)) {
+            if (openingBook.has_value() &&
+                isOpeningBookEligible(
+                    localPonder,
+                    useOpeningBook,
+                    board.sanHistory().size(),
+                    maximumBookDepth
+                )) {
                 std::optional<SelectedBookMove> bookMove = openingBook->selectBookMove(board);
                 if (bookMove.has_value()) {
                     std::vector<Move> legalMoves = board.generateLegalMoves();

@@ -759,6 +759,153 @@ void test_opening_book_zero_weight_and_top_n_policy() {
     }
 }
 
+void test_phase9_generated_opening_defaults_match_production_baseline() {
+    const auto& opening = Tuning::Generated::VALUES.opening;
+    require(opening.enabled, "Generated OwnBook default changed from true");
+    require(opening.depthPlies == 30, "Generated book-depth default changed from 30 plies");
+    require(opening.selectionMode == Tuning::BookSelectionMode::Weighted,
+            "Generated selection-mode default changed from weighted");
+    require(opening.selectionTopN == 4U, "Generated top-N default changed from 4");
+    require(opening.seed == 1592594996U, "Generated book seed changed from 1592594996");
+}
+
+void test_phase9_opening_book_generated_constructor_defaults() {
+    Board board;
+    const uint64_t key = board.computePolyglotHash();
+    const std::filesystem::path path = writeTempBook("bitboard-phase9-defaults.bin", {
+        {key, "e2e4", 40, 0},
+        {key, "d2d4", 30, 0},
+        {key, "c2c4", 20, 0},
+        {key, "g1f3", 10, 0},
+        {key, "b1c3", 5, 0},
+    });
+
+    OpeningBook generatedDefaults(path.string());
+    OpeningBook explicitBaseline(path.string());
+    explicitBaseline.setSelectionMode(BookSelectionMode::Weighted);
+    explicitBaseline.setTopN(4);
+    explicitBaseline.setSeed(1592594996U);
+
+    for (int i = 0; i < 64; ++i) {
+        const auto generated = generatedDefaults.selectBookMove(board);
+        const auto baseline = explicitBaseline.selectBookMove(board);
+        require(generated.has_value() && baseline.has_value(),
+                "Expected generated-default weighted selection");
+        require(moveKey(generated->move) == moveKey(baseline->move),
+                "Generated default mode/seed changed weighted selection sequence");
+        require(generated->weight == baseline->weight &&
+                    generated->candidateCount == baseline->candidateCount,
+                "Generated defaults changed selected book metadata");
+    }
+
+    OpeningBook generatedTopN(path.string());
+    OpeningBook explicitTopN(path.string());
+    generatedTopN.setSelectionMode(BookSelectionMode::TopNWeighted);
+    explicitTopN.setSelectionMode(BookSelectionMode::TopNWeighted);
+    explicitTopN.setTopN(Tuning::Generated::VALUES.opening.selectionTopN);
+    for (int i = 0; i < 64; ++i) {
+        const auto generated = generatedTopN.selectBookMove(board);
+        const auto baseline = explicitTopN.selectBookMove(board);
+        require(generated.has_value() && baseline.has_value(),
+                "Expected generated-default top-N selection");
+        require(moveKey(generated->move) == moveKey(baseline->move),
+                "Generated default top-N changed selection sequence");
+    }
+
+    OpeningBook oversizedTopN(path.string());
+    OpeningBook allCandidatesWeighted(path.string());
+    oversizedTopN.setSelectionMode(BookSelectionMode::TopNWeighted);
+    oversizedTopN.setTopN(100);
+    allCandidatesWeighted.setSelectionMode(BookSelectionMode::Weighted);
+    for (int i = 0; i < 32; ++i) {
+        const auto oversized = oversizedTopN.selectBookMove(board);
+        const auto allCandidates = allCandidatesWeighted.selectBookMove(board);
+        require(oversized.has_value() && allCandidates.has_value() &&
+                    moveKey(oversized->move) == moveKey(allCandidates->move),
+                "Top-N larger than candidate count changed weighted selection");
+    }
+}
+
+void test_phase9_opening_depth_and_override_boundaries() {
+    const int limit = Tuning::Generated::VALUES.opening.depthPlies;
+    require(isOpeningBookEligible(false, true, static_cast<size_t>(limit - 1), limit),
+            "Book should remain eligible one ply below generated depth");
+    require(!isOpeningBookEligible(false, true, static_cast<size_t>(limit), limit),
+            "Book should be ineligible at generated depth");
+    require(!isOpeningBookEligible(false, true, static_cast<size_t>(limit + 1), limit),
+            "Book should remain ineligible beyond generated depth");
+    require(!isOpeningBookEligible(false, false, 0, limit),
+            "OwnBook=false should override generated enabled default");
+    require(!isOpeningBookEligible(true, true, 0, limit),
+            "Ponder searches should remain excluded from book lookup");
+    require(isOpeningBookEligible(false, true, 30, 31),
+            "Runtime BookDepth override should supersede generated depth");
+    require(!isOpeningBookEligible(false, true, 30, 30),
+            "Runtime BookDepth exact-limit behavior changed");
+}
+
+void test_phase9_weighted_cumulative_boundaries() {
+    const std::vector<BookMoveCandidate> candidates = {
+        {Move{}, 10, 0},
+        {Move{}, 20, 0},
+        {Move{}, 30, 0},
+    };
+    require(selectWeightedBookCandidateIndex(candidates, 0) == 0,
+            "Weighted target 0 changed candidate");
+    require(selectWeightedBookCandidateIndex(candidates, 9) == 0,
+            "Weighted target 9 changed candidate");
+    require(selectWeightedBookCandidateIndex(candidates, 10) == 1,
+            "Weighted target 10 changed cumulative boundary");
+    require(selectWeightedBookCandidateIndex(candidates, 29) == 1,
+            "Weighted target 29 changed candidate");
+    require(selectWeightedBookCandidateIndex(candidates, 30) == 2,
+            "Weighted target 30 changed cumulative boundary");
+    require(selectWeightedBookCandidateIndex(candidates, 59) == 2,
+            "Weighted target 59 changed candidate");
+}
+
+void test_phase9_missing_invalid_and_special_book_entries() {
+    Board start;
+    const auto emptyPath = writeTempBook("bitboard-phase9-empty.bin", {});
+    OpeningBook empty(emptyPath.string());
+    require(empty.lineCount() == 0 && !empty.selectBookMove(start).has_value(),
+            "Empty book should safely fall back");
+
+    const std::filesystem::path truncatedPath =
+        std::filesystem::temp_directory_path() / "bitboard-phase9-truncated.bin";
+    {
+        std::ofstream out(truncatedPath, std::ios::binary | std::ios::trunc);
+        out.write("bad", 3);
+    }
+    OpeningBook truncated(truncatedPath.string());
+    require(truncated.lineCount() == 0 && !truncated.selectBookMove(start).has_value(),
+            "Truncated book should safely fall back");
+
+    Board castling;
+    require(castling.loadFEN("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1"),
+            "Failed to load castling book fixture");
+    const auto castlingPath = writeTempBook("bitboard-phase9-castling.bin", {
+        {castling.computePolyglotHash(), "e1h1", 10, 0},
+    });
+    OpeningBook castlingBook(castlingPath.string());
+    const auto castlingMove = castlingBook.selectBookMove(castling);
+    require(castlingMove.has_value() && moveKey(castlingMove->move) == "e1g1",
+            "Polyglot castling conversion changed");
+
+    Board promotion;
+    require(promotion.loadFEN("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"),
+            "Failed to load promotion book fixture");
+    const auto promotionPath = writeTempBook("bitboard-phase9-promotion.bin", {
+        {promotion.computePolyglotHash(), "a7a8q", 10, 0},
+    });
+    OpeningBook promotionBook(promotionPath.string());
+    const auto promotionMove = promotionBook.selectBookMove(promotion);
+    const ParseResult expectedPromotion = promotion.parseMove("a7a8q");
+    require(expectedPromotion.move.has_value(), "Failed to parse expected promotion book move");
+    require(promotionMove.has_value() && sameMove(promotionMove->move, *expectedPromotion.move),
+            "Polyglot promotion decoding changed");
+}
+
 void test_tuning_model_constructs_and_validates_default() {
     Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
     const Tuning::TuningValidationResult result = Tuning::validateTuning(tuning);
@@ -1039,7 +1186,7 @@ void test_tuning_defaults_match_production_search_time_and_opening_values() {
     require(tuning.time.stopPolicy.criticalLowTimeThresholdMs == 40, "Typed critical low-time threshold should mirror production literal");
     require(tuning.time.stopPolicy.criticalLowTimeReserveMs == 5, "Typed critical low-time reserve should mirror production literal");
     require(tuning.opening.enabled == true, "Typed opening enabled should mirror production default");
-    require(tuning.opening.depthPlies == SearchConstants::MAX_BOOK_DEPTH, "Typed book depth should mirror production default");
+    require(tuning.opening.depthPlies == 30, "Typed book depth should mirror production default");
     require(tuning.opening.selectionMode == Tuning::BookSelectionMode::Weighted, "Typed book selection mode should mirror production default");
     require(tuning.opening.selectionTopN == 4, "Typed selection top-N should mirror production default");
     require(tuning.opening.seed == 1592594996U, "Typed seed should mirror UCI default");
@@ -1624,6 +1771,11 @@ int main() {
         {"Opening book deterministic single/best selection", test_opening_book_single_candidate_and_best_are_deterministic},
         {"Opening book seeded weighted selection", test_opening_book_weighted_selector_is_seeded_and_weighted},
         {"Opening book zero-weight and top-N policy", test_opening_book_zero_weight_and_top_n_policy},
+        {"Phase 9 generated opening defaults match production baseline", test_phase9_generated_opening_defaults_match_production_baseline},
+        {"Phase 9 OpeningBook generated constructor defaults", test_phase9_opening_book_generated_constructor_defaults},
+        {"Phase 9 opening depth and override boundaries", test_phase9_opening_depth_and_override_boundaries},
+        {"Phase 9 weighted cumulative boundaries", test_phase9_weighted_cumulative_boundaries},
+        {"Phase 9 missing, invalid, and special book entries", test_phase9_missing_invalid_and_special_book_entries},
         {"Tuning model constructs and validates default", test_tuning_model_constructs_and_validates_default},
         {"Generated tuning header identity and validation", test_generated_tuning_header_identity_and_validation},
         {"Generated tuning values match typed model", test_generated_tuning_values_match_typed_model},

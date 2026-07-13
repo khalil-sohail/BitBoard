@@ -225,29 +225,45 @@ def generated_time_values() -> dict[str, Any]:
     }
 
 
-def production_values() -> dict[str, Any]:
-    search_constants = read_repo_file("engine/include/search/search_constants.hpp")
-    app_uci = read_repo_file("engine/src/app/app_uci.cpp")
+def generated_opening_values() -> dict[str, Any]:
+    generated = read_repo_file("engine/include/tuning/generated_tuning_values.hpp")
+    match = re.search(r"\n    \.opening = \{(?P<body>.*?)\n    \},\n\};", generated, re.DOTALL)
+    if not match:
+        raise RegistryError("Could not find generated opening tuning block")
+    opening = match.group("body")
 
+    def scalar(field: str) -> int:
+        field_match = re.search(r"\." + re.escape(field) + r"\s*=\s*([0-9']+)(?:U|ULL)?", opening)
+        if not field_match:
+            raise RegistryError(f"Could not find generated opening field {field}")
+        return int(field_match.group(1).replace("'", ""))
+
+    enabled = re.search(r"\.enabled\s*=\s*(true|false)", opening)
+    mode = re.search(r"\.selectionMode\s*=\s*BookSelectionMode::([A-Za-z0-9_]+)", opening)
+    if not enabled or not mode:
+        raise RegistryError("Could not find generated opening enabled/mode fields")
+
+    mode_names = {
+        "Weighted": "weighted",
+        "Best": "best",
+        "TopNWeighted": "top-n-weighted",
+    }
+    if mode.group(1) not in mode_names:
+        raise RegistryError(f"Unknown generated opening mode {mode.group(1)}")
+
+    return {
+        "opening.bookDepth": scalar("depthPlies"),
+        "opening.enabled": enabled.group(1) == "true",
+        "opening.seed": scalar("seed"),
+        "opening.selectionMode": mode_names[mode.group(1)],
+        "opening.selectionTopN": scalar("selectionTopN"),
+    }
+
+
+def production_values() -> dict[str, Any]:
     values: dict[str, Any] = generated_search_values()
     values.update(generated_time_values())
-    values.update({
-        "opening.enabled": bool(parse_int_assignment(search_constants, "USE_OPENING_BOOK")),
-        "opening.bookDepth": parse_int_assignment(search_constants, "MAX_BOOK_DEPTH"),
-    })
-
-    literal_checks = {
-        "opening.selectionTopN": r"size_t bookSelectionTopN = (\d+);",
-    }
-    for name, pattern in literal_checks.items():
-        match = re.search(pattern, app_uci)
-        if not match:
-            raise RegistryError(f"Could not find literal for {name}")
-        values[name] = int(match.group(1))
-
-    values["opening.selectionMode"] = "weighted"
-    seed = re.search(r"BookSeed type spin default (\d+)", app_uci)
-    values["opening.seed"] = int(seed.group(1))
+    values.update(generated_opening_values())
 
     return values
 

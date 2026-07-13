@@ -36,6 +36,18 @@ struct SelectedBookMove {
     size_t candidateCount = 0;
 };
 
+[[nodiscard]] bool isOpeningBookEligible(
+    bool isPondering,
+    bool enabled,
+    size_t historyPlyCount,
+    int maximumDepth
+);
+
+[[nodiscard]] size_t selectWeightedBookCandidateIndex(
+    const std::vector<BookMoveCandidate>& candidates,
+    uint64_t target
+);
+
 class OpeningBook {
 public:
     explicit OpeningBook(const std::string& bookPath = "openings");
@@ -53,8 +65,8 @@ private:
     std::filesystem::path m_bookPath;
     std::vector<PolyGlotEntry> m_entries;
     mutable std::mt19937 m_rng;
-    BookSelectionMode m_selectionMode = BookSelectionMode::Weighted;
-    size_t m_topN = 4;
+    BookSelectionMode m_selectionMode;
+    size_t m_topN;
 
     [[nodiscard]] std::pair<size_t, size_t> findEntryRange(uint64_t hash) const;
     [[nodiscard]] std::optional<Move> decodePolyGlotMove(uint16_t encodedMove, const Board& board) const;

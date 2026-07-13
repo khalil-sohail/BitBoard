@@ -1878,13 +1878,13 @@
       "risk": "low",
       "tuningGroup": "opening-strength",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 23,
-        "symbol": "SearchConstants::MAX_BOOK_DEPTH"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 185,
+        "symbol": "Tuning::Generated::VALUES.opening.depthPlies"
       },
       "consumer": {
         "file": "engine/src/app/app_uci.cpp",
-        "line": 492,
+        "line": 530,
         "function": "AppUci::runUciMode"
       },
       "connectivity": "Opening book is used only while sanHistory().size() is below this value; UCI BookDepth writes it directly.",
@@ -1908,13 +1908,13 @@
       "risk": "low",
       "tuningGroup": "opening-strength",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 22,
-        "symbol": "SearchConstants::USE_OPENING_BOOK"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 184,
+        "symbol": "Tuning::Generated::VALUES.opening.enabled"
       },
       "consumer": {
         "file": "engine/src/app/app_uci.cpp",
-        "line": 490,
+        "line": 528,
         "function": "AppUci::runUciMode"
       },
       "connectivity": "UCI OwnBook toggles whether runUciMode consults OpeningBook before launching search.",
@@ -1938,14 +1938,14 @@
       "risk": "low",
       "tuningGroup": "opening-variety",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 285,
-        "symbol": "BookSeed UCI default"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 188,
+        "symbol": "Tuning::Generated::VALUES.opening.seed"
       },
       "consumer": {
         "file": "engine/src/openingBook.cpp",
-        "line": 127,
-        "function": "OpeningBook::setSeed"
+        "line": 93,
+        "function": "OpeningBook::OpeningBook"
       },
       "connectivity": "UCI BookSeed reseeds OpeningBook::m_rng, changing deterministic weighted selection sequence.",
       "dataRequirements": [
@@ -1973,14 +1973,14 @@
       "risk": "low",
       "tuningGroup": "opening-variety",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 249,
-        "symbol": "bookSelectionMode local default"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 186,
+        "symbol": "Tuning::Generated::VALUES.opening.selectionMode"
       },
       "consumer": {
-        "file": "engine/src/openingBook.cpp",
-        "line": 257,
-        "function": "OpeningBook::selectBookMove"
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 278,
+        "function": "AppUci::runUciMode"
       },
       "connectivity": "Selection mode chooses best, weighted, or top-N weighted behavior for legal book candidates.",
       "dataRequirements": [
@@ -2003,14 +2003,14 @@
       "risk": "low",
       "tuningGroup": "opening-variety",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 250,
-        "symbol": "bookSelectionTopN local default"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 187,
+        "symbol": "Tuning::Generated::VALUES.opening.selectionTopN"
       },
       "consumer": {
-        "file": "engine/src/openingBook.cpp",
-        "line": 262,
-        "function": "OpeningBook::selectBookMove"
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 279,
+        "function": "AppUci::runUciMode"
       },
       "connectivity": "TopNWeighted mode truncates legal sorted candidates to this count before weighted random selection.",
       "dataRequirements": [

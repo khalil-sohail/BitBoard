@@ -1,5 +1,7 @@
 #include "openingBook.hpp"
 
+#include "tuning/generated_tuning_values.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <cctype>
@@ -8,6 +10,15 @@
 #include <limits>
 
 namespace {
+
+constexpr const auto& OPENING_TUNING = Tuning::Generated::VALUES.opening;
+
+static_assert(static_cast<int>(BookSelectionMode::Weighted) ==
+              static_cast<int>(Tuning::BookSelectionMode::Weighted));
+static_assert(static_cast<int>(BookSelectionMode::Best) ==
+              static_cast<int>(Tuning::BookSelectionMode::Best));
+static_assert(static_cast<int>(BookSelectionMode::TopNWeighted) ==
+              static_cast<int>(Tuning::BookSelectionMode::TopNWeighted));
 
 std::filesystem::path resolveBookPath(const std::filesystem::path& configuredPath) {
     std::error_code ec;
@@ -53,9 +64,35 @@ std::optional<PieceType> decodePromotion(int promotionCode) {
 
 } // namespace
 
+bool isOpeningBookEligible(
+    bool isPondering,
+    bool enabled,
+    size_t historyPlyCount,
+    int maximumDepth
+) {
+    return !isPondering && enabled &&
+           historyPlyCount < static_cast<size_t>(maximumDepth);
+}
+
+size_t selectWeightedBookCandidateIndex(
+    const std::vector<BookMoveCandidate>& candidates,
+    uint64_t target
+) {
+    uint64_t cumulative = 0;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        cumulative += static_cast<uint64_t>(candidates[i].weight);
+        if (target < cumulative) {
+            return i;
+        }
+    }
+    return candidates.size() - 1;
+}
+
 OpeningBook::OpeningBook(const std::string& bookPath)
     : m_bookPath(bookPath),
-      m_rng(0x5eed1234U) {
+      m_rng(OPENING_TUNING.seed),
+      m_selectionMode(static_cast<BookSelectionMode>(OPENING_TUNING.selectionMode)),
+      m_topN(OPENING_TUNING.selectionTopN) {
     load();
 }
 
@@ -277,14 +314,7 @@ std::optional<SelectedBookMove> OpeningBook::selectBookMove(const Board& board) 
     std::uniform_int_distribution<uint64_t> weighted(0, totalWeight - 1);
     const uint64_t target = weighted(m_rng);
 
-    uint64_t cumulative = 0;
-    for (const BookMoveCandidate& c : candidates) {
-        cumulative += static_cast<uint64_t>(c.weight);
-        if (target < cumulative) {
-            return SelectedBookMove{c.move, c.weight, c.learn, originalCandidateCount};
-        }
-    }
-
-    const BookMoveCandidate& selected = candidates.back();
+    const BookMoveCandidate& selected =
+        candidates[selectWeightedBookCandidateIndex(candidates, target)];
     return SelectedBookMove{selected.move, selected.weight, selected.learn, originalCandidateCount};
 }
