@@ -1,0 +1,2 @@
+# Legal PGN parsing and move replay for the private Phase 12 dataset pipeline.
+python-chess==1.999

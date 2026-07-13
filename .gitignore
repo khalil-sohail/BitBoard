@@ -69,3 +69,7 @@ website/out/
 TUNING_AUDIT.md
 TUNING_PARAMETERS.md
 /docs/TUNING_*.md
+tuning/pgn/
+tuning/datasets/
+tuning/engines/
+tuning/annotations/
