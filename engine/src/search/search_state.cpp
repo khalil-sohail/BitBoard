@@ -6,6 +6,7 @@
 namespace {
 
 constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+constexpr const auto& TIME_TUNING = Tuning::Generated::VALUES.time;
 
 }
 
@@ -90,7 +91,7 @@ bool shouldAbortSearch() {
     }
 
     ++g_nodesSearched;
-    if ((g_nodesSearched & SearchConstants::TIME_CHECK_MASK) == 0ULL) {
+    if ((g_nodesSearched & TIME_TUNING.polling.nodeMask) == 0ULL) {
         checkTime();
     }
 

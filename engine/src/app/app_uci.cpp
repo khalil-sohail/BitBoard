@@ -4,6 +4,8 @@
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_internal.hpp"
+#include "time/time_management.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,6 +23,12 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+namespace {
+
+constexpr const auto& TIME_TUNING = Tuning::Generated::VALUES.time;
+
+}
 
 namespace AppUci {
 
@@ -524,39 +532,25 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             if (goCommand.mode == SearchLimitMode::Infinite) {
                 timeLimitMs = 999'999'999LL;
             } else if (goCommand.mode == SearchLimitMode::MoveTime) {
-                timeLimitMs = std::max(10LL, static_cast<long long>(*goCommand.moveTimeMs));
+                timeLimitMs = std::max(
+                    static_cast<long long>(TIME_TUNING.allocation.minimumMoveTimeMs),
+                    static_cast<long long>(*goCommand.moveTimeMs)
+                );
             } else if (goCommand.mode == SearchLimitMode::Depth) {
                 timeLimitMs = 999'999'999LL;
             } else if (goCommand.mode == SearchLimitMode::Clock && timeLeft > 0) {
-                // Subtract a flat network RTT buffer upfront so that the
-                // bestmove response reaches the server before the flag falls.
-                const long long safeTimeLeft = std::max(1LL, timeLeft - 30LL);
-                
                 int move_number = base_fullmove + (board.sanHistory().size() / 2);
-                int expected_moves_remaining = std::max(20, 40 - move_number);
-                if (goCommand.movesToGo.has_value()) {
-                    expected_moves_remaining = *goCommand.movesToGo;
-                }
-
-                long long allocated_time = (safeTimeLeft / expected_moves_remaining) + increment;
-
-                if (g_hasTwoScores.load(std::memory_order_relaxed)) {
-                    if (std::abs(g_lastSearchScore.load(std::memory_order_relaxed) - g_prevSearchScore.load(std::memory_order_relaxed)) > 50) {
-                        allocated_time = static_cast<long long>(allocated_time * 1.3);
-                    }
-                }
-
-                long long hard_cap = std::max(1LL, safeTimeLeft / 4);
-
-                // Standard case: clamp between a 10ms minimum and the 25% hard cap
-                timeLimitMs = std::max(10LL, std::min(allocated_time, hard_cap));
-
-                // Critical low-time panic case: if we have less than 40ms
-                // (after the buffer), use exactly what remains minus a tiny
-                // internal scheduler buffer.
-                if (safeTimeLeft < 40) {
-                    timeLimitMs = std::max(1LL, safeTimeLeft - 5LL);
-                }
+                const TimeManagement::ClockBudget budget =
+                    TimeManagement::calculateClockBudget(
+                        timeLeft,
+                        increment,
+                        move_number,
+                        goCommand.movesToGo,
+                        g_hasTwoScores.load(std::memory_order_relaxed),
+                        g_lastSearchScore.load(std::memory_order_relaxed),
+                        g_prevSearchScore.load(std::memory_order_relaxed)
+                    );
+                timeLimitMs = budget.timeLimitMs;
             }
 
             const long long realTimeLimitMs = timeLimitMs;

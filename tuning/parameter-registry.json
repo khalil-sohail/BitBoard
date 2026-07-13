@@ -2541,14 +2541,14 @@
       "risk": "high",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 558,
-        "symbol": "critical low-time reserve literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 177,
+        "symbol": "Tuning::Generated::VALUES.time.stopPolicy.criticalLowTimeReserveMs"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 558,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 71,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Panic allocation uses max(1, safeTimeLeft - this reserve).",
       "dataRequirements": [
@@ -2571,14 +2571,14 @@
       "risk": "high",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 557,
-        "symbol": "critical low-time threshold literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 176,
+        "symbol": "Tuning::Generated::VALUES.time.stopPolicy.criticalLowTimeThresholdMs"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 557,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 67,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "When safeTimeLeft is below this threshold, normal allocation is replaced by panic allocation.",
       "dataRequirements": [
@@ -2601,14 +2601,14 @@
       "risk": "medium",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 536,
-        "symbol": "expected moves base literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 165,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.expectedMovesBase"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 536,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 34,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Expected moves remaining is max(floor, base - moveNumber) unless movestogo is supplied.",
       "dataRequirements": [
@@ -2631,14 +2631,14 @@
       "risk": "medium",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 536,
-        "symbol": "expected moves floor literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 166,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.expectedMovesFloor"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 536,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 33,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Expected moves remaining is max(floor, base - moveNumber) unless movestogo is supplied.",
       "dataRequirements": [
@@ -2670,13 +2670,13 @@
       "risk": "high",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/src/search/search_root.cpp",
-        "line": 298,
-        "symbol": "hard stop fraction literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 175,
+        "symbol": "Tuning::Generated::VALUES.time.stopPolicy.hardStopFraction"
       },
       "consumer": {
         "file": "engine/src/search/search_root.cpp",
-        "line": 298,
+        "line": 310,
         "function": "findBestMove"
       },
       "connectivity": "Iterative deepening exits after elapsed time exceeds currentHardLimit * 3 / 4.",
@@ -2707,14 +2707,14 @@
       "risk": "medium",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 545,
-        "symbol": "1.3 instability multiplier literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 169,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.instabilityMultiplier"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 545,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 46,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Unstable score history multiplies allocated_time by 1.3 before hard cap; future model should use fixed-point integer.",
       "dataRequirements": [
@@ -2737,14 +2737,14 @@
       "risk": "medium",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 544,
-        "symbol": "score instability literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 168,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.instabilityThresholdCp"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 544,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 45,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "If previous two search scores differ by more than this threshold, allocated time is multiplied.",
       "dataRequirements": [
@@ -2767,14 +2767,14 @@
       "risk": "high",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 549,
-        "symbol": "hard_cap denominator literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 170,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.maximumClockFraction.denominator"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 549,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 59,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Normal clock allocation is capped at safeTimeLeft divided by this denominator.",
       "dataRequirements": [
@@ -2797,13 +2797,13 @@
       "risk": "high",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 527,
-        "symbol": "minimum movetime literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 164,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.minimumMoveTimeMs"
       },
       "consumer": {
         "file": "engine/src/app/app_uci.cpp",
-        "line": 527,
+        "line": 535,
         "function": "AppUci::runUciMode"
       },
       "connectivity": "go movetime and clock allocation clamp to this minimum in normal cases.",
@@ -2827,13 +2827,13 @@
       "risk": "high",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 17,
-        "symbol": "SearchConstants::TIME_CHECK_MASK"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 180,
+        "symbol": "Tuning::Generated::VALUES.time.polling.nodeMask"
       },
       "consumer": {
         "file": "engine/src/search/search_state.cpp",
-        "line": 84,
+        "line": 94,
         "function": "SearchInternal::shouldAbortSearch"
       },
       "connectivity": "Search calls checkTime when (nodesSearched & mask) == 0; affects stop latency and overhead.",
@@ -2857,14 +2857,14 @@
       "risk": "high",
       "tuningGroup": "time-allocation",
       "source": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 533,
-        "symbol": "safeTimeLeft literal reserve"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 163,
+        "symbol": "Tuning::Generated::VALUES.time.allocation.safetyReserveMs"
       },
       "consumer": {
-        "file": "engine/src/app/app_uci.cpp",
-        "line": 533,
-        "function": "AppUci::runUciMode"
+        "file": "engine/src/time/time_management.cpp",
+        "line": 29,
+        "function": "TimeManagement::calculateClockBudget"
       },
       "connectivity": "Clock mode subtracts this reserve from remaining time before allocation.",
       "dataRequirements": [
@@ -2887,13 +2887,13 @@
       "risk": "medium",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/src/search/search_root.cpp",
-        "line": 98,
-        "symbol": "softLimitFraction initial literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 173,
+        "symbol": "Tuning::Generated::VALUES.time.stopPolicy.stableSoftStopFraction"
       },
       "consumer": {
         "file": "engine/src/search/search_root.cpp",
-        "line": 296,
+        "line": 106,
         "function": "findBestMove"
       },
       "connectivity": "If best move is stable for enough iterations, search may stop after elapsed time exceeds this fraction of hard limit.",
@@ -2917,13 +2917,13 @@
       "risk": "medium",
       "tuningGroup": "time-stop-policy",
       "source": {
-        "file": "engine/src/search/search_root.cpp",
-        "line": 260,
-        "symbol": "softLimitFraction unstable literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 174,
+        "symbol": "Tuning::Generated::VALUES.time.stopPolicy.unstableSoftStopFraction"
       },
       "consumer": {
         "file": "engine/src/search/search_root.cpp",
-        "line": 296,
+        "line": 270,
         "function": "findBestMove"
       },
       "connectivity": "When best move changes, soft stop fraction is set to this higher percent.",

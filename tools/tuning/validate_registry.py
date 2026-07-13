@@ -176,30 +176,67 @@ def generated_search_values() -> dict[str, Any]:
     }
 
 
+def generated_time_values() -> dict[str, Any]:
+    generated = read_repo_file("engine/include/tuning/generated_tuning_values.hpp")
+    match = re.search(r"\n    \.time = \{(?P<body>.*?)\n    \},\n    \.opening = \{", generated, re.DOTALL)
+    if not match:
+        raise RegistryError("Could not find generated time tuning block")
+    time = match.group("body")
+
+    def scalar(field: str) -> int:
+        field_match = re.search(r"\." + re.escape(field) + r"\s*=\s*(-?[0-9']+)", time)
+        if not field_match:
+            raise RegistryError(f"Could not find generated time field {field}")
+        return int(field_match.group(1).replace("'", ""))
+
+    def rational(field: str) -> tuple[int, int]:
+        field_match = re.search(
+            r"\." + re.escape(field) + r"\s*=\s*RationalValue<int>\{(-?\d+),\s*(-?\d+)\}",
+            time,
+        )
+        if not field_match:
+            raise RegistryError(f"Could not find generated time rational {field}")
+        return tuple(int(value) for value in field_match.groups())
+
+    instability_numerator, instability_denominator = rational("instabilityMultiplier")
+    maximum_numerator, maximum_denominator = rational("maximumClockFraction")
+    stable_numerator, stable_denominator = rational("stableSoftStopFraction")
+    unstable_numerator, unstable_denominator = rational("unstableSoftStopFraction")
+    hard_numerator, hard_denominator = rational("hardStopFraction")
+
+    if maximum_numerator != 1:
+        raise RegistryError("Generated maximum clock fraction numerator must remain 1")
+
+    return {
+        "time.criticalLowTimeReserveMs": scalar("criticalLowTimeReserveMs"),
+        "time.criticalLowTimeThresholdMs": scalar("criticalLowTimeThresholdMs"),
+        "time.expectedMovesBase": scalar("expectedMovesBase"),
+        "time.expectedMovesFloor": scalar("expectedMovesFloor"),
+        "time.hardStopFraction": [hard_numerator, hard_denominator],
+        "time.instabilityMultiplierPermille":
+            instability_numerator * 1000 // instability_denominator,
+        "time.instabilityThresholdCp": scalar("instabilityThresholdCp"),
+        "time.maxClockFractionDenominator": maximum_denominator,
+        "time.minimumMoveTimeMs": scalar("minimumMoveTimeMs"),
+        "time.polling.nodeMask": scalar("nodeMask"),
+        "time.safetyReserveMs": scalar("safetyReserveMs"),
+        "time.softStop.stablePercent": stable_numerator * 100 // stable_denominator,
+        "time.softStop.unstablePercent": unstable_numerator * 100 // unstable_denominator,
+    }
+
+
 def production_values() -> dict[str, Any]:
     search_constants = read_repo_file("engine/include/search/search_constants.hpp")
     app_uci = read_repo_file("engine/src/app/app_uci.cpp")
-    search_root = read_repo_file("engine/src/search/search_root.cpp")
 
     values: dict[str, Any] = generated_search_values()
+    values.update(generated_time_values())
     values.update({
-        "time.polling.nodeMask": parse_int_assignment(search_constants, "TIME_CHECK_MASK"),
         "opening.enabled": bool(parse_int_assignment(search_constants, "USE_OPENING_BOOK")),
         "opening.bookDepth": parse_int_assignment(search_constants, "MAX_BOOK_DEPTH"),
-        "time.softStop.stablePercent": int(re.search(r"int softLimitFraction = (\d+);", search_root).group(1)),
-        "time.softStop.unstablePercent": int(re.search(r"stableCount = 0;\n\s+softLimitFraction = (\d+);", search_root).group(1)),
-        "time.hardStopFraction": [3, 4],
     })
 
     literal_checks = {
-        "time.safetyReserveMs": r"timeLeft - (\d+)LL",
-        "time.minimumMoveTimeMs": r"std::max\((\d+)LL, static_cast<long long>\(\*goCommand\.moveTimeMs\)\)",
-        "time.expectedMovesFloor": r"std::max\((\d+), 40 - move_number\)",
-        "time.expectedMovesBase": r"std::max\(20, (\d+) - move_number\)",
-        "time.instabilityThresholdCp": r"g_prevSearchScore\.load\(std::memory_order_relaxed\)\) > (\d+)\)",
-        "time.maxClockFractionDenominator": r"safeTimeLeft / (\d+)\)",
-        "time.criticalLowTimeThresholdMs": r"safeTimeLeft < (\d+)",
-        "time.criticalLowTimeReserveMs": r"safeTimeLeft - (\d+)LL",
         "opening.selectionTopN": r"size_t bookSelectionTopN = (\d+);",
     }
     for name, pattern in literal_checks.items():
@@ -208,8 +245,6 @@ def production_values() -> dict[str, Any]:
             raise RegistryError(f"Could not find literal for {name}")
         values[name] = int(match.group(1))
 
-    instability = re.search(r"allocated_time \* ([0-9.]+)\)", app_uci)
-    values["time.instabilityMultiplierPermille"] = int(float(instability.group(1)) * 1000)
     values["opening.selectionMode"] = "weighted"
     seed = re.search(r"BookSeed type spin default (\d+)", app_uci)
     values["opening.seed"] = int(seed.group(1))

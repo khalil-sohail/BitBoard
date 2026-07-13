@@ -1,8 +1,8 @@
 NAME =  chess-engine
 TEST_NAME = chess-engine-tests
 
-SRCS = $(wildcard src/*.cpp src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp)
-ENGINE_SRCS = src/Board.cpp src/openingBook.cpp src/printers.cpp $(wildcard src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp)
+SRCS = $(wildcard src/*.cpp src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp src/time/*.cpp)
+ENGINE_SRCS = src/Board.cpp src/openingBook.cpp src/printers.cpp $(wildcard src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp src/time/*.cpp)
 TUNING_MODEL_SRCS = src/tuning/tuning_validation.cpp
 TEST_SRCS = $(ENGINE_SRCS) $(TUNING_MODEL_SRCS) tests.cpp
 

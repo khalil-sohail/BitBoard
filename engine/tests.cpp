@@ -6,6 +6,7 @@
 #include "search.hpp"
 #include "search/search_constants.hpp"
 #include "search/search_internal.hpp"
+#include "time/time_management.hpp"
 #include "tuning/engine_tuning.hpp"
 #include "tuning/generated_tuning_values.hpp"
 #include "tuning/tuning_metadata.hpp"
@@ -1032,7 +1033,6 @@ void test_generated_evaluation_defaults_match_production_baseline() {
 
 void test_tuning_defaults_match_production_search_time_and_opening_values() {
     const Tuning::EngineTuning& tuning = Tuning::Generated::VALUES;
-    require(tuning.time.polling.nodeMask == SearchConstants::TIME_CHECK_MASK, "Typed time polling mask should mirror production");
     require(tuning.time.allocation.safetyReserveMs == 30, "Typed safety reserve should mirror production literal");
     require(tuning.time.allocation.expectedMovesBase == 40, "Typed expected moves base should mirror production literal");
     require(tuning.time.allocation.expectedMovesFloor == 20, "Typed expected moves floor should mirror production literal");
@@ -1043,6 +1043,165 @@ void test_tuning_defaults_match_production_search_time_and_opening_values() {
     require(tuning.opening.selectionMode == Tuning::BookSelectionMode::Weighted, "Typed book selection mode should mirror production default");
     require(tuning.opening.selectionTopN == 4, "Typed selection top-N should mirror production default");
     require(tuning.opening.seed == 1592594996U, "Typed seed should mirror UCI default");
+}
+
+void test_phase8_generated_time_defaults_match_production_baseline() {
+    const auto& time = Tuning::Generated::VALUES.time;
+    require(time.polling.nodeMask == 8191ULL, "Generated polling mask changed from 8191");
+    require(time.allocation.safetyReserveMs == 30, "Generated safety reserve changed from 30ms");
+    require(time.allocation.minimumMoveTimeMs == 10, "Generated minimum move time changed from 10ms");
+    require(time.allocation.expectedMovesBase == 40, "Generated expected-moves base changed from 40");
+    require(time.allocation.expectedMovesFloor == 20, "Generated expected-moves floor changed from 20");
+    require(time.allocation.incrementContribution.equals(1, 1), "Full increment contribution changed");
+    require(time.allocation.instabilityThresholdCp == 50, "Generated instability threshold changed from 50cp");
+    require(time.allocation.instabilityMultiplier.equals(13, 10), "Generated instability multiplier changed from 1.3");
+    require(time.allocation.maximumClockFraction.equals(1, 4), "Generated maximum clock fraction changed from 1/4");
+    require(time.stopPolicy.stableSoftStopFraction.equals(1, 2), "Generated stable soft stop changed from 1/2");
+    require(time.stopPolicy.unstableSoftStopFraction.equals(4, 5), "Generated unstable soft stop changed from 4/5");
+    require(time.stopPolicy.hardStopFraction.equals(3, 4), "Generated hard stop changed from 3/4");
+    require(time.stopPolicy.criticalLowTimeThresholdMs == 40, "Generated critical threshold changed from 40ms");
+    require(time.stopPolicy.criticalLowTimeReserveMs == 5, "Generated critical reserve changed from 5ms");
+}
+
+void requireClockBudget(
+    const TimeManagement::ClockBudget& actual,
+    long long safeTimeLeftMs,
+    int expectedMovesRemaining,
+    long long allocatedBeforeCapMs,
+    long long maximumCapMs,
+    long long timeLimitMs,
+    bool instabilityApplied,
+    const std::string& scenario
+) {
+    require(actual.safeTimeLeftMs == safeTimeLeftMs, scenario + ": safe time changed");
+    require(actual.expectedMovesRemaining == expectedMovesRemaining, scenario + ": expected moves changed");
+    require(actual.allocatedBeforeCapMs == allocatedBeforeCapMs, scenario + ": allocation changed");
+    require(actual.maximumCapMs == maximumCapMs, scenario + ": maximum cap changed");
+    require(actual.timeLimitMs == timeLimitMs, scenario + ": time limit changed");
+    require(actual.instabilityApplied == instabilityApplied, scenario + ": instability decision changed");
+    const auto deadlines = TimeManagement::calculateStopDeadlines(actual.timeLimitMs);
+    require(deadlines.stableSoftMs == (timeLimitMs * 50) / 100,
+            scenario + ": stable soft deadline changed");
+    require(deadlines.unstableSoftMs == (timeLimitMs * 80) / 100,
+            scenario + ": unstable soft deadline changed");
+    require(deadlines.hardMs == (timeLimitMs * 3) / 4,
+            scenario + ": hard deadline changed");
+}
+
+void test_phase8_synthetic_clock_allocation_baselines() {
+    struct Scenario {
+        const char* name;
+        long long timeLeftMs;
+        long long incrementMs;
+        int moveNumber;
+        std::optional<int> movesToGo;
+        long long safeTimeLeftMs;
+        int expectedMovesRemaining;
+        long long allocatedBeforeCapMs;
+        long long maximumCapMs;
+        long long timeLimitMs;
+    };
+
+    const Scenario scenarios[] = {
+        {"60+0", 60'000, 0, 1, std::nullopt, 59'970, 39, 1'537, 14'992, 1'537},
+        {"60+1", 60'000, 1'000, 1, std::nullopt, 59'970, 39, 2'537, 14'992, 2'537},
+        {"180+0", 180'000, 0, 1, std::nullopt, 179'970, 39, 4'614, 44'992, 4'614},
+        {"180+2", 180'000, 2'000, 1, std::nullopt, 179'970, 39, 6'614, 44'992, 6'614},
+        {"600+0", 600'000, 0, 1, std::nullopt, 599'970, 39, 15'383, 149'992, 15'383},
+        {"600+5", 600'000, 5'000, 1, std::nullopt, 599'970, 39, 20'383, 149'992, 20'383},
+        {"very low", 500, 0, 1, std::nullopt, 470, 39, 12, 117, 12},
+        {"critical", 60, 0, 1, std::nullopt, 30, 39, 0, 7, 25},
+        {"large clock", 3'600'000, 10'000, 1, std::nullopt, 3'599'970, 39, 102'306, 899'992, 102'306},
+        {"explicit moves-to-go", 60'000, 0, 1, 10, 59'970, 10, 5'997, 14'992, 5'997},
+        {"large increment capped", 60'000, 100'000, 1, 1, 59'970, 1, 159'970, 14'992, 14'992},
+    };
+
+    for (const Scenario& scenario : scenarios) {
+        const auto budget = TimeManagement::calculateClockBudget(
+            scenario.timeLeftMs,
+            scenario.incrementMs,
+            scenario.moveNumber,
+            scenario.movesToGo,
+            false,
+            0,
+            0
+        );
+        requireClockBudget(
+            budget,
+            scenario.safeTimeLeftMs,
+            scenario.expectedMovesRemaining,
+            scenario.allocatedBeforeCapMs,
+            scenario.maximumCapMs,
+            scenario.timeLimitMs,
+            false,
+            scenario.name
+        );
+    }
+}
+
+void test_phase8_time_policy_boundaries() {
+    const auto& time = Tuning::Generated::VALUES.time;
+
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(69, 0, 1, std::nullopt, false, 0, 0),
+        39, 39, 1, 9, 34, false, "critical threshold - 1"
+    );
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(70, 0, 1, std::nullopt, false, 0, 0),
+        40, 39, 1, 10, 10, false, "critical threshold"
+    );
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(71, 0, 1, std::nullopt, false, 0, 0),
+        41, 39, 1, 10, 10, false, "critical threshold + 1"
+    );
+
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 51),
+        59'970, 39, 1'537, 14'992, 1'537, false, "instability threshold - 1"
+    );
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 50),
+        59'970, 39, 1'537, 14'992, 1'537, false, "instability threshold"
+    );
+    requireClockBudget(
+        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 101, 50),
+        59'970, 39, 1'998, 14'992, 1'998, true, "instability threshold + 1"
+    );
+
+    require(TimeManagement::calculateClockBudget(400, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 10,
+            "Minimum-move boundary below 10ms changed");
+    require(TimeManagement::calculateClockBudget(420, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 10,
+            "Minimum-move boundary at 10ms changed");
+    require(TimeManagement::calculateClockBudget(459, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 11,
+            "Minimum-move boundary above 10ms changed");
+
+    require(TimeManagement::calculateClockBudget(60'000, 8'994, 1, 10, false, 0, 0).timeLimitMs == 14'991,
+            "Maximum-cap boundary below cap changed");
+    require(TimeManagement::calculateClockBudget(60'000, 8'995, 1, 10, false, 0, 0).timeLimitMs == 14'992,
+            "Maximum-cap boundary at cap changed");
+    require(TimeManagement::calculateClockBudget(60'000, 8'996, 1, 10, false, 0, 0).timeLimitMs == 14'992,
+            "Maximum-cap boundary above cap changed");
+
+    require(TimeManagement::calculateClockBudget(60'000, 0, 19, std::nullopt, false, 0, 0).expectedMovesRemaining == 21,
+            "Expected-moves value immediately above floor changed");
+    require(TimeManagement::calculateClockBudget(60'000, 0, 20, std::nullopt, false, 0, 0).expectedMovesRemaining == 20,
+            "Expected-moves floor boundary changed");
+    require(TimeManagement::calculateClockBudget(60'000, 0, 21, std::nullopt, false, 0, 0).expectedMovesRemaining == 20,
+            "Expected-moves clamp below floor changed");
+
+    const auto deadlines = TimeManagement::calculateStopDeadlines(1'001);
+    require(deadlines.stableSoftMs == 500, "Stable soft-stop integer truncation changed");
+    require(deadlines.unstableSoftMs == 800, "Unstable soft-stop integer truncation changed");
+    require(deadlines.hardMs == 750, "Hard-stop integer truncation changed");
+    require(!(749 > deadlines.hardMs) && !(750 > deadlines.hardMs) && 751 > deadlines.hardMs,
+            "Hard-stop strict comparison boundary changed");
+
+    require((8191ULL & time.polling.nodeMask) != 0ULL,
+            "Polling mask boundary before check changed");
+    require((8192ULL & time.polling.nodeMask) == 0ULL,
+            "Polling mask check cadence changed");
+    require((8193ULL & time.polling.nodeMask) != 0ULL,
+            "Polling mask boundary after check changed");
 }
 
 void test_phase7_generated_search_defaults_match_production_baseline() {
@@ -1476,6 +1635,9 @@ int main() {
         {"Tuning validation rejects malformed values", test_tuning_validation_rejects_malformed_values},
         {"Generated evaluation defaults match production baseline", test_generated_evaluation_defaults_match_production_baseline},
         {"Tuning defaults match production search/time/opening values", test_tuning_defaults_match_production_search_time_and_opening_values},
+        {"Phase 8 generated time defaults match production baseline", test_phase8_generated_time_defaults_match_production_baseline},
+        {"Phase 8 synthetic clock allocation baselines", test_phase8_synthetic_clock_allocation_baselines},
+        {"Phase 8 time-policy boundaries", test_phase8_time_policy_boundaries},
         {"Phase 7 generated search defaults match production baseline", test_phase7_generated_search_defaults_match_production_baseline},
         {"Phase 7 search formula characterization", test_phase7_search_formula_characterization},
         {"Phase 7 null-move exclusions remain structural", test_phase7_null_move_exclusions_remain_structural},

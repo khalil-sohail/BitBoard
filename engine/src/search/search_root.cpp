@@ -9,6 +9,7 @@
 namespace {
 
 constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+constexpr const auto& TIME_TUNING = Tuning::Generated::VALUES.time;
 
 }
 
@@ -102,7 +103,9 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
     allocatedTimeMs.store(std::max(1LL, timeLimitMs), std::memory_order_relaxed);
     Move bestMoveLastIteration{};
     int stableCount = 0;
-    int softLimitFraction = 50;
+    int softLimitFraction =
+        TIME_TUNING.stopPolicy.stableSoftStopFraction.numerator * 100 /
+        TIME_TUNING.stopPolicy.stableSoftStopFraction.denominator;
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
     startTime = SearchInternal::SearchClock::now();
     SearchInternal::g_nodesSearched = 0;
@@ -264,7 +267,9 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             ++stableCount;
         } else {
             stableCount = 0;
-            softLimitFraction = 80;
+            softLimitFraction =
+                TIME_TUNING.stopPolicy.unstableSoftStopFraction.numerator * 100 /
+                TIME_TUNING.stopPolicy.unstableSoftStopFraction.denominator;
         }
         bestMoveLastIteration  = bestCompletedMove;
         previousIterationBest  = best.move;
@@ -302,7 +307,9 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
         long long currentHardLimit = allocatedTimeMs.load(std::memory_order_relaxed);
         long long currentSoftLimit = (currentHardLimit * softLimitFraction) / 100;
         if (elapsedMs > currentSoftLimit && stableCount >= 2) break;
-        if (elapsedMs > (currentHardLimit * 3 / 4)) break;
+        if (elapsedMs >
+            (currentHardLimit * TIME_TUNING.stopPolicy.hardStopFraction.numerator /
+             TIME_TUNING.stopPolicy.hardStopFraction.denominator)) break;
     }
 
     const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
