@@ -6,11 +6,7 @@
 #include "tuning/search_tuning.hpp"
 #include "tuning/time_tuning.hpp"
 
-#include <string_view>
-
 namespace Tuning {
-
-inline constexpr std::string_view kDefaultProfileId = "builtin-default-v1";
 
 struct EngineTuning {
     EvaluationTuning evaluation;

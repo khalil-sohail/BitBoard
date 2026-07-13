@@ -7,6 +7,7 @@
 #include "search/search_constants.hpp"
 #include "search/search_internal.hpp"
 #include "time/time_management.hpp"
+#include "tuning/compiled_profile_identity.hpp"
 #include "tuning/engine_tuning.hpp"
 #include "tuning/generated_tuning_values.hpp"
 #include "tuning/tuning_metadata.hpp"
@@ -20,7 +21,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -910,7 +913,6 @@ void test_tuning_model_constructs_and_validates_default() {
     Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
     const Tuning::TuningValidationResult result = Tuning::validateTuning(tuning);
     require(result.valid(), "BUILTIN_DEFAULT_V1_MODEL should validate");
-    require(Tuning::kDefaultProfileId == "builtin-default-v1", "Default profile id should remain builtin-default-v1");
 }
 
 void requireSameRational(const Tuning::RationalValue<int>& lhs,
@@ -1016,6 +1018,38 @@ void test_generated_tuning_header_identity_and_validation() {
     require(Tuning::Generated::GENERATED_PROFILE_ENTRY_COUNT == 76, "Generated profile entry count mismatch");
     require(Tuning::Generated::GENERATED_GROUPED_ARRAY_TABLE_COUNT == 19, "Generated grouped array/table count mismatch");
     require(Tuning::validateTuning(Tuning::Generated::VALUES).valid(), "Generated tuning values should validate");
+}
+
+void test_phase10_compiled_profile_identity_api() {
+    constexpr Tuning::CompiledProfileIdentity identity = Tuning::compiledProfileIdentity();
+    static_assert(identity.profileId == Tuning::Generated::PROFILE_ID);
+    static_assert(identity.canonicalHash == Tuning::Generated::PROFILE_HASH);
+    static_assert(identity.schemaVersion == Tuning::Generated::PROFILE_SCHEMA_VERSION);
+    static_assert(identity.modelVersion == Tuning::Generated::MODEL_VERSION);
+    static_assert(!std::is_assignable_v<decltype(identity.profileId), std::string_view>);
+    static_assert(!std::is_assignable_v<decltype(identity.canonicalHash), std::string_view>);
+    static_assert(!std::is_assignable_v<decltype(identity.schemaVersion), int>);
+    static_assert(!std::is_assignable_v<decltype(identity.modelVersion), std::string_view>);
+
+    require(!identity.profileId.empty(), "Compiled profile ID must not be empty");
+    require(identity.canonicalHash.starts_with("sha256:"),
+            "Compiled canonical hash must retain sha256 prefix");
+    require(identity.canonicalHash.size() == 71,
+            "Compiled canonical hash must contain 64 hexadecimal digits");
+    require(std::all_of(identity.canonicalHash.begin() + 7, identity.canonicalHash.end(), [](char value) {
+                return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
+            }),
+            "Compiled canonical hash must contain lowercase hexadecimal digits");
+    require(identity.schemaVersion > 0, "Compiled schema version must be positive");
+    require(!identity.modelVersion.empty(), "Compiled model version must not be empty");
+
+    std::ostringstream report;
+    Tuning::reportCompiledProfileIdentity(report);
+    require(report.str() ==
+                "info string tuning profile=builtin-default-v1 "
+                "hash=sha256:55a1ac92352bd018460f115cb5061c76140f1eed453afc8a229ed3fa84145718 "
+                "schema=1 model=phase-2-typed-model-v1",
+            "Compiled profile report format changed");
 }
 
 void test_generated_tuning_values_match_typed_model() {
@@ -1778,6 +1812,7 @@ int main() {
         {"Phase 9 missing, invalid, and special book entries", test_phase9_missing_invalid_and_special_book_entries},
         {"Tuning model constructs and validates default", test_tuning_model_constructs_and_validates_default},
         {"Generated tuning header identity and validation", test_generated_tuning_header_identity_and_validation},
+        {"Phase 10 compiled profile identity API", test_phase10_compiled_profile_identity_api},
         {"Generated tuning values match typed model", test_generated_tuning_values_match_typed_model},
         {"Generated PST values match production", test_generated_piece_square_tables_match_production},
         {"Generated PST production orientation", test_generated_piece_square_production_orientation},

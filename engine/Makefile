@@ -40,11 +40,13 @@ fclean : clean
 
 re : fclean all
 
-test: $(TEST_NAME)
+test: $(TEST_NAME) $(NAME)
 	./$(TEST_NAME)
+	ENGINE=./$(NAME) ./scripts/test_uci_profile_identity.sh
 
-tuning-header-test: $(TEST_NAME)
+tuning-header-test: $(TEST_NAME) $(NAME)
 	./$(TEST_NAME)
+	ENGINE=./$(NAME) ./scripts/test_uci_profile_identity.sh
 
 $(TEST_NAME): $(TEST_OBJS)
 	$(CXX) $(TEST_CXXFLAGS) $(LDFLAGS) $(TEST_OBJS) $(LDLIBS) -o $(TEST_NAME)

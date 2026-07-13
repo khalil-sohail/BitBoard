@@ -128,7 +128,24 @@ def main() -> int:
         candidate_header = tmp_path / "candidate-generated.hpp"
         candidate_result = run_generator(candidate_path, candidate_header)
         require(candidate_result.returncode == 0, candidate_result.stderr)
-        require("candidate-eval-0001" in candidate_header.read_text(encoding="utf-8"), "candidate identity should be embedded")
+        candidate_text = candidate_header.read_text(encoding="utf-8")
+        require(
+            'PROFILE_ID = "candidate-eval-0001"' in candidate_text,
+            "candidate profile ID should be embedded",
+        )
+        require(
+            f'PROFILE_HASH = "{candidate["canonicalHash"]}"' in candidate_text,
+            "candidate canonical hash should be embedded",
+        )
+        require(candidate["canonicalHash"] != profile["canonicalHash"], "candidate hash should differ from builtin")
+        require(
+            f'PROFILE_SCHEMA_VERSION = {candidate["schemaVersion"]}' in candidate_text,
+            "candidate schema version should be embedded",
+        )
+        require(
+            f'MODEL_VERSION = "{candidate["modelVersion"]}"' in candidate_text,
+            "candidate model version should be embedded",
+        )
 
         denied_candidate = run_generator(candidate_path, TRACKED_HEADER)
         require(denied_candidate.returncode != 0, "candidate profile should not overwrite builtin header by default")

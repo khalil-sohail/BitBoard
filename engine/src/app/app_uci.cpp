@@ -5,6 +5,7 @@
 #include "search.hpp"
 #include "search/search_internal.hpp"
 #include "time/time_management.hpp"
+#include "tuning/compiled_profile_identity.hpp"
 #include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
@@ -305,6 +306,8 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
             (input.size() == 3 || std::isspace(static_cast<unsigned char>(input[3])))) {
             std::cout << "id name BitboardEngine" << std::endl;
             std::cout << "id author Khalil" << std::endl;
+            Tuning::reportCompiledProfileIdentity(std::cout);
+            std::cout << std::endl;
             std::cout << "option name Hash type spin default 16 min 1 max 32768" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name OwnBook type check default "

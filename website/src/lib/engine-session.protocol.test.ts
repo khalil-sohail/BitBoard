@@ -113,6 +113,7 @@ class RecordingEngineProcess extends EventEmitter {
     this.writes.push(line);
 
     if (line === 'uci') {
+      this.stdout.write('info string tuning profile=test-profile hash=sha256:0000000000000000000000000000000000000000000000000000000000000000 schema=1 model=test-model\n');
       this.stdout.write('uciok\n');
       return;
     }
@@ -184,6 +185,7 @@ class ManualEngineProcess extends EventEmitter {
     this.writes.push(line);
 
     if (line === 'uci') {
+      this.stdout.write('info string tuning profile=test-profile hash=sha256:0000000000000000000000000000000000000000000000000000000000000000 schema=1 model=test-model\n');
       this.stdout.write('uciok\n');
       return;
     }
