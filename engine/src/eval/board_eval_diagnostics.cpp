@@ -1,6 +1,5 @@
 #include "board.hpp"
 #include "eval/eval_terms.hpp"
-#include "eval/eval_weights.hpp"
 #include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>

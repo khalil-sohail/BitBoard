@@ -1,6 +1,6 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_masks.hpp"
-#include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -12,6 +12,7 @@ namespace {
 
 constexpr int WHITE_IDX = static_cast<int>(Color::White);
 constexpr int BLACK_IDX = static_cast<int>(Color::Black);
+constexpr const auto& KING_SAFETY = Tuning::Generated::VALUES.evaluation.kingSafety;
 
 } // namespace
 
@@ -70,15 +71,15 @@ int kingAttackPressure(
         }
     }
 
-    const size_t idx = std::min(static_cast<size_t>(attackers), EvalWeights::KING_ATTACK_PRESSURE_PENALTY.size() - 1);
-    return EvalWeights::KING_ATTACK_PRESSURE_PENALTY[idx];
+    const size_t idx = std::min(static_cast<size_t>(attackers), KING_SAFETY.attackPressure.size() - 1);
+    return KING_SAFETY.attackPressure[idx];
 }
 
 int kingPawnShieldBonus(Color color, int kingSquare, uint64_t ownPawns) {
     const int colorIdx = (color == Color::White) ? WHITE_IDX : BLACK_IDX;
     const uint64_t shield = EvalMask::MASKS.KING_SHIELD_MASKS[static_cast<size_t>(colorIdx)][static_cast<size_t>(kingSquare)] & ownPawns;
     const int count = std::popcount(shield);
-    return std::min(count, EvalWeights::KING_SHIELD_MAX_PAWNS) * EvalWeights::KING_SHIELD_PER_PAWN_BONUS;
+    return std::min(count, KING_SAFETY.shieldMaxPawns) * KING_SAFETY.shieldPerPawnBonus;
 }
 
 } // namespace EvalTerms

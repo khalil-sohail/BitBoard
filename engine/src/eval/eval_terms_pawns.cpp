@@ -1,6 +1,5 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_masks.hpp"
-#include "eval/eval_weights.hpp"
 #include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
@@ -196,27 +195,27 @@ int passedPawnCount(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
 }
 
 int connectedPawnsBonus(Color color, uint64_t ownPawns) {
-    return connectedPawnsBonusByRank(color, ownPawns, EvalWeights::CONNECTED_PAWN_BONUS_MG_BY_RANK);
+    return connectedPawnsBonusByRank(color, ownPawns, EVAL_TUNING.pawns.connectedMgByRank);
 }
 
 int connectedPawnsBonusEg(Color color, uint64_t ownPawns) {
-    return connectedPawnsBonusByRank(color, ownPawns, EvalWeights::CONNECTED_PAWN_BONUS_EG_BY_RANK);
+    return connectedPawnsBonusByRank(color, ownPawns, EVAL_TUNING.pawns.connectedEgByRank);
 }
 
 int candidatePawnsBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
-    return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, EvalWeights::CANDIDATE_PAWN_BONUS_MG_BY_RANK);
+    return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, EVAL_TUNING.pawns.candidateMgByRank);
 }
 
 int candidatePawnsBonusEg(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
-    return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, EvalWeights::CANDIDATE_PAWN_BONUS_EG_BY_RANK);
+    return candidatePawnsBonusByRank(color, ownPawns, enemyPawns, EVAL_TUNING.pawns.candidateEgByRank);
 }
 
 int backwardPawnsPenalty(Color color, uint64_t ownPawns, uint64_t enemyPawns, uint64_t allOcc) {
-    return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, EvalWeights::BACKWARD_PAWN_PENALTY_MG_BY_RANK);
+    return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, EVAL_TUNING.pawns.backwardMgByRank);
 }
 
 int backwardPawnsPenaltyEg(Color color, uint64_t ownPawns, uint64_t enemyPawns, uint64_t allOcc) {
-    return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, EvalWeights::BACKWARD_PAWN_PENALTY_EG_BY_RANK);
+    return backwardPawnsPenaltyByRank(color, ownPawns, enemyPawns, allOcc, EVAL_TUNING.pawns.backwardEgByRank);
 }
 
 Eval::TaperTerms pawnIslandPenalty(uint64_t ownPawns) {

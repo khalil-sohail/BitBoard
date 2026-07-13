@@ -1,5 +1,4 @@
 #include "eval/eval_terms.hpp"
-#include "eval/eval_weights.hpp"
 #include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
@@ -17,15 +16,22 @@ constexpr int BISHOP_IDX = static_cast<int>(PieceType::Bishop);
 constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
 constexpr int QUEEN_IDX = static_cast<int>(PieceType::Queen);
 constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
+constexpr std::size_t MOP_UP_CENTER_DISTANCE_WEIGHT = 0;
+constexpr std::size_t MOP_UP_EDGE_DISTANCE_BASE = 1;
+constexpr std::size_t MOP_UP_EDGE_PRESSURE_WEIGHT = 2;
+constexpr std::size_t MOP_UP_CORNER_DISTANCE_CAP = 3;
+constexpr std::size_t MOP_UP_CORNER_PRESSURE_WEIGHT = 4;
+constexpr std::size_t MOP_UP_KING_DISTANCE_BASE = 5;
+constexpr std::size_t MOP_UP_KING_DISTANCE_WEIGHT = 6;
 
 } // namespace
 
 int endgameMaterialValue(uint64_t pawns, uint64_t knights, uint64_t bishops, uint64_t rooks, uint64_t queens) {
-    return std::popcount(pawns) * EvalWeights::EG_VALUE[PAWN_IDX]
-        + std::popcount(knights) * EvalWeights::EG_VALUE[KNIGHT_IDX]
-        + std::popcount(bishops) * EvalWeights::EG_VALUE[BISHOP_IDX]
-        + std::popcount(rooks) * EvalWeights::EG_VALUE[ROOK_IDX]
-        + std::popcount(queens) * EvalWeights::EG_VALUE[QUEEN_IDX];
+    return std::popcount(pawns) * EVAL_TUNING.material.endgame[PAWN_IDX]
+        + std::popcount(knights) * EVAL_TUNING.material.endgame[KNIGHT_IDX]
+        + std::popcount(bishops) * EVAL_TUNING.material.endgame[BISHOP_IDX]
+        + std::popcount(rooks) * EVAL_TUNING.material.endgame[ROOK_IDX]
+        + std::popcount(queens) * EVAL_TUNING.material.endgame[QUEEN_IDX];
 }
 
 bool hasInsufficientMaterialDraw(
@@ -141,13 +147,14 @@ int mopUpEval(int winningKingSq, int losingKingSq) {
     const int winningRank = winningKingSq >> 3;
     const int kingDistance = std::abs(winningFile - losingFile) + std::abs(winningRank - losingRank);
 
-    const int edgePressure = (EvalWeights::MOP_UP_EDGE_DISTANCE_BASE - edgeDistance) * EvalWeights::MOP_UP_EDGE_PRESSURE_WEIGHT;
-    const int cornerPressure = (EvalWeights::MOP_UP_CORNER_DISTANCE_CAP - std::min(cornerDistance, EvalWeights::MOP_UP_CORNER_DISTANCE_CAP)) * EvalWeights::MOP_UP_CORNER_PRESSURE_WEIGHT;
+    const auto& weights = EVAL_TUNING.endgame.mopUpWeights;
+    const int edgePressure = (weights[MOP_UP_EDGE_DISTANCE_BASE] - edgeDistance) * weights[MOP_UP_EDGE_PRESSURE_WEIGHT];
+    const int cornerPressure = (weights[MOP_UP_CORNER_DISTANCE_CAP] - std::min(cornerDistance, weights[MOP_UP_CORNER_DISTANCE_CAP])) * weights[MOP_UP_CORNER_PRESSURE_WEIGHT];
 
-    return centerDistance * EvalWeights::MOP_UP_CENTER_DISTANCE_WEIGHT
+    return centerDistance * weights[MOP_UP_CENTER_DISTANCE_WEIGHT]
         + edgePressure
         + cornerPressure
-        + (EvalWeights::MOP_UP_KING_DISTANCE_BASE - kingDistance) * EvalWeights::MOP_UP_KING_DISTANCE_WEIGHT;
+        + (weights[MOP_UP_KING_DISTANCE_BASE] - kingDistance) * weights[MOP_UP_KING_DISTANCE_WEIGHT];
 }
 
 } // namespace EvalTerms

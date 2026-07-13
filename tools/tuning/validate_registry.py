@@ -121,7 +121,6 @@ def parse_int_assignment(text: str, symbol: str) -> int:
 
 
 def production_values() -> dict[str, Any]:
-    eval_weights = read_repo_file("engine/src/eval/eval_weights.cpp")
     search_constants = read_repo_file("engine/include/search/search_constants.hpp")
     app_uci = read_repo_file("engine/src/app/app_uci.cpp")
     search_state = read_repo_file("engine/src/search/search_state.cpp")
@@ -130,56 +129,6 @@ def production_values() -> dict[str, Any]:
     search_root = read_repo_file("engine/src/search/search_root.cpp")
 
     values: dict[str, Any] = {
-        "evaluation.material.mg": parse_int_array_initializer(eval_weights, "MG_VALUE"),
-        "evaluation.material.eg": parse_int_array_initializer(eval_weights, "EG_VALUE"),
-        "evaluation.phase.increments": parse_int_array_initializer(eval_weights, "GAME_PHASE_INC"),
-        "evaluation.mobility.mg": parse_int_array_initializer(eval_weights, "MOBILITY_BONUS_MG"),
-        "evaluation.mobility.eg": parse_int_array_initializer(eval_weights, "MOBILITY_BONUS_EG"),
-        "evaluation.rookActivity.mg": parse_int_array_initializer(eval_weights, "ROOK_ACTIVITY_BONUS_MG"),
-        "evaluation.rookActivity.eg": parse_int_array_initializer(eval_weights, "ROOK_ACTIVITY_BONUS_EG"),
-        "evaluation.pawns.connectedByRank.mg": parse_int_array_initializer(eval_weights, "CONNECTED_PAWN_BONUS_MG_BY_RANK"),
-        "evaluation.pawns.connectedByRank.eg": parse_int_array_initializer(eval_weights, "CONNECTED_PAWN_BONUS_EG_BY_RANK"),
-        "evaluation.pawns.candidateByRank.mg": parse_int_array_initializer(eval_weights, "CANDIDATE_PAWN_BONUS_MG_BY_RANK"),
-        "evaluation.pawns.candidateByRank.eg": parse_int_array_initializer(eval_weights, "CANDIDATE_PAWN_BONUS_EG_BY_RANK"),
-        "evaluation.pawns.backwardByRank.mg": parse_int_array_initializer(eval_weights, "BACKWARD_PAWN_PENALTY_MG_BY_RANK"),
-        "evaluation.pawns.backwardByRank.eg": parse_int_array_initializer(eval_weights, "BACKWARD_PAWN_PENALTY_EG_BY_RANK"),
-        "evaluation.king.attackPressure": parse_int_array_initializer(eval_weights, "KING_ATTACK_PRESSURE_PENALTY"),
-        "evaluation.pawns.islandPenalty.mg": parse_int_assignment(eval_weights, "PAWN_ISLAND_PENALTY_MG"),
-        "evaluation.pawns.islandPenalty.eg": parse_int_assignment(eval_weights, "PAWN_ISLAND_PENALTY_EG"),
-        "evaluation.bishopPair.mg": parse_int_assignment(eval_weights, "BISHOP_PAIR_BONUS_MG"),
-        "evaluation.bishopPair.eg": parse_int_assignment(eval_weights, "BISHOP_PAIR_BONUS_EG"),
-        "evaluation.king.shieldMaxPawns": parse_int_assignment(eval_weights, "KING_SHIELD_MAX_PAWNS"),
-        "evaluation.king.shieldPerPawnBonus": parse_int_assignment(eval_weights, "KING_SHIELD_PER_PAWN_BONUS"),
-        "evaluation.pawns.doubledPenalty": parse_int_assignment(eval_weights, "PAWN_STRUCTURE_DOUBLED_PENALTY"),
-        "evaluation.pawns.isolatedPenalty": parse_int_assignment(eval_weights, "PAWN_STRUCTURE_ISOLATED_PENALTY"),
-        "evaluation.pawns.passedCountBonus.mg": parse_int_assignment(eval_weights, "PASSED_PAWN_COUNT_BONUS_MG"),
-        "evaluation.pawns.passedCountBonus.eg": parse_int_assignment(eval_weights, "PASSED_PAWN_COUNT_BONUS_EG"),
-        "evaluation.pawns.passedEgMultiplier": parse_int_assignment(eval_weights, "PASSED_PAWN_EG_MULTIPLIER"),
-        "evaluation.pawns.passedRankSquareMultiplier": parse_int_assignment(eval_weights, "PASSED_PAWN_RANK_SQUARE_MULTIPLIER"),
-        "evaluation.pawns.passedBlockedDivisor": parse_int_assignment(eval_weights, "PASSED_PAWN_BLOCKED_DIVISOR"),
-        "evaluation.rook.trappedPenalty": parse_int_assignment(eval_weights, "TRAPPED_ROOK_PENALTY"),
-        "evaluation.bishop.badHeavyPenalty": parse_int_assignment(eval_weights, "BAD_BISHOP_HEAVY_PENALTY"),
-        "evaluation.bishop.badLightPenalty": parse_int_assignment(eval_weights, "BAD_BISHOP_LIGHT_PENALTY"),
-        "evaluation.queen.earlyUndevelopedMinorPenalty": parse_int_assignment(eval_weights, "EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY"),
-        "evaluation.king.uncastledCenterPenalty": parse_int_assignment(eval_weights, "UNCASTLED_KING_CENTER_PENALTY"),
-        "evaluation.king.uncastledLostRightsPenalty": parse_int_assignment(eval_weights, "UNCASTLED_KING_LOST_RIGHTS_PENALTY"),
-        "evaluation.taper.scale": parse_int_assignment(eval_weights, "TAPER_SCALE"),
-        "evaluation.endgame.latePhaseMax": parse_int_assignment(eval_weights, "LATE_ENDGAME_PHASE_MAX"),
-        "evaluation.endgame.mopUpEgMargin": parse_int_assignment(eval_weights, "MOP_UP_EG_MARGIN"),
-        "evaluation.endgame.mopUpMaterialMargin": parse_int_assignment(eval_weights, "MOP_UP_MATERIAL_MARGIN"),
-        "evaluation.endgame.scaleOppositeBishopsMinPawns": parse_int_assignment(eval_weights, "SCALE_OPPOSITE_BISHOPS_MIN_PAWNS"),
-        "evaluation.endgame.scaleOppositeBishopsLowPawns": parse_int_assignment(eval_weights, "SCALE_OPPOSITE_BISHOPS_LOW_PAWNS"),
-        "evaluation.endgame.scaleMinorOnlyNearEqual": parse_int_assignment(eval_weights, "SCALE_MINOR_ONLY_NEAR_EQUAL"),
-        "evaluation.endgame.scaleMinorOnlyClearEdge": parse_int_assignment(eval_weights, "SCALE_MINOR_ONLY_CLEAR_EDGE"),
-        "evaluation.endgame.mopUpWeights": [
-            parse_int_assignment(eval_weights, "MOP_UP_CENTER_DISTANCE_WEIGHT"),
-            parse_int_assignment(eval_weights, "MOP_UP_EDGE_DISTANCE_BASE"),
-            parse_int_assignment(eval_weights, "MOP_UP_EDGE_PRESSURE_WEIGHT"),
-            parse_int_assignment(eval_weights, "MOP_UP_CORNER_DISTANCE_CAP"),
-            parse_int_assignment(eval_weights, "MOP_UP_CORNER_PRESSURE_WEIGHT"),
-            parse_int_assignment(eval_weights, "MOP_UP_KING_DISTANCE_BASE"),
-            parse_int_assignment(eval_weights, "MOP_UP_KING_DISTANCE_WEIGHT"),
-        ],
         "search.aspiration.windowCp": parse_int_assignment(search_constants, "ASPIRATION_WINDOW_SIZE"),
         "search.nullMove.reduction": parse_int_assignment(search_constants, "NULL_MOVE_REDUCTION"),
         "search.futility.reverseMarginPerDepthCp": parse_int_assignment(search_constants, "REVERSE_FUTILITY_MARGIN"),

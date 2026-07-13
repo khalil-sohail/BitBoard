@@ -1,6 +1,5 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_masks.hpp"
-#include "eval/eval_weights.hpp"
 #include "tuning/generated_tuning_values.hpp"
 
 #include <bit>
@@ -133,8 +132,8 @@ Eval::TaperTerms mobilityTermsForSide(
         bb &= (bb - 1);
 
         const int mobility = std::popcount(knightAttacks(square) & ~ownOccupancy);
-        terms.mg += mobility * EvalWeights::MOBILITY_BONUS_MG[static_cast<size_t>(KNIGHT_IDX)];
-        terms.eg += mobility * EvalWeights::MOBILITY_BONUS_EG[static_cast<size_t>(KNIGHT_IDX)];
+        terms.mg += mobility * EVAL_TUNING.mobility.middlegame[static_cast<size_t>(KNIGHT_IDX)];
+        terms.eg += mobility * EVAL_TUNING.mobility.endgame[static_cast<size_t>(KNIGHT_IDX)];
     }
 
     bb = ownBishops;
@@ -143,8 +142,8 @@ Eval::TaperTerms mobilityTermsForSide(
         bb &= (bb - 1);
 
         const int mobility = std::popcount(bishopAttacks(square, allOccupancy) & ~ownOccupancy);
-        terms.mg += mobility * EvalWeights::MOBILITY_BONUS_MG[static_cast<size_t>(BISHOP_IDX)];
-        terms.eg += mobility * EvalWeights::MOBILITY_BONUS_EG[static_cast<size_t>(BISHOP_IDX)];
+        terms.mg += mobility * EVAL_TUNING.mobility.middlegame[static_cast<size_t>(BISHOP_IDX)];
+        terms.eg += mobility * EVAL_TUNING.mobility.endgame[static_cast<size_t>(BISHOP_IDX)];
     }
 
     bb = ownRooks;
@@ -153,8 +152,8 @@ Eval::TaperTerms mobilityTermsForSide(
         bb &= (bb - 1);
 
         const int mobility = std::popcount(rookAttacks(square, allOccupancy) & ~ownOccupancy);
-        terms.mg += mobility * EvalWeights::MOBILITY_BONUS_MG[static_cast<size_t>(ROOK_IDX)];
-        terms.eg += mobility * EvalWeights::MOBILITY_BONUS_EG[static_cast<size_t>(ROOK_IDX)];
+        terms.mg += mobility * EVAL_TUNING.mobility.middlegame[static_cast<size_t>(ROOK_IDX)];
+        terms.eg += mobility * EVAL_TUNING.mobility.endgame[static_cast<size_t>(ROOK_IDX)];
     }
 
     bb = ownQueens;
@@ -164,8 +163,8 @@ Eval::TaperTerms mobilityTermsForSide(
 
         const uint64_t queenAttacks = (bishopAttacks(square, allOccupancy) | rookAttacks(square, allOccupancy)) & ~ownOccupancy;
         const int mobility = std::popcount(queenAttacks);
-        terms.mg += mobility * EvalWeights::MOBILITY_BONUS_MG[static_cast<size_t>(QUEEN_IDX)];
-        terms.eg += mobility * EvalWeights::MOBILITY_BONUS_EG[static_cast<size_t>(QUEEN_IDX)];
+        terms.mg += mobility * EVAL_TUNING.mobility.middlegame[static_cast<size_t>(QUEEN_IDX)];
+        terms.eg += mobility * EVAL_TUNING.mobility.endgame[static_cast<size_t>(QUEEN_IDX)];
     }
 
     return terms;

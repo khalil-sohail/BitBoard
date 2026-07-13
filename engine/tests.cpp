@@ -1,7 +1,7 @@
 #include "board.hpp"
+#include "eval/eval_masks.hpp"
 #include "eval/eval_tables.hpp"
 #include "eval/eval_terms.hpp"
-#include "eval/eval_weights.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_constants.hpp"
@@ -329,6 +329,50 @@ void test_incremental_evaluation() {
         applyMustSucceed(board, mv);
         require(board.evaluate() == board.computeStaticEvaluation(),
                 "Incremental eval drift detected after move: " + mv);
+    }
+}
+
+void test_incremental_evaluation_promotions() {
+    for (const std::string promotion : {"a7a8q", "a7a8r", "a7a8b", "a7a8n"}) {
+        Board board;
+        require(board.loadFEN("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"),
+                "Failed to load promotion evaluation fixture");
+        applyMustSucceed(board, promotion);
+        require(board.evaluate() == board.computeStaticEvaluation(),
+                "Incremental eval drift after promotion: " + promotion);
+        require(board.undoMove(), "Promotion undo should succeed: " + promotion);
+        require(board.evaluate() == board.computeStaticEvaluation(),
+                "Incremental eval drift after promotion undo: " + promotion);
+    }
+}
+
+void test_incremental_evaluation_special_moves() {
+    const struct Fixture {
+        const char* fen;
+        const char* move;
+        const char* description;
+    } fixtures[] = {
+        {"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6", "white en passant"},
+        {"4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 1", "e4d3", "black en passant"},
+        {"4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1", "e1g1", "white kingside castling"},
+        {"4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1", "e1c1", "white queenside castling"},
+        {"r3k2r/8/8/8/8/8/8/4K3 b kq - 0 1", "e8g8", "black kingside castling"},
+        {"r3k2r/8/8/8/8/8/8/4K3 b kq - 0 1", "e8c8", "black queenside castling"},
+        {"1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7b8q", "white promotion capture"},
+        {"4k3/8/8/8/8/8/p7/1R2K3 b - - 0 1", "a2b1q", "black promotion capture"},
+        {"4k3/8/8/8/8/8/p7/4K3 b - - 0 1", "a2a1n", "black underpromotion"},
+    };
+
+    for (const Fixture& fixture : fixtures) {
+        Board board;
+        require(board.loadFEN(fixture.fen), "Failed to load special-move fixture: " + std::string(fixture.description));
+        const std::string before = boardSignature(board);
+        applyMustSucceed(board, fixture.move);
+        require(board.evaluate() == board.computeStaticEvaluation(),
+                "Incremental eval drift after " + std::string(fixture.description));
+        require(board.undoMove(), "Undo failed after " + std::string(fixture.description));
+        require(boardSignature(board) == before,
+                "Undo failed to restore evaluation state after " + std::string(fixture.description));
     }
 }
 
@@ -829,12 +873,57 @@ void test_generated_tuning_values_match_typed_model() {
 }
 
 void test_generated_piece_square_tables_match_production() {
-    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE.size() == 6, "Generated MG PST piece dimension should be 6");
-    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE.size() == 6, "Generated EG PST piece dimension should be 6");
-    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE[0].size() == 64, "Generated MG PST square dimension should be 64");
-    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE[0].size() == 64, "Generated EG PST square dimension should be 64");
-    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE == EvalTables::MG_PESTO, "Generated MG PST should match production EvalTables");
-    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE == EvalTables::EG_PESTO, "Generated EG PST should match production EvalTables");
+    const auto& mg = Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE;
+    const auto& eg = Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE;
+    require(mg.size() == 6 && eg.size() == 6, "Generated PST piece dimensions should be 6");
+    require(mg[0].size() == 64 && eg[0].size() == 64, "Generated PST square dimensions should be 64");
+
+    long long mgSum = 0;
+    long long egSum = 0;
+    long long mgWeighted = 0;
+    long long egWeighted = 0;
+    std::size_t flatIndex = 0;
+    for (std::size_t piece = 0; piece < 6; ++piece) {
+        for (std::size_t square = 0; square < 64; ++square, ++flatIndex) {
+            mgSum += mg[piece][square];
+            egSum += eg[piece][square];
+            mgWeighted += static_cast<long long>(flatIndex + 1) * mg[piece][square];
+            egWeighted += static_cast<long long>(flatIndex + 1) * eg[piece][square];
+        }
+    }
+    require(mgSum == 693 && mgWeighted == -175701, "Generated MG PST checksum changed from production baseline");
+    require(egSum == 1550 && egWeighted == 98007, "Generated EG PST checksum changed from production baseline");
+
+    require(mg[0][8] == 98 && mg[1][0] == -167 && mg[2][0] == -29,
+            "Generated MG pawn/knight/bishop row ordering changed");
+    require(mg[3][0] == 32 && mg[4][0] == -28 && mg[5][0] == -65,
+            "Generated MG rook/queen/king row ordering changed");
+    require(eg[0][8] == 178 && eg[1][0] == -58 && eg[2][0] == -14,
+            "Generated EG pawn/knight/bishop row ordering changed");
+    require(eg[3][0] == 13 && eg[4][0] == -9 && eg[5][0] == -74,
+            "Generated EG rook/queen/king row ordering changed");
+}
+
+void test_generated_piece_square_production_orientation() {
+    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
+    const auto& mg = Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE;
+    const auto& eg = Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE;
+
+    for (std::size_t piece = 0; piece < Tuning::kPieceTypeCount; ++piece) {
+        for (int square = 0; square < 64; ++square) {
+            const PieceType type = static_cast<PieceType>(piece);
+            const auto white = EvalTables::pieceScoreDelta(Color::White, type, square);
+            require(white.mg - evaluation.material.middlegame[piece] == mg[piece][static_cast<std::size_t>(square)],
+                    "White MG PST orientation changed");
+            require(white.eg - evaluation.material.endgame[piece] == eg[piece][static_cast<std::size_t>(square)],
+                    "White EG PST orientation changed");
+
+            const int mirroredSquare = Eval::mirrorSquare(square);
+            const auto black = EvalTables::pieceScoreDelta(Color::Black, type, mirroredSquare);
+            require(black.mg == white.mg && black.eg == white.eg && black.phase == white.phase,
+                    "Black PST mirroring should map exactly once to the white-oriented source square");
+        }
+    }
 }
 
 void test_tuning_metadata_field_coverage_and_ordering() {
@@ -897,27 +986,46 @@ void test_tuning_validation_rejects_malformed_values() {
     }
 }
 
-void test_tuning_defaults_match_production_evaluation_values() {
-    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
-    require(tuning.evaluation.material.middlegame == EvalWeights::MG_VALUE, "Typed MG material should mirror EvalWeights::MG_VALUE");
-    require(tuning.evaluation.material.endgame == EvalWeights::EG_VALUE, "Typed EG material should mirror EvalWeights::EG_VALUE");
-    require(tuning.evaluation.phase.increments == EvalWeights::GAME_PHASE_INC, "Typed phase increments should mirror EvalWeights::GAME_PHASE_INC");
-    require(tuning.evaluation.mobility.middlegame == EvalWeights::MOBILITY_BONUS_MG, "Typed MG mobility should mirror EvalWeights::MOBILITY_BONUS_MG");
-    require(tuning.evaluation.mobility.endgame == EvalWeights::MOBILITY_BONUS_EG, "Typed EG mobility should mirror EvalWeights::MOBILITY_BONUS_EG");
-    require(tuning.evaluation.rookActivity.middlegameArray() == EvalWeights::ROOK_ACTIVITY_BONUS_MG, "Typed MG rook activity should mirror production");
-    require(tuning.evaluation.rookActivity.endgameArray() == EvalWeights::ROOK_ACTIVITY_BONUS_EG, "Typed EG rook activity should mirror production");
-    require(tuning.evaluation.pawns.connectedMgByRank == EvalWeights::CONNECTED_PAWN_BONUS_MG_BY_RANK, "Typed connected MG pawns should mirror production");
-    require(tuning.evaluation.pawns.connectedEgByRank == EvalWeights::CONNECTED_PAWN_BONUS_EG_BY_RANK, "Typed connected EG pawns should mirror production");
-    require(tuning.evaluation.pawns.candidateMgByRank == EvalWeights::CANDIDATE_PAWN_BONUS_MG_BY_RANK, "Typed candidate MG pawns should mirror production");
-    require(tuning.evaluation.pawns.candidateEgByRank == EvalWeights::CANDIDATE_PAWN_BONUS_EG_BY_RANK, "Typed candidate EG pawns should mirror production");
-    require(tuning.evaluation.pawns.backwardMgByRank == EvalWeights::BACKWARD_PAWN_PENALTY_MG_BY_RANK, "Typed backward MG pawns should mirror production");
-    require(tuning.evaluation.pawns.backwardEgByRank == EvalWeights::BACKWARD_PAWN_PENALTY_EG_BY_RANK, "Typed backward EG pawns should mirror production");
-    require(tuning.evaluation.kingSafety.attackPressure == EvalWeights::KING_ATTACK_PRESSURE_PENALTY, "Typed king pressure should mirror production");
-    require(tuning.evaluation.bishopPair.middlegame == EvalWeights::BISHOP_PAIR_BONUS_MG, "Typed bishop pair MG should mirror production");
-    require(tuning.evaluation.bishopPair.endgame == EvalWeights::BISHOP_PAIR_BONUS_EG, "Typed bishop pair EG should mirror production");
-    require(tuning.evaluation.pawns.doubledPenalty == EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY, "Typed doubled pawn penalty should mirror production");
-    require(tuning.evaluation.pawns.isolatedPenalty == EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY, "Typed isolated pawn penalty should mirror production");
-    require(tuning.evaluation.endgame.taperScale == EvalWeights::TAPER_SCALE, "Typed taper scale should mirror production");
+void test_generated_evaluation_defaults_match_production_baseline() {
+    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
+    require(evaluation.material.middlegame == Tuning::PieceValueArray{150, 250, 284, 490, 839, 0},
+            "Generated MG material should match the production baseline");
+    require(evaluation.material.endgame == Tuning::PieceValueArray{160, 200, 269, 650, 1150, 0},
+            "Generated EG material should match the production baseline");
+    require(evaluation.phase.increments == Tuning::PieceValueArray{0, 1, 1, 2, 4, 0},
+            "Generated phase increments should match the production baseline");
+    require(evaluation.mobility.middlegame == Tuning::PieceValueArray{0, 3, 10, 8, 5, 0},
+            "Generated MG mobility should match the production baseline");
+    require(evaluation.mobility.endgame == Tuning::PieceValueArray{0, 10, 10, 8, 8, 0},
+            "Generated EG mobility should match the production baseline");
+    require(evaluation.pawns.connectedMgByRank == Tuning::RankTuningTable{0, 0, 0, 21, 60, 60, 60, 0, 0},
+            "Generated connected-pawn MG table should match the production baseline");
+    require(evaluation.pawns.connectedEgByRank == Tuning::RankTuningTable{0, 0, 0, 0, 80, 80, 80, 80, 0},
+            "Generated connected-pawn EG table should match the production baseline");
+    require(evaluation.pawns.candidateMgByRank == Tuning::RankTuningTable{0, 0, 0, 40, 40, 40, 40, 0, 0},
+            "Generated candidate-pawn MG table should match the production baseline");
+    require(evaluation.pawns.candidateEgByRank == Tuning::RankTuningTable{0, 0, 0, 50, 50, 50, 50, 0, 0},
+            "Generated candidate-pawn EG table should match the production baseline");
+    require(evaluation.pawns.backwardMgByRank == Tuning::RankTuningTable{0, 0, 40, 20, 10, 40, 0, 0, 0},
+            "Generated backward-pawn MG table should match the production baseline");
+    require(evaluation.pawns.backwardEgByRank == Tuning::RankTuningTable{0, 0, 30, 30, 30, 0, 0, 0, 0},
+            "Generated backward-pawn EG table should match the production baseline");
+    require(evaluation.kingSafety.attackPressure == Tuning::KingPressureTable{0, 40, 165, 400, 400, 400, 160, 200, 240},
+            "Generated king-pressure table should match the production baseline");
+    require(evaluation.kingSafety.shieldMaxPawns == 3 && evaluation.kingSafety.shieldPerPawnBonus == 27,
+            "Generated king-shield controls should match the production baseline");
+    require(evaluation.endgame.mopUpWeights == Tuning::MopUpWeightArray{15, 10, 20, 7, 10, 25, 12},
+            "Generated mop-up table should match the production baseline");
+
+    for (std::size_t piece = 0; piece < Tuning::kPieceTypeCount; ++piece) {
+        const auto delta = EvalTables::pieceScoreDelta(Color::White, static_cast<PieceType>(piece), 0);
+        require(delta.mg - Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE[piece][0] == evaluation.material.middlegame[piece],
+                "Production MG material consumer should use generated values");
+        require(delta.eg - Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE[piece][0] == evaluation.material.endgame[piece],
+                "Production EG material consumer should use generated values");
+        require(delta.phase == evaluation.phase.increments[piece],
+                "Production phase consumer should use generated increments");
+    }
 }
 
 void test_tuning_defaults_match_production_search_time_and_opening_values() {
@@ -941,78 +1049,6 @@ void test_tuning_defaults_match_production_search_time_and_opening_values() {
     require(tuning.opening.selectionMode == Tuning::BookSelectionMode::Weighted, "Typed book selection mode should mirror production default");
     require(tuning.opening.selectionTopN == 4, "Typed selection top-N should mirror production default");
     require(tuning.opening.seed == 1592594996U, "Typed seed should mirror UCI default");
-}
-
-void test_tuning_model_does_not_use_old_texel_defaults() {
-    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
-    require(tuning.evaluation.material.middlegame[0] == 150, "Typed MG pawn value should use production default");
-    require(tuning.evaluation.material.middlegame[0] != 82, "Typed MG pawn value must not use old Texel default");
-    require(tuning.evaluation.material.endgame[4] == 1150, "Typed EG queen value should use production default");
-    require(tuning.evaluation.material.endgame[4] != 936, "Typed EG queen value must not use old Texel default");
-    require(tuning.evaluation.bishopPair.middlegame == 70, "Typed bishop pair MG should use production default");
-    require(tuning.evaluation.bishopPair.middlegame != 30, "Typed bishop pair MG must not use old Texel default");
-}
-
-void test_phase5a_legacy_scalar_bridges_match_generated_values() {
-    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
-
-    require(EvalWeights::ROOK_ACTIVITY_BONUS_MG == evaluation.rookActivity.middlegameArray(),
-            "Legacy MG rook activity bridge should initialize from generated values");
-    require(EvalWeights::ROOK_ACTIVITY_BONUS_EG == evaluation.rookActivity.endgameArray(),
-            "Legacy EG rook activity bridge should initialize from generated values");
-    require(EvalWeights::BISHOP_PAIR_BONUS_MG == evaluation.bishopPair.middlegame,
-            "Legacy bishop-pair MG bridge should initialize from generated values");
-    require(EvalWeights::BISHOP_PAIR_BONUS_EG == evaluation.bishopPair.endgame,
-            "Legacy bishop-pair EG bridge should initialize from generated values");
-
-    require(EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY == evaluation.pawns.doubledPenalty,
-            "Legacy doubled-pawn bridge should initialize from generated values");
-    require(EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY == evaluation.pawns.isolatedPenalty,
-            "Legacy isolated-pawn bridge should initialize from generated values");
-    require(EvalWeights::PAWN_ISLAND_PENALTY_MG == evaluation.pawns.islandPenaltyMg,
-            "Legacy pawn-island MG bridge should initialize from generated values");
-    require(EvalWeights::PAWN_ISLAND_PENALTY_EG == evaluation.pawns.islandPenaltyEg,
-            "Legacy pawn-island EG bridge should initialize from generated values");
-    require(EvalWeights::PASSED_PAWN_COUNT_BONUS_MG == evaluation.pawns.passedCountBonusMg,
-            "Legacy passed-count MG bridge should initialize from generated values");
-    require(EvalWeights::PASSED_PAWN_COUNT_BONUS_EG == evaluation.pawns.passedCountBonusEg,
-            "Legacy passed-count EG bridge should initialize from generated values");
-    require(EvalWeights::PASSED_PAWN_EG_MULTIPLIER == evaluation.pawns.passedEgMultiplier,
-            "Legacy passed-pawn EG multiplier bridge should initialize from generated values");
-    require(EvalWeights::PASSED_PAWN_RANK_SQUARE_MULTIPLIER == evaluation.pawns.passedRankSquareMultiplier,
-            "Legacy passed-rank multiplier bridge should initialize from generated values");
-    require(EvalWeights::PASSED_PAWN_BLOCKED_DIVISOR == evaluation.pawns.passedBlockedDivisor,
-            "Legacy blocked-passer divisor bridge should initialize from generated values");
-
-    require(EvalWeights::TRAPPED_ROOK_PENALTY == evaluation.piecePlacement.trappedRookPenalty,
-            "Legacy trapped-rook bridge should initialize from generated values");
-    require(EvalWeights::BAD_BISHOP_HEAVY_PENALTY == evaluation.piecePlacement.badBishopHeavyPenalty,
-            "Legacy heavy bad-bishop bridge should initialize from generated values");
-    require(EvalWeights::BAD_BISHOP_LIGHT_PENALTY == evaluation.piecePlacement.badBishopLightPenalty,
-            "Legacy light bad-bishop bridge should initialize from generated values");
-    require(EvalWeights::EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY == evaluation.piecePlacement.earlyQueenUndevelopedMinorPenalty,
-            "Legacy early-queen bridge should initialize from generated values");
-    require(EvalWeights::UNCASTLED_KING_CENTER_PENALTY == evaluation.kingSafety.uncastledCenterPenalty,
-            "Legacy uncastled-center bridge should initialize from generated values");
-    require(EvalWeights::UNCASTLED_KING_LOST_RIGHTS_PENALTY == evaluation.kingSafety.uncastledLostRightsPenalty,
-            "Legacy lost-castling-rights bridge should initialize from generated values");
-
-    require(EvalWeights::TAPER_SCALE == evaluation.endgame.taperScale,
-            "Legacy taper-scale bridge should initialize from generated values");
-    require(EvalWeights::LATE_ENDGAME_PHASE_MAX == evaluation.endgame.latePhaseMax,
-            "Legacy late-phase bridge should initialize from generated values");
-    require(EvalWeights::MOP_UP_EG_MARGIN == evaluation.endgame.mopUpEgMargin,
-            "Legacy mop-up EG margin bridge should initialize from generated values");
-    require(EvalWeights::MOP_UP_MATERIAL_MARGIN == evaluation.endgame.mopUpMaterialMargin,
-            "Legacy mop-up material margin bridge should initialize from generated values");
-    require(EvalWeights::SCALE_OPPOSITE_BISHOPS_MIN_PAWNS == evaluation.endgame.scaleOppositeBishopsMinPawns,
-            "Legacy opposite-bishop minimum-pawn scale bridge should initialize from generated values");
-    require(EvalWeights::SCALE_OPPOSITE_BISHOPS_LOW_PAWNS == evaluation.endgame.scaleOppositeBishopsLowPawns,
-            "Legacy opposite-bishop low-pawn scale bridge should initialize from generated values");
-    require(EvalWeights::SCALE_MINOR_ONLY_NEAR_EQUAL == evaluation.endgame.scaleMinorOnlyNearEqual,
-            "Legacy near-equal minor scale bridge should initialize from generated values");
-    require(EvalWeights::SCALE_MINOR_ONLY_CLEAR_EDGE == evaluation.endgame.scaleMinorOnlyClearEdge,
-            "Legacy clear-edge minor scale bridge should initialize from generated values");
 }
 
 void test_phase5a_scalar_term_characterization() {
@@ -1072,6 +1108,151 @@ void test_phase5a_scalar_term_characterization() {
             "Non-late phase should retain generated full taper scale");
 }
 
+void test_phase5b_grouped_evaluation_characterization() {
+    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
+    constexpr int square = 27;
+    const uint64_t piece = 1ULL << square;
+
+    const struct MobilityFixture {
+        PieceType type;
+        uint64_t knights;
+        uint64_t bishops;
+        uint64_t rooks;
+        uint64_t queens;
+        int attacks;
+    } mobilityFixtures[] = {
+        {PieceType::Knight, piece, 0ULL, 0ULL, 0ULL, std::popcount(EvalTerms::knightAttacks(square) & ~piece)},
+        {PieceType::Bishop, 0ULL, piece, 0ULL, 0ULL, std::popcount(EvalTerms::bishopAttacks(square, piece) & ~piece)},
+        {PieceType::Rook, 0ULL, 0ULL, piece, 0ULL, std::popcount(EvalTerms::rookAttacks(square, piece) & ~piece)},
+        {PieceType::Queen, 0ULL, 0ULL, 0ULL, piece,
+            std::popcount((EvalTerms::bishopAttacks(square, piece) | EvalTerms::rookAttacks(square, piece)) & ~piece)},
+    };
+    for (const auto& fixture : mobilityFixtures) {
+        const auto terms = EvalTerms::mobilityTermsForSide(
+            fixture.knights, fixture.bishops, fixture.rooks, fixture.queens, piece, piece
+        );
+        const std::size_t index = static_cast<std::size_t>(fixture.type);
+        require(terms.mg == fixture.attacks * evaluation.mobility.middlegame[index],
+                "MG mobility should use generated piece-indexed values");
+        require(terms.eg == fixture.attacks * evaluation.mobility.endgame[index],
+                "EG mobility should use generated piece-indexed values");
+    }
+
+    const uint64_t whiteConnected = (1ULL << 27) | (1ULL << 28);
+    const uint64_t blackConnected = (1ULL << 35) | (1ULL << 36);
+    require(EvalTerms::connectedPawnsBonus(Color::White, whiteConnected)
+                == 2 * evaluation.pawns.connectedMgByRank[4],
+            "White connected-pawn rank indexing should use generated MG table");
+    require(EvalTerms::connectedPawnsBonus(Color::Black, blackConnected)
+                == 2 * evaluation.pawns.connectedMgByRank[4],
+            "Black connected-pawn rank indexing should mirror white");
+    require(EvalTerms::connectedPawnsBonusEg(Color::White, whiteConnected)
+                == 2 * evaluation.pawns.connectedEgByRank[4],
+            "Connected-pawn EG table should preserve rank indexing");
+
+    const uint64_t whiteCandidatePawns = (1ULL << 27) | (1ULL << 18);
+    const uint64_t whiteCandidateEnemy = 1ULL << 36;
+    require(EvalTerms::candidatePawnsBonus(Color::White, whiteCandidatePawns, whiteCandidateEnemy)
+                == evaluation.pawns.candidateMgByRank[4],
+            "Candidate-pawn MG table should preserve white rank indexing");
+    require(EvalTerms::candidatePawnsBonusEg(Color::White, whiteCandidatePawns, whiteCandidateEnemy)
+                == evaluation.pawns.candidateEgByRank[4],
+            "Candidate-pawn EG table should preserve white rank indexing");
+
+    const uint64_t whiteBackward = 1ULL << 19;
+    const uint64_t whiteBackwardEnemy = 1ULL << 34;
+    require(EvalTerms::backwardPawnsPenalty(
+                Color::White, whiteBackward, whiteBackwardEnemy, whiteBackward | whiteBackwardEnemy)
+                == evaluation.pawns.backwardMgByRank[3],
+            "Backward-pawn MG table should preserve white rank indexing");
+    require(EvalTerms::backwardPawnsPenaltyEg(
+                Color::White, whiteBackward, whiteBackwardEnemy, whiteBackward | whiteBackwardEnemy)
+                == evaluation.pawns.backwardEgByRank[3],
+            "Backward-pawn EG table should preserve white rank indexing");
+
+    require(EvalTerms::kingAttackPressure(Color::White, 4, 0ULL, 0ULL, 0ULL, 0ULL, 1ULL << 4) == 0,
+            "King pressure should use the generated zero-attacker entry");
+    uint64_t attackingKnights = 0ULL;
+    const uint64_t whiteKingZone = EvalMask::MASKS.KING_SHIELD_MASKS[0][4];
+    for (int attackerSquare = 0; attackerSquare < 64; ++attackerSquare) {
+        if ((EvalTerms::knightAttacks(attackerSquare) & whiteKingZone) != 0ULL) {
+            attackingKnights |= 1ULL << attackerSquare;
+        }
+    }
+    require(std::popcount(attackingKnights) >= 8, "King-pressure clamp fixture needs at least eight attackers");
+    require(EvalTerms::kingAttackPressure(
+                Color::White, 4, attackingKnights, 0ULL, 0ULL, 0ULL, attackingKnights | (1ULL << 4))
+                == evaluation.kingSafety.attackPressure.back(),
+            "King pressure should clamp to the final generated entry");
+
+    require(EvalTerms::kingPawnShieldBonus(Color::White, 6, (1ULL << 13) | (1ULL << 14) | (1ULL << 15))
+                == evaluation.kingSafety.shieldMaxPawns * evaluation.kingSafety.shieldPerPawnBonus,
+            "White king shield should use generated grouped controls");
+    require(EvalTerms::kingPawnShieldBonus(Color::Black, 62, (1ULL << 53) | (1ULL << 54) | (1ULL << 55))
+                == evaluation.kingSafety.shieldMaxPawns * evaluation.kingSafety.shieldPerPawnBonus,
+            "Black king shield should mirror white");
+
+    const auto& mopUp = evaluation.endgame.mopUpWeights;
+    const int winningKing = 4;
+    const int losingKing = 60;
+    const int expectedMopUp = 5 * mopUp[0]
+        + (mopUp[1] - 0) * mopUp[2]
+        + (mopUp[3] - 3) * mopUp[4]
+        + (mopUp[5] - 7) * mopUp[6];
+    require(EvalTerms::mopUpEval(winningKing, losingKing) == expectedMopUp,
+            "Mop-up formula should use generated grouped weights without reordering");
+}
+
+void test_phase5b_static_evaluation_baselines() {
+    struct Fixture { const char* fen; int expected; };
+    constexpr Fixture fixtures[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0},
+        {"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1", 363},
+        {"4k3/P7/8/8/8/8/8/4K3 w - - 0 1", 1129},
+        {"4k3/8/8/8/3N4/8/8/4K3 w - - 0 1", 0},
+        {"4k3/8/8/8/3PP3/8/8/4K3 w - - 0 1", 1135},
+        {"4k3/8/8/4p3/3P4/8/8/4K3 w - - 0 1", 7},
+        {"4k3/8/8/8/2P5/3P4/8/4K3 w - - 0 1", 992},
+        {"6k1/5ppp/8/8/8/5Q2/8/6K1 b - - 0 1", 90},
+        {"6k1/5ppp/8/8/8/8/5PPP/6K1 w - - 0 1", 0},
+        {"8/8/8/4k3/8/8/4K3/R7 w - - 0 1", 601},
+        {"8/8/8/4k3/8/8/4K3/Q7 w - - 0 1", 796},
+        {"8/8/8/4k3/8/8/4K3/BN6 w - - 0 1", 277},
+    };
+    for (const Fixture& fixture : fixtures) {
+        Board board;
+        require(board.loadFEN(fixture.fen), "Failed to load Phase 5B evaluation fixture");
+        require(board.evaluate() == board.computeStaticEvaluation(),
+                "FEN reconstruction produced incremental evaluation drift");
+        require(board.computeStaticEvaluation() == fixture.expected,
+                "Phase 5B static-evaluation baseline changed for FEN: " + std::string(fixture.fen));
+    }
+}
+
+void test_phase5c_piece_square_static_baselines() {
+    struct Fixture { const char* fen; int expected; };
+    constexpr Fixture fixtures[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0},
+        {"4k3/8/8/8/3N4/8/P7/4K3 w - - 0 1", 1201},
+        {"4k3/8/8/8/2B5/8/P7/4K3 w - - 0 1", 1279},
+        {"4k3/8/8/8/R7/8/P7/4K3 w - - 0 1", 1602},
+        {"4k3/8/8/8/3Q4/8/P7/4K3 w - - 0 1", 2152},
+        {"4k3/8/8/8/3K4/8/P7/8 w - - 0 1", 432},
+        {"4k3/8/8/P7/8/8/8/4K3 w - - 0 1", 649},
+        {"4k3/P7/8/8/8/8/8/4K3 w - - 0 1", 1129},
+        {"r3k2r/ppp2ppp/2n1bn2/3pp3/3PP3/2N1BN2/PPP2PPP/R2QK2R w KQkq - 0 8", 948},
+        {"8/8/8/4k3/8/8/4K3/Q7 w - - 0 1", 796},
+    };
+    for (const Fixture& fixture : fixtures) {
+        Board board;
+        require(board.loadFEN(fixture.fen), "Failed to load Phase 5C PST fixture");
+        require(board.evaluate() == board.computeStaticEvaluation(),
+                "PST FEN reconstruction produced incremental evaluation drift");
+        require(board.computeStaticEvaluation() == fixture.expected,
+                "Phase 5C PST baseline changed for FEN: " + std::string(fixture.fen));
+    }
+}
+
 void test_phase5a_static_evaluation_baselines() {
     struct Fixture {
         const char* fen;
@@ -1112,6 +1293,8 @@ int main() {
         {"Perft start position depth 1..4", test_perft_start_position_depth_1_to_4},
         {"Search tactics (mate in 1 + winning capture)", test_search_tactics},
         {"Incremental evaluation drift test", test_incremental_evaluation},
+        {"Incremental promotion evaluation", test_incremental_evaluation_promotions},
+        {"Incremental special-move evaluation", test_incremental_evaluation_special_moves},
         {"Make/undo full-state restoration", test_make_undo_restores_full_state},
         {"Deep legality and undo stress", test_deep_legality_and_undo_stress},
         {"Mate in three tactical search", test_mate_in_three},
@@ -1131,16 +1314,18 @@ int main() {
         {"Generated tuning header identity and validation", test_generated_tuning_header_identity_and_validation},
         {"Generated tuning values match typed model", test_generated_tuning_values_match_typed_model},
         {"Generated PST values match production", test_generated_piece_square_tables_match_production},
+        {"Generated PST production orientation", test_generated_piece_square_production_orientation},
         {"Tuning metadata field coverage and ordering", test_tuning_metadata_field_coverage_and_ordering},
         {"Tuning array dimensions", test_tuning_array_dimensions},
         {"Tuning rational fraction representations", test_tuning_fraction_representations_are_exact},
         {"Tuning validation rejects malformed values", test_tuning_validation_rejects_malformed_values},
-        {"Tuning defaults match production evaluation values", test_tuning_defaults_match_production_evaluation_values},
+        {"Generated evaluation defaults match production baseline", test_generated_evaluation_defaults_match_production_baseline},
         {"Tuning defaults match production search/time/opening values", test_tuning_defaults_match_production_search_time_and_opening_values},
-        {"Tuning model does not use old Texel defaults", test_tuning_model_does_not_use_old_texel_defaults},
-        {"Phase 5A legacy scalar bridges match generated values", test_phase5a_legacy_scalar_bridges_match_generated_values},
         {"Phase 5A scalar term characterization", test_phase5a_scalar_term_characterization},
         {"Phase 5A static evaluation baselines", test_phase5a_static_evaluation_baselines},
+        {"Phase 5B grouped evaluation characterization", test_phase5b_grouped_evaluation_characterization},
+        {"Phase 5B static evaluation baselines", test_phase5b_static_evaluation_baselines},
+        {"Phase 5C PST static evaluation baselines", test_phase5c_piece_square_static_baselines},
     };
 
     int passed = 0;
