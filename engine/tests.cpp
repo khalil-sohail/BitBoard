@@ -1,9 +1,11 @@
 #include "board.hpp"
+#include "eval/eval_tables.hpp"
 #include "eval/eval_weights.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_constants.hpp"
 #include "tuning/engine_tuning.hpp"
+#include "tuning/generated_tuning_values.hpp"
 #include "tuning/tuning_metadata.hpp"
 #include "tuning/tuning_validation.hpp"
 
@@ -716,6 +718,124 @@ void test_tuning_model_constructs_and_validates_default() {
     require(Tuning::kDefaultProfileId == "builtin-default-v1", "Default profile id should remain builtin-default-v1");
 }
 
+void requireSameRational(const Tuning::RationalValue<int>& lhs,
+                         const Tuning::RationalValue<int>& rhs,
+                         const std::string& message) {
+    require(lhs.numerator == rhs.numerator && lhs.denominator == rhs.denominator, message);
+}
+
+void requireSameGeneratedAndModelTuning(const Tuning::EngineTuning& generated,
+                                        const Tuning::EngineTuning& model) {
+    require(generated.evaluation.material.middlegame == model.evaluation.material.middlegame, "Generated MG material mismatch");
+    require(generated.evaluation.material.endgame == model.evaluation.material.endgame, "Generated EG material mismatch");
+    require(generated.evaluation.phase.increments == model.evaluation.phase.increments, "Generated phase increments mismatch");
+    require(generated.evaluation.mobility.middlegame == model.evaluation.mobility.middlegame, "Generated MG mobility mismatch");
+    require(generated.evaluation.mobility.endgame == model.evaluation.mobility.endgame, "Generated EG mobility mismatch");
+    require(generated.evaluation.rookActivity.middlegameArray() == model.evaluation.rookActivity.middlegameArray(), "Generated MG rook activity mismatch");
+    require(generated.evaluation.rookActivity.endgameArray() == model.evaluation.rookActivity.endgameArray(), "Generated EG rook activity mismatch");
+    require(generated.evaluation.bishopPair.middlegame == model.evaluation.bishopPair.middlegame, "Generated bishop pair MG mismatch");
+    require(generated.evaluation.bishopPair.endgame == model.evaluation.bishopPair.endgame, "Generated bishop pair EG mismatch");
+    require(generated.evaluation.pawns.connectedMgByRank == model.evaluation.pawns.connectedMgByRank, "Generated connected pawn MG table mismatch");
+    require(generated.evaluation.pawns.connectedEgByRank == model.evaluation.pawns.connectedEgByRank, "Generated connected pawn EG table mismatch");
+    require(generated.evaluation.pawns.candidateMgByRank == model.evaluation.pawns.candidateMgByRank, "Generated candidate pawn MG table mismatch");
+    require(generated.evaluation.pawns.candidateEgByRank == model.evaluation.pawns.candidateEgByRank, "Generated candidate pawn EG table mismatch");
+    require(generated.evaluation.pawns.backwardMgByRank == model.evaluation.pawns.backwardMgByRank, "Generated backward pawn MG table mismatch");
+    require(generated.evaluation.pawns.backwardEgByRank == model.evaluation.pawns.backwardEgByRank, "Generated backward pawn EG table mismatch");
+    require(generated.evaluation.pawns.doubledPenalty == model.evaluation.pawns.doubledPenalty, "Generated doubled pawn mismatch");
+    require(generated.evaluation.pawns.isolatedPenalty == model.evaluation.pawns.isolatedPenalty, "Generated isolated pawn mismatch");
+    require(generated.evaluation.pawns.islandPenaltyMg == model.evaluation.pawns.islandPenaltyMg, "Generated MG pawn island mismatch");
+    require(generated.evaluation.pawns.islandPenaltyEg == model.evaluation.pawns.islandPenaltyEg, "Generated EG pawn island mismatch");
+    require(generated.evaluation.pawns.passedCountBonusMg == model.evaluation.pawns.passedCountBonusMg, "Generated passed count MG mismatch");
+    require(generated.evaluation.pawns.passedCountBonusEg == model.evaluation.pawns.passedCountBonusEg, "Generated passed count EG mismatch");
+    require(generated.evaluation.pawns.passedEgMultiplier == model.evaluation.pawns.passedEgMultiplier, "Generated passed EG multiplier mismatch");
+    require(generated.evaluation.pawns.passedRankSquareMultiplier == model.evaluation.pawns.passedRankSquareMultiplier, "Generated passed rank-square multiplier mismatch");
+    require(generated.evaluation.pawns.passedBlockedDivisor == model.evaluation.pawns.passedBlockedDivisor, "Generated passed blocked divisor mismatch");
+    require(generated.evaluation.kingSafety.attackPressure == model.evaluation.kingSafety.attackPressure, "Generated king pressure table mismatch");
+    require(generated.evaluation.kingSafety.shieldMaxPawns == model.evaluation.kingSafety.shieldMaxPawns, "Generated king shield max mismatch");
+    require(generated.evaluation.kingSafety.shieldPerPawnBonus == model.evaluation.kingSafety.shieldPerPawnBonus, "Generated king shield bonus mismatch");
+    require(generated.evaluation.kingSafety.uncastledCenterPenalty == model.evaluation.kingSafety.uncastledCenterPenalty, "Generated uncastled center penalty mismatch");
+    require(generated.evaluation.kingSafety.uncastledLostRightsPenalty == model.evaluation.kingSafety.uncastledLostRightsPenalty, "Generated uncastled rights penalty mismatch");
+    require(generated.evaluation.piecePlacement.badBishopHeavyPenalty == model.evaluation.piecePlacement.badBishopHeavyPenalty, "Generated bad bishop heavy mismatch");
+    require(generated.evaluation.piecePlacement.badBishopLightPenalty == model.evaluation.piecePlacement.badBishopLightPenalty, "Generated bad bishop light mismatch");
+    require(generated.evaluation.piecePlacement.earlyQueenUndevelopedMinorPenalty == model.evaluation.piecePlacement.earlyQueenUndevelopedMinorPenalty, "Generated early queen penalty mismatch");
+    require(generated.evaluation.piecePlacement.trappedRookPenalty == model.evaluation.piecePlacement.trappedRookPenalty, "Generated trapped rook mismatch");
+    require(generated.evaluation.endgame.taperScale == model.evaluation.endgame.taperScale, "Generated taper scale mismatch");
+    require(generated.evaluation.endgame.latePhaseMax == model.evaluation.endgame.latePhaseMax, "Generated late phase max mismatch");
+    require(generated.evaluation.endgame.mopUpEgMargin == model.evaluation.endgame.mopUpEgMargin, "Generated mop-up EG margin mismatch");
+    require(generated.evaluation.endgame.mopUpMaterialMargin == model.evaluation.endgame.mopUpMaterialMargin, "Generated mop-up material margin mismatch");
+    require(generated.evaluation.endgame.scaleOppositeBishopsMinPawns == model.evaluation.endgame.scaleOppositeBishopsMinPawns, "Generated opposite bishops min-pawns scale mismatch");
+    require(generated.evaluation.endgame.scaleOppositeBishopsLowPawns == model.evaluation.endgame.scaleOppositeBishopsLowPawns, "Generated opposite bishops low-pawns scale mismatch");
+    require(generated.evaluation.endgame.scaleMinorOnlyNearEqual == model.evaluation.endgame.scaleMinorOnlyNearEqual, "Generated minor-only near-equal scale mismatch");
+    require(generated.evaluation.endgame.scaleMinorOnlyClearEdge == model.evaluation.endgame.scaleMinorOnlyClearEdge, "Generated minor-only clear-edge scale mismatch");
+    require(generated.evaluation.endgame.mopUpWeights == model.evaluation.endgame.mopUpWeights, "Generated mop-up weights mismatch");
+    require(generated.evaluation.pieceSquare.middlegameRepresented == model.evaluation.pieceSquare.middlegameRepresented, "Generated MG PST representation flag mismatch");
+    require(generated.evaluation.pieceSquare.endgameRepresented == model.evaluation.pieceSquare.endgameRepresented, "Generated EG PST representation flag mismatch");
+
+    require(generated.search.aspiration.windowCp == model.search.aspiration.windowCp, "Generated aspiration mismatch");
+    require(generated.search.nullMove.reduction == model.search.nullMove.reduction, "Generated null move mismatch");
+    require(generated.search.futility.reverseMarginPerDepthCp == model.search.futility.reverseMarginPerDepthCp, "Generated reverse futility mismatch");
+    require(generated.search.futility.forwardMarginPerDepthCp == model.search.futility.forwardMarginPerDepthCp, "Generated forward futility mismatch");
+    requireSameRational(generated.search.lateMoveReduction.base, model.search.lateMoveReduction.base, "Generated LMR rational mismatch");
+    require(generated.search.quiescence.deltaMarginCp == model.search.quiescence.deltaMarginCp, "Generated quiescence margin mismatch");
+    require(generated.search.singularExtension.marginCp == model.search.singularExtension.marginCp, "Generated singular margin mismatch");
+    require(generated.search.moveOrdering.transpositionMoveScore == model.search.moveOrdering.transpositionMoveScore, "Generated TT score mismatch");
+    require(generated.search.moveOrdering.quiet.firstKillerScore == model.search.moveOrdering.quiet.firstKillerScore, "Generated first killer mismatch");
+    require(generated.search.moveOrdering.quiet.secondKillerScore == model.search.moveOrdering.quiet.secondKillerScore, "Generated second killer mismatch");
+    require(generated.search.moveOrdering.quiet.counterMoveScore == model.search.moveOrdering.quiet.counterMoveScore, "Generated countermove mismatch");
+    require(generated.search.moveOrdering.capture.winningCaptureBaseScore == model.search.moveOrdering.capture.winningCaptureBaseScore, "Generated winning capture mismatch");
+    require(generated.search.moveOrdering.capture.losingCaptureBaseScore == model.search.moveOrdering.capture.losingCaptureBaseScore, "Generated losing capture mismatch");
+    require(generated.search.moveOrdering.capture.seeScoreMultiplier == model.search.moveOrdering.capture.seeScoreMultiplier, "Generated SEE multiplier mismatch");
+    require(generated.search.moveOrdering.promotionBaseScore == model.search.moveOrdering.promotionBaseScore, "Generated promotion score mismatch");
+    require(generated.search.moveOrdering.historyLimit == model.search.moveOrdering.historyLimit, "Generated history cap mismatch");
+    require(generated.search.moveOrdering.mvvLva == model.search.moveOrdering.mvvLva, "Generated MVV-LVA mismatch");
+    require(generated.search.moveOrdering.seePieceValues == model.search.moveOrdering.seePieceValues, "Generated SEE values mismatch");
+
+    require(generated.time.allocation.safetyReserveMs == model.time.allocation.safetyReserveMs, "Generated safety reserve mismatch");
+    require(generated.time.allocation.minimumMoveTimeMs == model.time.allocation.minimumMoveTimeMs, "Generated minimum move time mismatch");
+    require(generated.time.allocation.expectedMovesBase == model.time.allocation.expectedMovesBase, "Generated expected moves base mismatch");
+    require(generated.time.allocation.expectedMovesFloor == model.time.allocation.expectedMovesFloor, "Generated expected moves floor mismatch");
+    requireSameRational(generated.time.allocation.incrementContribution, model.time.allocation.incrementContribution, "Generated increment contribution mismatch");
+    require(generated.time.allocation.instabilityThresholdCp == model.time.allocation.instabilityThresholdCp, "Generated instability threshold mismatch");
+    requireSameRational(generated.time.allocation.instabilityMultiplier, model.time.allocation.instabilityMultiplier, "Generated instability multiplier mismatch");
+    requireSameRational(generated.time.allocation.maximumClockFraction, model.time.allocation.maximumClockFraction, "Generated max clock fraction mismatch");
+    requireSameRational(generated.time.stopPolicy.stableSoftStopFraction, model.time.stopPolicy.stableSoftStopFraction, "Generated stable soft-stop mismatch");
+    requireSameRational(generated.time.stopPolicy.unstableSoftStopFraction, model.time.stopPolicy.unstableSoftStopFraction, "Generated unstable soft-stop mismatch");
+    requireSameRational(generated.time.stopPolicy.hardStopFraction, model.time.stopPolicy.hardStopFraction, "Generated hard-stop mismatch");
+    require(generated.time.stopPolicy.criticalLowTimeThresholdMs == model.time.stopPolicy.criticalLowTimeThresholdMs, "Generated critical threshold mismatch");
+    require(generated.time.stopPolicy.criticalLowTimeReserveMs == model.time.stopPolicy.criticalLowTimeReserveMs, "Generated critical reserve mismatch");
+    require(generated.time.polling.nodeMask == model.time.polling.nodeMask, "Generated polling mask mismatch");
+
+    require(generated.opening.enabled == model.opening.enabled, "Generated opening enabled mismatch");
+    require(generated.opening.depthPlies == model.opening.depthPlies, "Generated opening depth mismatch");
+    require(generated.opening.selectionMode == model.opening.selectionMode, "Generated opening mode mismatch");
+    require(generated.opening.selectionTopN == model.opening.selectionTopN, "Generated opening top-N mismatch");
+    require(generated.opening.seed == model.opening.seed, "Generated opening seed mismatch");
+}
+
+void test_generated_tuning_header_identity_and_validation() {
+    require(Tuning::Generated::PROFILE_ID == "builtin-default-v1", "Generated profile id mismatch");
+    require(Tuning::Generated::PROFILE_HASH == "sha256:55a1ac92352bd018460f115cb5061c76140f1eed453afc8a229ed3fa84145718", "Generated profile hash mismatch");
+    require(Tuning::Generated::PROFILE_SCHEMA_VERSION == 1, "Generated schema version mismatch");
+    require(Tuning::Generated::REGISTRY_VERSION == 1, "Generated registry version mismatch");
+    require(Tuning::Generated::MODEL_VERSION == "phase-2-typed-model-v1", "Generated model version mismatch");
+    require(Tuning::Generated::GENERATED_PROFILE_ENTRY_COUNT == 76, "Generated profile entry count mismatch");
+    require(Tuning::Generated::GENERATED_GROUPED_ARRAY_TABLE_COUNT == 19, "Generated grouped array/table count mismatch");
+    require(Tuning::validateTuning(Tuning::Generated::VALUES).valid(), "Generated tuning values should validate");
+}
+
+void test_generated_tuning_values_match_typed_model() {
+    requireSameGeneratedAndModelTuning(Tuning::Generated::VALUES, Tuning::BUILTIN_DEFAULT_V1_MODEL);
+}
+
+void test_generated_piece_square_tables_match_production() {
+    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE.size() == 6, "Generated MG PST piece dimension should be 6");
+    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE.size() == 6, "Generated EG PST piece dimension should be 6");
+    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE[0].size() == 64, "Generated MG PST square dimension should be 64");
+    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE[0].size() == 64, "Generated EG PST square dimension should be 64");
+    require(Tuning::Generated::MIDDLEGAME_PIECE_SQUARE_TABLE == EvalTables::MG_PESTO, "Generated MG PST should match production EvalTables");
+    require(Tuning::Generated::ENDGAME_PIECE_SQUARE_TABLE == EvalTables::EG_PESTO, "Generated EG PST should match production EvalTables");
+}
+
 void test_tuning_metadata_field_coverage_and_ordering() {
     require(Tuning::TUNING_FIELDS.size() == 76, "Expected 76 typed tuning field mappings");
     require(static_cast<size_t>(Tuning::TuningFieldId::Count) == 76, "TuningFieldId count should match registry entries");
@@ -865,6 +985,9 @@ int main() {
         {"Opening book seeded weighted selection", test_opening_book_weighted_selector_is_seeded_and_weighted},
         {"Opening book zero-weight and top-N policy", test_opening_book_zero_weight_and_top_n_policy},
         {"Tuning model constructs and validates default", test_tuning_model_constructs_and_validates_default},
+        {"Generated tuning header identity and validation", test_generated_tuning_header_identity_and_validation},
+        {"Generated tuning values match typed model", test_generated_tuning_values_match_typed_model},
+        {"Generated PST values match production", test_generated_piece_square_tables_match_production},
         {"Tuning metadata field coverage and ordering", test_tuning_metadata_field_coverage_and_ordering},
         {"Tuning array dimensions", test_tuning_array_dimensions},
         {"Tuning rational fraction representations", test_tuning_fraction_representations_are_exact},

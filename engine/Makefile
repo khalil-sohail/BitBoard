@@ -49,6 +49,9 @@ re : fclean all
 test: $(TEST_NAME)
 	./$(TEST_NAME)
 
+tuning-header-test: $(TEST_NAME)
+	./$(TEST_NAME)
+
 $(TEST_NAME): $(TEST_OBJS)
 	$(CXX) $(TEST_CXXFLAGS) $(LDFLAGS) $(TEST_OBJS) $(LDLIBS) -o $(TEST_NAME)
 
@@ -65,4 +68,4 @@ print-config:
 	@echo "LDFLAGS=$(LDFLAGS)"
 	@echo "LDLIBS=$(LDLIBS)"
 
-.PHONY: all clean fclean re test tune print-config
+.PHONY: all clean fclean re test tuning-header-test tune print-config
