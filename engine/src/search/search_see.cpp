@@ -1,7 +1,7 @@
 #include "search/search_see.hpp"
 #include "move/movegen_attacks.hpp"
 #include "move/movegen_constants.hpp"
-#include "tuning/generated_tuning_values.hpp"
+#include "tuning/active_tuning_values.hpp"
 
 #include <algorithm>
 #include <cstdint>

@@ -58,4 +58,10 @@ print-config:
 	@echo "LDFLAGS=$(LDFLAGS)"
 	@echo "LDLIBS=$(LDLIBS)"
 
-.PHONY: all clean fclean re test tuning-header-test print-config
+candidate-build:
+	@test -n "$(CANDIDATE_HEADER)" || (echo "CANDIDATE_HEADER is required" >&2; exit 2)
+	@test -n "$(CANDIDATE_OUTPUT)" || (echo "CANDIDATE_OUTPUT is required" >&2; exit 2)
+	@mkdir -p "$(dir $(CANDIDATE_OUTPUT))"
+	$(CXX) $(CXXFLAGS) -DBITBOARD_TUNING_HEADER='"$(abspath $(CANDIDATE_HEADER))"' $(SRCS) $(LDLIBS) -o "$(CANDIDATE_OUTPUT)"
+
+.PHONY: all clean fclean re test tuning-header-test print-config candidate-build

@@ -74,3 +74,6 @@ tuning/datasets/
 tuning/engines/
 tuning/annotations/
 tuning/features/
+tuning/selections/
+tuning/candidates/
+tuning/builds/

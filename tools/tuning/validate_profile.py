@@ -203,9 +203,13 @@ def validate_profile(profile: dict[str, Any], registry_path: Path = Path("tuning
                 type_mismatches += 1
             raise
         _validate_bounds(name, value, param)
-        if value != expected_values[name]:
+        # The builtin profile must remain byte-for-byte tied to production defaults.
+        # Development candidates may vary within the same typed registry bounds.
+        if value != expected_values[name] and profile["profileId"] == PROFILE_ID:
             value_mismatches += 1
             raise ProfileValidationError(f"{name}: value mismatch profile={value!r} expected={expected_values[name]!r}")
+        if value != expected_values[name]:
+            value_mismatches += 1
 
     if profile["parameters"]["opening.selectionTopN"] < 1:
         raise ProfileValidationError("opening.selectionTopN must be nonzero")

@@ -309,6 +309,44 @@ def select_positions(dataset_dir: Path, split: str, maximum: int | None) -> list
     return positions[:maximum] if maximum is not None else positions
 
 
+def select_explicit_positions(dataset_dir: Path, manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    manifest = read_json(manifest_path)
+    source = manifest.get("sourceDataset", {})
+    if source.get("manifestSha256") != sha256_file(dataset_dir / "manifest.json"):
+        raise FeatureError("Selection source dataset manifest checksum mismatch")
+    if source.get("positionsSha256") != sha256_file(dataset_dir / "positions.jsonl"):
+        raise FeatureError("Selection source positions checksum mismatch")
+    selection_path = manifest_path.parent / "selection.jsonl"
+    expected = manifest.get("artifacts", {}).get("selection.jsonl", {})
+    if expected.get("sha256") != sha256_file(selection_path):
+        raise FeatureError("Selection checksum mismatch")
+    selected_records = read_jsonl(selection_path)
+    ids = [record.get("positionId") for record in selected_records]
+    if len(set(ids)) != len(ids):
+        raise FeatureError("Selection contains duplicate position IDs")
+    wanted = set(ids); by_id: dict[str, dict[str, Any]] = {}
+    try:
+        with (dataset_dir / "positions.jsonl").open("r", encoding="utf-8") as handle:
+            for number, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                identifier = record.get("positionId")
+                if identifier in wanted:
+                    if identifier in by_id:
+                        raise FeatureError(f"Duplicate selected source position: {identifier}")
+                    by_id[identifier] = record
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FeatureError(f"Cannot stream source positions: {error}") from error
+    missing = [identifier for identifier in ids if identifier not in by_id]
+    if missing:
+        raise FeatureError(f"Selection contains {len(missing)} IDs absent from the source dataset")
+    return [by_id[identifier] for identifier in ids], {
+        "manifestSha256": sha256_file(manifest_path),
+        "selectionSha256": sha256_file(selection_path),
+    }
+
+
 def join_records(positions: Sequence[dict[str, Any]], annotations: Sequence[dict[str, Any]], engine_records: Sequence[dict[str, Any]], registry: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
     def unique(items: Sequence[dict[str, Any]], label: str) -> dict[str, dict[str, Any]]:
         result = {}
@@ -588,8 +626,16 @@ def export_command(args: argparse.Namespace) -> None:
     dataset_manifest,annotation_manifest=read_json(dataset_dir/"manifest.json"),read_json(annotation_dir/"manifest.json")
     validate_artifact_manifest(dataset_dir,dataset_manifest,"Phase 12")
     validate_artifact_manifest(annotation_dir,annotation_manifest,"Phase 13")
+    if args.selection_manifest:
+        expected_selection=annotation_manifest.get("compatibility",{}).get("selection",{}).get("explicitSelection",{})
+        if expected_selection.get("manifestSha256") != sha256_file(Path(args.selection_manifest)):
+            raise FeatureError("Annotation selection identity does not match the requested selection")
     registry,registry_hash=load_registry(registry_path)
-    positions=select_positions(dataset_dir,args.split,args.max_positions)
+    selection_identity=None
+    if args.selection_manifest:
+        positions,selection_identity=select_explicit_positions(dataset_dir,Path(args.selection_manifest))
+    else:
+        positions=select_positions(dataset_dir,args.split,args.max_positions)
     annotation_records=read_jsonl(annotation_dir/"annotations.jsonl")
     selected_ids={position["positionId"] for position in positions}
     annotations=[record for record in annotation_records if record.get("positionId") in selected_ids]
@@ -612,7 +658,7 @@ def export_command(args: argparse.Namespace) -> None:
         for name,records in (("features.jsonl",joined),("failures.jsonl",failures),*((f"{split}.jsonl",by_split[split]) for split in SPLITS)): write_atomic(temporary/name,jsonl_bytes(records))
         write_atomic(temporary/"summary.json",pretty_json(summary).encode())
         for name in ANALYSIS_FILES: write_atomic(temporary/name,pretty_json({"schemaVersion":1,"pending":True}).encode())
-        manifest={"schemaVersion":1,"featureModelVersion":FEATURE_MODEL_VERSION,"tool":{"name":"evaluation_features.py","version":"1"},"sourceDataset":{"datasetId":dataset_manifest.get("datasetId"),"manifestSha256":sha256_file(dataset_dir/"manifest.json")},"sourceAnnotations":{"annotationVersion":annotation_manifest.get("annotationVersion"),"manifestSha256":sha256_file(annotation_dir/"manifest.json")},"bitboard":{**identity,"binarySha256":sha256_file(engine)},"evaluationRegistry":{"sha256":registry_hash,"entries":len(registry)},"selection":{"split":args.split,"maxPositions":args.max_positions,"selectedCount":len(positions)},"counts":{"records":len(joined),"failures":len(failures)},"featureMetadata":feature_metadata(registry),"artifacts":artifact_metadata(temporary,(*JSONL_FILES,"summary.json",*ANALYSIS_FILES))}
+        manifest={"schemaVersion":1,"featureModelVersion":FEATURE_MODEL_VERSION,"tool":{"name":"evaluation_features.py","version":"1"},"sourceDataset":{"datasetId":dataset_manifest.get("datasetId"),"manifestSha256":sha256_file(dataset_dir/"manifest.json")},"sourceAnnotations":{"annotationVersion":annotation_manifest.get("annotationVersion"),"manifestSha256":sha256_file(annotation_dir/"manifest.json")},"bitboard":{**identity,"binarySha256":sha256_file(engine)},"evaluationRegistry":{"sha256":registry_hash,"entries":len(registry)},"selection":{"split":args.split,"maxPositions":None if selection_identity else args.max_positions,"selectedCount":len(positions),**({"explicitSelection":selection_identity} if selection_identity else {})},"counts":{"records":len(joined),"failures":len(failures)},"featureMetadata":feature_metadata(registry),"artifacts":artifact_metadata(temporary,(*JSONL_FILES,"summary.json",*ANALYSIS_FILES))}
         write_atomic(temporary/"manifest.json",pretty_json(manifest).encode())
         # Validate every canonical record before publication.
         for record in read_jsonl(temporary/"features.jsonl"): validate_reconstruction(record);validate_sparse_features(record["features"],registry)
@@ -647,7 +693,7 @@ def sensitivity_command(args: argparse.Namespace) -> None:
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description=__doc__);sub=result.add_subparsers(dest="command",required=True)
-    export=sub.add_parser("export");export.add_argument("--dataset-dir",default=str(DEFAULT_DATASET));export.add_argument("--annotation-dir",default=str(DEFAULT_ANNOTATIONS));export.add_argument("--engine",default=str(DEFAULT_ENGINE));export.add_argument("--output-dir",default=str(DEFAULT_OUTPUT));export.add_argument("--registry",default=str(DEFAULT_REGISTRY));export.add_argument("--split",choices=(*SPLITS,"all"),default="validation");export.add_argument("--max-positions",type=int,default=100);export.add_argument("--force",action="store_true");export.set_defaults(function=export_command)
+    export=sub.add_parser("export");export.add_argument("--dataset-dir",default=str(DEFAULT_DATASET));export.add_argument("--annotation-dir",default=str(DEFAULT_ANNOTATIONS));export.add_argument("--engine",default=str(DEFAULT_ENGINE));export.add_argument("--output-dir",default=str(DEFAULT_OUTPUT));export.add_argument("--registry",default=str(DEFAULT_REGISTRY));export.add_argument("--split",choices=(*SPLITS,"all"),default="validation");export.add_argument("--max-positions",type=int,default=100);export.add_argument("--selection-manifest");export.add_argument("--force",action="store_true");export.set_defaults(function=export_command)
     inspect=sub.add_parser("inspect");inspect.add_argument("--feature-dir",default=str(DEFAULT_OUTPUT));inspect.set_defaults(function=inspect_command)
     sensitivity=sub.add_parser("sensitivity");sensitivity.add_argument("--feature-dir",default=str(DEFAULT_OUTPUT));sensitivity.add_argument("--registry",default=str(DEFAULT_REGISTRY));sensitivity.set_defaults(function=sensitivity_command)
     return result

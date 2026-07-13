@@ -9,8 +9,10 @@ import hashlib
 import json
 import math
 import os
+import select
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -79,6 +81,7 @@ class AnnotationConfig:
     resume: bool = False
     force: bool = False
     annotation_version: str = ANNOTATION_VERSION
+    selection_manifest: Path | None = None
 
 
 class EngineAdapter(Protocol):
@@ -207,13 +210,29 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
     require_python_chess()
     binary = validate_engine_binary(path)
     try:
-        engine = chess.engine.SimpleEngine.popen_uci(str(path), timeout=timeout)
-    except Exception as error:
-        raise AnnotationError(f"Stockfish UCI handshake failed: {error}") from error
-    try:
-        engine.ping()
-        name = str(engine.id.get("name", "")).strip()
-        author = str(engine.id.get("author", "")).strip()
+        process = subprocess.Popen([str(path.resolve())], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, bufsize=1)
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write("uci\n"); process.stdin.flush()
+        name = ""; author = ""; supported: dict[str, dict[str, Any]] = {}
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                raise AnnotationError("Stockfish terminated during UCI handshake")
+            text = line.strip()
+            if text.startswith("id name "): name = text[8:]
+            elif text.startswith("id author "): author = text[10:]
+            elif text.startswith("option name "):
+                tokens = text.split(); type_index = tokens.index("type"); option_name = " ".join(tokens[2:type_index])
+                option_type = tokens[type_index+1]; item: dict[str, Any] = {"type":option_type,"default":None,"minimum":None,"maximum":None}
+                for marker,target in (("default","default"),("min","minimum"),("max","maximum")):
+                    if marker in tokens:
+                        index=tokens.index(marker)+1; raw=tokens[index] if index<len(tokens) else ""
+                        item[target]=int(raw) if raw.lstrip("-").isdigit() else raw
+                supported[option_name]=item
+            elif text == "uciok": break
+        process.stdin.write("isready\n"); process.stdin.flush()
+        while process.stdout.readline().strip() != "readyok": pass
         if not name:
             raise AnnotationError("Stockfish did not report an engine name")
         if not author:
@@ -223,8 +242,7 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
             "engineName": name,
             "engineAuthor": author,
             "supportedOptions": {
-                option_name: serialize_option(option)
-                for option_name, option in sorted(engine.options.items())
+                option_name: item for option_name, item in sorted(supported.items())
             },
         }
     except Exception as error:
@@ -232,10 +250,12 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
             raise
         raise AnnotationError(f"Stockfish readiness check failed: {error}") from error
     finally:
-        try:
-            engine.quit()
-        except Exception:
-            engine.close()
+        if 'process' in locals():
+            try:
+                assert process.stdin is not None
+                process.stdin.write("quit\n"); process.stdin.flush(); process.wait(timeout=2)
+            except Exception:
+                process.kill()
 
 
 class StockfishAdapter:
@@ -244,45 +264,62 @@ class StockfishAdapter:
     def __init__(self, config: AnnotationConfig, identity: dict[str, Any]) -> None:
         self.config = config
         self.identity = identity
+        self.timeout = config.position_timeout_seconds
         try:
-            self.engine = chess.engine.SimpleEngine.popen_uci(
-                str(config.engine_path), timeout=min(config.position_timeout_seconds, 30.0)
-            )
-            self.engine.timeout = config.position_timeout_seconds
-            options = deterministic_engine_options(
-                config.threads, config.hash_mb, config.multipv, self.engine.options,
-            )
-            validate_engine_option_values(options, self.engine.options)
-            # Ponder and MultiPV are managed by python-chess's analysis command.
-            configurable = {
-                key: value for key, value in options.items()
-                if key not in {"Ponder", "MultiPV"} and key in self.engine.options
-            }
-            self.engine.configure(configurable)
-            self.engine.ping()
+            self.process = subprocess.Popen([str(config.engine_path.resolve())],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1)
+            assert self.process.stdin is not None and self.process.stdout is not None
+            self._send("uci")
+            while self._read() != "uciok": pass
+            supported = identity["supportedOptions"]
+            options = deterministic_engine_options(config.threads,config.hash_mb,config.multipv,supported)
+            for name,value in options.items():
+                if name in supported: self._send(f"setoption name {name} value {str(value).lower() if isinstance(value,bool) else value}")
+            self._send("isready")
+            while self._read() != "readyok": pass
         except Exception as error:
             raise RetryableEngineError(f"engine_start_failed: {error}") from error
 
     def analyse(self, board: Any, limit: AnalysisLimit, multipv: int) -> list[dict[str, Any]]:
-        chess_limit = chess.engine.Limit(**{limit.type: limit.value})
         try:
-            raw = self.engine.analyse(
-                board,
-                chess_limit,
-                multipv=multipv,
-                info=chess.engine.INFO_ALL,
-            )
-        except (TimeoutError, asyncio.TimeoutError) as error:
-            raise AnalysisTimeout(f"analysis_timeout: {error}") from error
-        except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as error:
+            self._send(f"position fen {board.fen(en_passant='legal')}")
+            self._send(f"go {limit.type} {limit.value}")
+            latest: dict[int, dict[str, Any]] = {}
+            while True:
+                line=self._read()
+                if line.startswith("bestmove "): break
+                if not line.startswith("info ") or " score " not in line or " pv " not in line: continue
+                tokens=line.split(); rank=int(tokens[tokens.index("multipv")+1]) if "multipv" in tokens else 1
+                item: dict[str,Any]={"multipv":rank}
+                for key in ("depth","seldepth","nodes","hashfull","tbhits"):
+                    if key in tokens: item[key]=int(tokens[tokens.index(key)+1])
+                score_index=tokens.index("score"); score_type=tokens[score_index+1]; score_value=int(tokens[score_index+2])
+                relative=chess.engine.Cp(score_value) if score_type=="cp" else chess.engine.Mate(score_value)
+                item["score"]=chess.engine.PovScore(relative,board.turn)
+                pv_index=tokens.index("pv"); item["pv"]=[chess.Move.from_uci(value) for value in tokens[pv_index+1:]]
+                latest[rank]=item
+            return [latest[rank] for rank in range(1,multipv+1)]
+        except Exception as error:
+            if isinstance(error,(AnnotationError,RetryableEngineError)): raise
             raise RetryableEngineError(f"protocol_or_engine_crash: {error}") from error
-        return raw if isinstance(raw, list) else [raw]
+
+    def _send(self, command: str) -> None:
+        assert self.process.stdin is not None
+        self.process.stdin.write(command+"\n"); self.process.stdin.flush()
+
+    def _read(self) -> str:
+        assert self.process.stdout is not None
+        ready, _, _ = select.select([self.process.stdout], [], [], self.timeout)
+        if not ready:
+            raise AnalysisTimeout("analysis_timeout: Stockfish produced no response before the configured timeout")
+        line=self.process.stdout.readline()
+        if not line: raise RetryableEngineError("protocol_or_engine_crash: unexpected EOF")
+        return line.strip()
 
     def close(self) -> None:
         try:
-            self.engine.quit()
+            self._send("quit"); self.process.wait(timeout=2)
         except Exception:
-            self.engine.close()
+            self.process.kill()
 
 
 def validate_config(config: AnnotationConfig) -> None:
@@ -329,6 +366,35 @@ def load_source_dataset(dataset_dir: Path) -> tuple[dict[str, Any], list[dict[st
     }
 
 
+def load_source_dataset_for_explicit_selection(dataset_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    """Validate the manifest-bound source once without materializing every split repeatedly."""
+    require_python_chess()
+    manifest_path = dataset_dir / "manifest.json"
+    summary_path = dataset_dir / "summary.json"
+    positions_path = dataset_dir / "positions.jsonl"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AnnotationError(f"Invalid Phase 12 dataset metadata: {error}") from error
+    if manifest.get("schemaVersion") != pgn_dataset.SCHEMA_VERSION:
+        raise AnnotationError("Phase 12 dataset schema mismatch")
+    for name, path in (("positions.jsonl", positions_path), ("summary.json", summary_path)):
+        expected = manifest.get("artifacts", {}).get(name, {}).get("sha256")
+        if expected != sha256_file(path):
+            raise AnnotationError(f"Phase 12 artifact checksum mismatch: {name}")
+    total_positions = manifest.get("counts", {}).get("finalPositions")
+    if not isinstance(total_positions, int) or total_positions < 1:
+        raise AnnotationError("Phase 12 manifest has an invalid position count")
+    return manifest, [], {
+        "datasetDirectory": safe_relative_path(dataset_dir),
+        "datasetId": manifest["datasetId"], "datasetVersion": manifest["datasetVersion"],
+        "manifestSha256": sha256_file(manifest_path), "positionsSha256": sha256_file(positions_path),
+        "summarySha256": sha256_file(summary_path), "totalPositions": total_positions,
+        "corpusStatus": summary.get("corpusStatus", "unknown"),
+    }
+
+
 def select_positions(
     positions: Sequence[dict[str, Any]], split: str, max_positions: int | None,
     start_after_position_id: str | None,
@@ -354,9 +420,72 @@ def select_positions(
     return selected
 
 
+def select_positions_from_manifest(
+    positions: Sequence[dict[str, Any]], manifest_path: Path, source: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not manifest_path.is_file():
+        raise AnnotationError(f"Selection manifest does not exist: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AnnotationError(f"Invalid selection manifest: {error}") from error
+    artifact = manifest.get("artifacts", {}).get("selection.jsonl", {})
+    selection_path = manifest_path.parent / "selection.jsonl"
+    if not selection_path.is_file():
+        raise AnnotationError(f"Selection artifact does not exist: {selection_path}")
+    actual_checksum = sha256_file(selection_path)
+    if artifact.get("sha256") != actual_checksum:
+        raise AnnotationError("Selection artifact checksum does not match its manifest")
+    selection_records = read_jsonl(selection_path)
+    ids = [record.get("positionId") for record in selection_records]
+    if any(not isinstance(identifier, str) for identifier in ids):
+        raise AnnotationError("Selection contains a record without a valid positionId")
+    if len(set(ids)) != len(ids):
+        raise AnnotationError("Selection contains duplicate position IDs")
+    if artifact.get("records") != len(ids):
+        raise AnnotationError("Selection record count does not match its manifest")
+    selection_source = manifest.get("sourceDataset", {})
+    if selection_source.get("manifestSha256") != source["manifestSha256"]:
+        raise AnnotationError("Selection source dataset manifest checksum mismatch")
+    if selection_source.get("positionsSha256") != source["positionsSha256"]:
+        raise AnnotationError("Selection source positions checksum mismatch")
+    if positions:
+        by_id = {record["positionId"]: record for record in positions}
+    else:
+        wanted = set(ids); by_id = {}
+        source_path = Path(str(source["datasetDirectory"])) / "positions.jsonl"
+        try:
+            with source_path.open("r", encoding="utf-8") as handle:
+                for number, line in enumerate(handle, 1):
+                    if not line.strip():
+                        continue
+                    record = json.loads(line)
+                    identifier = record.get("positionId")
+                    if identifier in wanted:
+                        if identifier in by_id:
+                            raise AnnotationError(f"Duplicate selected position ID in source dataset: {identifier}")
+                        by_id[identifier] = record
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AnnotationError(f"Cannot stream Phase 12 positions: {error}") from error
+    missing = [identifier for identifier in ids if identifier not in by_id]
+    if missing:
+        raise AnnotationError(f"Selection contains {len(missing)} position IDs absent from the dataset")
+    selected = [by_id[identifier] for identifier in ids]
+    for selected_record, selection_record in zip(selected, selection_records):
+        for key in ("gameId", "split", "fen", "sideToMove", "gamePhase"):
+            if selection_record.get(key) != selected_record.get(key):
+                raise AnnotationError(f"Selection/source mismatch for {selected_record['positionId']}: {key}")
+    return selected, {
+        "manifestSha256": sha256_file(manifest_path),
+        "selectionSha256": actual_checksum,
+        "selectedPositionIds": ids,
+    }
+
+
 def compatibility_payload(
     config: AnnotationConfig, source: dict[str, Any], identity: dict[str, Any],
     options: dict[str, Any], selected: Sequence[dict[str, Any]],
+    selection_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "annotationVersion": config.annotation_version,
@@ -382,6 +511,7 @@ def compatibility_payload(
             "selectedLastPositionId": selected[-1]["positionId"],
             "split": config.split,
             "startAfterPositionId": config.start_after_position_id,
+            **({"explicitSelection": dict(selection_identity)} if selection_identity else {}),
         },
         "sourceDataset": {
             "manifestSha256": source["manifestSha256"],
@@ -740,11 +870,30 @@ def summary_for_records(annotations: Sequence[dict[str, Any]], failures: Sequenc
     split_counts = Counter(record["split"] for record in annotations)
     depths = [record["depth"] for record in annotations if "depth" in record]
     nodes = [record["nodes"] for record in annotations if "nodes" in record]
+    def coverage(key: str, labels: Sequence[str]) -> dict[str, Any]:
+        return {label: {
+            "annotated": sum(record.get(key) == label for record in annotations),
+            "cp": sum(record.get(key) == label and record.get("scoreType") == "cp" for record in annotations),
+        } for label in labels}
+    result_labels = {"1.0": "win", "0.5": "draw", "0.0": "loss"}
+    result_coverage = {}
+    for raw,label in result_labels.items():
+        value=float(raw); result_coverage[label]={
+            "annotated":sum(record.get("resultFromSideToMove")==value for record in annotations),
+            "cp":sum(record.get("resultFromSideToMove")==value and record.get("scoreType")=="cp" for record in annotations),
+        }
     return {
         "averageDepth": sum(depths) / len(depths) if depths else None,
         "averageNodes": sum(nodes) / len(nodes) if nodes else None,
         "completeDatasetCoverage": selected == available,
         "coveragePercent": selected * 100.0 / available,
+        "successfulCpCoveragePercent": score_counts["cp"] * 100.0 / selected,
+        "coverageBreakdown": {
+            "split": coverage("split", SPLITS),
+            "gamePhase": coverage("gamePhase", ("opening", "middlegame", "endgame")),
+            "sideToMove": coverage("sideToMove", ("white", "black")),
+            "resultClass": result_coverage,
+        },
         "engineRestarts": restarts,
         "failures": len(failures),
         "positionsAnnotated": len(annotations),
@@ -931,9 +1080,15 @@ def validate_annotation_corpus(annotation_dir: Path) -> dict[str, Any]:
             raise AnnotationError("Source dataset manifest checksum mismatch")
         if sha256_file(source_dir / "positions.jsonl") != source["positionsSha256"]:
             raise AnnotationError("Source dataset positions checksum mismatch")
-        pgn_dataset.validate_dataset(source_dir)
+        explicit_selection = manifest.get("compatibility", {}).get("selection", {}).get("explicitSelection")
+        if not explicit_selection:
+            pgn_dataset.validate_dataset(source_dir)
         source_positions = pgn_dataset.read_jsonl(source_dir / "positions.jsonl")
-        source_order = {record["positionId"]: index for index, record in enumerate(source_positions)}
+        explicit = manifest.get("compatibility", {}).get("selection", {}).get("explicitSelection")
+        ordered_ids = explicit.get("selectedPositionIds") if isinstance(explicit, dict) else None
+        source_order = ({identifier: index for index, identifier in enumerate(ordered_ids)}
+                        if isinstance(ordered_ids, list)
+                        else {record["positionId"]: index for index, record in enumerate(source_positions)})
         source_by_id = {record["positionId"]: record for record in source_positions}
     else:
         raise AnnotationError(f"Source dataset directory is unavailable for joined validation: {source_dir}")
@@ -983,8 +1138,17 @@ def annotate_dataset(
     identity_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate_config(config)
-    _, positions, source = load_source_dataset(config.dataset_dir)
-    selected = select_positions(positions, config.split, config.max_positions, config.start_after_position_id)
+    loader = load_source_dataset_for_explicit_selection if config.selection_manifest is not None else load_source_dataset
+    _, positions, source = loader(config.dataset_dir)
+    selection_identity = None
+    if config.selection_manifest is not None:
+        if config.split != "all" or config.max_positions is not None or config.start_after_position_id is not None:
+            raise AnnotationError("--selection-manifest cannot be combined with split/range selection options")
+        selected, selection_identity = select_positions_from_manifest(
+            positions, config.selection_manifest, source,
+        )
+    else:
+        selected = select_positions(positions, config.split, config.max_positions, config.start_after_position_id)
     identity = identity_override or verify_engine(config.engine_path)
     supported_for_values: dict[str, Any]
     if identity_override is None:
@@ -998,7 +1162,7 @@ def annotate_dataset(
         supported_for_values = identity.get("optionObjects", {})
     options = deterministic_engine_options(config.threads, config.hash_mb, config.multipv, supported_for_values)
     validate_engine_option_values(options, supported_for_values)
-    compatibility = compatibility_payload(config, source, identity, options, selected)
+    compatibility = compatibility_payload(config, source, identity, options, selected, selection_identity)
     paths = prepare_work_state(config, compatibility)
     runtime = run_annotation_work(config, identity, compatibility, selected, paths, adapter_factory)
     temp_dir = Path(tempfile.mkdtemp(prefix=f".{config.output_dir.name}.final-", dir=config.output_dir.parent))
@@ -1070,6 +1234,7 @@ def add_selection_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--split", choices=(*SPLITS, "all"), default="all")
     parser.add_argument("--max-positions", type=int)
     parser.add_argument("--start-after-position-id")
+    parser.add_argument("--selection-manifest", type=Path)
     limits = parser.add_mutually_exclusive_group()
     limits.add_argument("--nodes", type=int)
     limits.add_argument("--depth", type=int)
@@ -1124,6 +1289,7 @@ def config_from_args(args: argparse.Namespace) -> AnnotationConfig:
         strict=args.strict,
         resume=args.resume,
         force=args.force,
+        selection_manifest=args.selection_manifest,
     )
 
 
