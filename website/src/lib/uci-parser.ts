@@ -20,6 +20,7 @@ export interface ParsedInfo {
   multipv?: number;
   score?: number;
   mate?: number;
+  scoreBound?: 'lowerbound' | 'upperbound';
   nodes?: number;
   time?: number;
   pv?: string[];
@@ -38,39 +39,71 @@ export interface ParsedBestMove {
  */
 export function parseUciInfo(line: string): ParsedInfo | null {
   const result: ParsedInfo = {};
-  const parts = line.split(' ');
+  const parts = line.trim().split(/\s+/);
+  const integer = /^[+-]?\d+$/;
+  const uciMove = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+
+  if (parts[0] !== 'info' || parts.filter((token) => token === 'score').length > 1) return null;
+
+  const readInteger = (index: number): number | null => {
+    if (index >= parts.length || !integer.test(parts[index])) return null;
+    const value = Number(parts[index]);
+    return Number.isSafeInteger(value) ? value : null;
+  };
 
   for (let i = 0; i < parts.length; i++) {
     const token = parts[i];
 
     if (token === 'depth' && i + 1 < parts.length) {
-      result.depth = parseInt(parts[i + 1], 10);
+      const value = readInteger(i + 1);
+      if (value === null) return null;
+      result.depth = value;
 
     } else if (token === 'seldepth' && i + 1 < parts.length) {
-      result.selectiveDepth = parseInt(parts[i + 1], 10);
+      const value = readInteger(i + 1);
+      if (value === null) return null;
+      result.selectiveDepth = value;
 
     } else if (token === 'multipv' && i + 1 < parts.length) {
-      result.multipv = parseInt(parts[i + 1], 10);
+      const value = readInteger(i + 1);
+      if (value === null) return null;
+      result.multipv = value;
 
     } else if (token === 'score' && i + 2 < parts.length) {
       const scoreType = parts[i + 1];
+      const value = readInteger(i + 2);
+      if (value === null) return null;
 
       if (scoreType === 'cp') {
-        result.score = parseInt(parts[i + 2], 10);
+        result.score = value;
 
       } else if (scoreType === 'mate') {
-        result.mate = parseInt(parts[i + 2], 10);
+        if (value === 0) return null;
+        result.mate = value;
+      } else {
+        return null;
       }
+      if (parts.filter((token) => token === 'cp').length !== (scoreType === 'cp' ? 1 : 0) ||
+          parts.filter((token) => token === 'mate').length !== (scoreType === 'mate' ? 1 : 0)) return null;
+      const bound = parts[i + 3];
+      if (bound === 'lowerbound' || bound === 'upperbound') result.scoreBound = bound;
+      else if (parts.includes('lowerbound') || parts.includes('upperbound')) return null;
 
     } else if (token === 'nodes' && i + 1 < parts.length) {
-      result.nodes = parseInt(parts[i + 1], 10);
+      const value = readInteger(i + 1);
+      if (value === null) return null;
+      result.nodes = value;
 
     } else if (token === 'time' && i + 1 < parts.length) {
-      result.time = parseInt(parts[i + 1], 10);
+      const value = readInteger(i + 1);
+      if (value === null) return null;
+      result.time = value;
 
     } else if (token === 'pv' && i + 1 < parts.length) {
       // PV is always the last token group — consume everything to EOL.
-      result.pv = parts.slice(i + 1);
+      const pv = parts.slice(i + 1);
+      if (pv.length === 0 || pv.some((move) => !uciMove.test(move))) return null;
+      result.pv = pv;
       break;
     }
   }

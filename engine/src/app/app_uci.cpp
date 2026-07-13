@@ -1,6 +1,7 @@
 #include "app/app_uci.hpp"
 
 #include "app/app_text.hpp"
+#include "app/uci_telemetry.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_internal.hpp"
@@ -262,6 +263,11 @@ static void stopSearch() {
 void runUciMode(Board& board, const AppOptions::Options& options) {
     (void)options.searchDepth;
     std::cout.setf(std::ios::unitbuf);
+    auto emit = [](const auto&... values) {
+        std::ostringstream line;
+        (line << ... << values);
+        UciTelemetry::writeLine(line.str());
+    };
     
     int base_fullmove = 1;
 
@@ -287,9 +293,9 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         }
         if (!openingBookStatusPrinted) {
             if (openingBook->lineCount() > 0) {
-                std::cout << "info string Opening book loaded: " << openingBook->lineCount() << " entries." << std::endl;
+                emit("info string Opening book loaded: ", openingBook->lineCount(), " entries.");
             } else {
-                std::cout << "info string Failed to load book: " << options.bookPath << ". Falling back to search." << std::endl;
+                emit("info string Failed to load book: ", options.bookPath, ". Falling back to search.");
             }
             openingBookStatusPrinted = true;
         }
@@ -304,32 +310,28 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         // ── uci ──────────────────────────────────────────────────────────────
         if (input.rfind("uci", 0) == 0 &&
             (input.size() == 3 || std::isspace(static_cast<unsigned char>(input[3])))) {
-            std::cout << "id name BitboardEngine" << std::endl;
-            std::cout << "id author Khalil" << std::endl;
-            Tuning::reportCompiledProfileIdentity(std::cout);
-            std::cout << std::endl;
-            std::cout << "option name Hash type spin default 16 min 1 max 32768" << std::endl;
-            std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name OwnBook type check default "
-                      << (OPENING_TUNING.enabled ? "true" : "false") << std::endl;
-            std::cout << "option name BookDepth type spin default "
-                      << OPENING_TUNING.depthPlies << " min 0 max 100" << std::endl;
-            std::cout << "option name BookSelection type combo default "
-                      << openingSelectionModeName(OPENING_TUNING.selectionMode)
-                      << " var best var weighted var top-n-weighted" << std::endl;
-            std::cout << "option name BookSelectionTopN type spin default "
-                      << OPENING_TUNING.selectionTopN << " min 1 max 32" << std::endl;
-            std::cout << "option name BookSeed type spin default "
-                      << OPENING_TUNING.seed << " min 0 max 2147483647" << std::endl;
-            std::cout << "option name MultiPV type spin default 1 min 1 max 8" << std::endl;
-            std::cout << "option name Ponder type check default false" << std::endl;
-            std::cout << "uciok" << std::endl;
+            emit("id name BitboardEngine");
+            emit("id author Khalil");
+            std::ostringstream identity;
+            Tuning::reportCompiledProfileIdentity(identity);
+            emit(identity.str());
+            emit("option name Hash type spin default 16 min 1 max 32768");
+            emit("option name Clear Hash type button");
+            emit("option name OwnBook type check default ", OPENING_TUNING.enabled ? "true" : "false");
+            emit("option name BookDepth type spin default ", OPENING_TUNING.depthPlies, " min 0 max 100");
+            emit("option name BookSelection type combo default ", openingSelectionModeName(OPENING_TUNING.selectionMode),
+                 " var best var weighted var top-n-weighted");
+            emit("option name BookSelectionTopN type spin default ", OPENING_TUNING.selectionTopN, " min 1 max 32");
+            emit("option name BookSeed type spin default ", OPENING_TUNING.seed, " min 0 max 2147483647");
+            emit("option name MultiPV type spin default 1 min 1 max 8");
+            emit("option name Ponder type check default false");
+            emit("uciok");
             ensureOpeningBookLoaded();
         }
 
         // ── isready ──────────────────────────────────────────────────────────
         else if (input.rfind("isready", 0) == 0) {
-            std::cout << "readyok" << std::endl;
+            UciTelemetry::writeLine("readyok");
         }
 
         // ── ucinewgame ───────────────────────────────────────────────────────
@@ -377,23 +379,23 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 try {
                     size_t mb = std::stoull(optValue);
                     SearchInternal::resizeTT(mb);
-                    std::cout << "info string Hash set to " << mb << " MB (" << SearchConstants::TT_SIZE << " entries)" << std::endl;
+                    emit("info string Hash set to ", mb, " MB (", SearchConstants::TT_SIZE, " entries)");
                 } catch (...) {
-                    std::cout << "info string Invalid Hash value: " << optValue << std::endl;
+                    emit("info string Invalid Hash value: ", optValue);
                 }
             } else if (optName == "Clear Hash") {
                 SearchInternal::clearTT();
-                std::cout << "info string Transposition table cleared" << std::endl;
+                emit("info string Transposition table cleared");
             } else if (optName == "OwnBook") {
                 if (optValue == "true")  useOpeningBook = true;
                 else if (optValue == "false") useOpeningBook = false;
-                std::cout << "info string OwnBook set to " << (useOpeningBook ? "true" : "false") << std::endl;
+                emit("info string OwnBook set to ", useOpeningBook ? "true" : "false");
             } else if (optName == "BookDepth") {
                 try {
                     maximumBookDepth = std::stoi(optValue);
-                    std::cout << "info string BookDepth set to " << maximumBookDepth << std::endl;
+                    emit("info string BookDepth set to ", maximumBookDepth);
                 } catch (...) {
-                    std::cout << "info string Invalid BookDepth value: " << optValue << std::endl;
+                    emit("info string Invalid BookDepth value: ", optValue);
                 }
             } else if (optName == "BookSelection") {
                 if (optValue == "best") {
@@ -403,42 +405,42 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 } else if (optValue == "top-n-weighted") {
                     bookSelectionMode = BookSelectionMode::TopNWeighted;
                 } else {
-                    std::cout << "info string Invalid BookSelection value: " << optValue << std::endl;
+                    emit("info string Invalid BookSelection value: ", optValue);
                     continue;
                 }
                 if (openingBook.has_value()) {
                     openingBook->setSelectionMode(bookSelectionMode);
                 }
-                std::cout << "info string BookSelection set to " << optValue << std::endl;
+                emit("info string BookSelection set to ", optValue);
             } else if (optName == "BookSelectionTopN") {
                 try {
                     bookSelectionTopN = static_cast<size_t>(std::max(1, std::stoi(optValue)));
                     if (openingBook.has_value()) {
                         openingBook->setTopN(bookSelectionTopN);
                     }
-                    std::cout << "info string BookSelectionTopN set to " << bookSelectionTopN << std::endl;
+                    emit("info string BookSelectionTopN set to ", bookSelectionTopN);
                 } catch (...) {
-                    std::cout << "info string Invalid BookSelectionTopN value: " << optValue << std::endl;
+                    emit("info string Invalid BookSelectionTopN value: ", optValue);
                 }
             } else if (optName == "BookSeed") {
                 try {
                     const uint32_t seed = static_cast<uint32_t>(std::stoul(optValue));
                     ensureOpeningBookLoaded();
                     openingBook->setSeed(seed);
-                    std::cout << "info string BookSeed set" << std::endl;
+                    emit("info string BookSeed set");
                 } catch (...) {
-                    std::cout << "info string Invalid BookSeed value: " << optValue << std::endl;
+                    emit("info string Invalid BookSeed value: ", optValue);
                 }
             } else if (optName == "MultiPV") {
                 try {
                     int n = std::stoi(optValue);
                     SearchConstants::MULTI_PV = std::max(1, std::min(n, 8));
-                    std::cout << "info string MultiPV set to " << SearchConstants::MULTI_PV << std::endl;
+                    emit("info string MultiPV set to ", SearchConstants::MULTI_PV);
                 } catch (...) {
-                    std::cout << "info string Invalid MultiPV value: " << optValue << std::endl;
+                    emit("info string Invalid MultiPV value: ", optValue);
                 }
             } else {
-                std::cout << "info string Unknown option: " << optName << std::endl;
+                emit("info string Unknown option: ", optName);
             }
         }
 
@@ -471,7 +473,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                         try { base_fullmove = std::max(1, std::stoi(fenTokens[5])); } catch(...) {}
                     }
                     if (!fen.empty() && !board.loadFEN(fen)) {
-                        std::cout << "info string Invalid FEN: " << fen << std::endl;
+                        emit("info string Invalid FEN: ", fen);
                     } else if (!fen.empty()) {
                         board.clearSanHistory();
                         g_hasOneScore.store(false, std::memory_order_relaxed);
@@ -500,7 +502,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
 #if !defined(NDEBUG) || defined(EVAL_TUNING_DIAGNOSTICS)
             board.printEvalBreakdown();
 #else
-            std::cout << "info string eval diagnostics disabled in this build" << std::endl;
+            emit("info string eval diagnostics disabled in this build");
 #endif
         }
 
@@ -508,7 +510,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
         else if (input.rfind("go", 0) == 0) {
             const ParseGoResult parsedGo = parseGoCommand(input);
             if (!parsedGo.command.has_value()) {
-                std::cout << "info string error invalid go command: " << parsedGo.error << std::endl;
+                emit("info string error invalid go command: ", parsedGo.error);
                 continue;
             }
             const ParsedGoCommand goCommand = *parsedGo.command;
@@ -544,10 +546,12 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                         });
                     if (it != legalMoves.end()) {
                         const std::string bm = AppText::moveToCompactString(board, bookMove->move);
-                        std::cout << "info string book move " << bm
-                                  << " candidates " << bookMove->candidateCount
-                                  << " weight " << bookMove->weight << std::endl;
-                        std::cout << "bestmove " << bm << std::endl;
+                        std::ostringstream bookInfo;
+                        bookInfo << "info string book move " << bm
+                                 << " candidates " << bookMove->candidateCount
+                                 << " weight " << bookMove->weight;
+                        UciTelemetry::writeLine(bookInfo.str());
+                        UciTelemetry::writeLine("bestmove " + bm);
                         continue; // back to getline — no thread needed
                     }
                 }
@@ -645,7 +649,7 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
 
-                std::cout << line << std::endl;
+                UciTelemetry::writeLine(line);
             });
         }
 

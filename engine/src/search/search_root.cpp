@@ -1,9 +1,11 @@
 #include "search/search_internal.hpp"
+#include "app/uci_telemetry.hpp"
 #include "tuning/active_tuning_values.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -282,26 +284,15 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
         // ── Emit one `info` line per PV ────────────────────────────────────
         for (int pvIdx = 0; pvIdx < static_cast<int>(pvResults.size()); ++pvIdx) {
             const PVResult& pv = pvResults[pvIdx];
-            std::cout << "info depth " << currentDepth
-                      << " multipv " << (pvIdx + 1);
-
-            if (pv.score > SearchConstants::MATE_SCORE - SearchConstants::MAX_PLY) {
-                int movesToMate = (SearchConstants::MATE_SCORE - pv.score + 1) / 2;
-                std::cout << " score mate " << movesToMate;
-            } else if (pv.score < -SearchConstants::MATE_SCORE + SearchConstants::MAX_PLY) {
-                int movesToMate = (SearchConstants::MATE_SCORE + pv.score + 1) / 2;
-                std::cout << " score mate -" << movesToMate;
-            } else {
-                std::cout << " score cp " << pv.score;
-            }
-
-            std::cout << " nodes " << SearchInternal::g_nodesSearched
-                      << " time "  << elapsedMs
-                      << " pv";
-            for (const std::string& m : pv.pv) {
-                std::cout << " " << m;
-            }
-            std::cout << std::endl;
+            const auto line = UciTelemetry::formatSearchInfo(
+                currentDepth,
+                pvIdx + 1,
+                pv.score,
+                SearchInternal::g_nodesSearched,
+                elapsedMs,
+                pv.pv
+            );
+            if (line.has_value()) UciTelemetry::writeLine(*line);
         }
 
         long long currentHardLimit = allocatedTimeMs.load(std::memory_order_relaxed);
@@ -316,13 +307,15 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
         SearchInternal::SearchClock::now() - startTime
     ).count();
 
-    std::cout << "info string nodes: " << SearchInternal::g_nodesSearched
-              << " qNodes: "     << qNodes.load(std::memory_order_relaxed)
-              << " deltaSkips: " << deltaPruneSkips.load(std::memory_order_relaxed)
-              << " ttHits: "     << ttHits.load(std::memory_order_relaxed)
-              << " ttCutoffs: "  << ttCutoffs.load(std::memory_order_relaxed)
-              << " ttStores: "   << ttStores.load(std::memory_order_relaxed)
-              << " elapsedMs: "  << totalElapsedMs << "\n";
+    std::ostringstream statisticsLine;
+    statisticsLine << "info string nodes: " << SearchInternal::g_nodesSearched
+                   << " qNodes: "     << qNodes.load(std::memory_order_relaxed)
+                   << " deltaSkips: " << deltaPruneSkips.load(std::memory_order_relaxed)
+                   << " ttHits: "     << ttHits.load(std::memory_order_relaxed)
+                   << " ttCutoffs: "  << ttCutoffs.load(std::memory_order_relaxed)
+                   << " ttStores: "   << ttStores.load(std::memory_order_relaxed)
+                   << " elapsedMs: "  << totalElapsedMs;
+    UciTelemetry::writeLine(statisticsLine.str());
 
     // ── Extract ponder move from TT (PV continuation after bestCompletedMove) ──
     Move ponderMove{};

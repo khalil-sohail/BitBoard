@@ -267,7 +267,9 @@ def validate_reconstruction(record: Mapping[str, Any]) -> None:
         raise FeatureError("Side-to-move perspective mismatch")
 
 
-def run_engine(engine: Path, positions: Sequence[dict[str, Any]], registry: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def run_engine(engine: Path, positions: Sequence[dict[str, Any]], registry: Mapping[str, Any],
+               expected_profile_id: str = EXPECTED_PROFILE_ID,
+               expected_profile_hash: str = EXPECTED_PROFILE_HASH) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     if not engine.is_file() or not os.access(engine, os.X_OK):
         raise FeatureError(f"Bitboard engine is not executable: {engine}")
     payload = "".join(str(position["fen"]) + "\n" for position in positions)
@@ -294,7 +296,7 @@ def run_engine(engine: Path, positions: Sequence[dict[str, Any]], registry: Mapp
     if not records:
         raise FeatureError("Feature exporter produced no usable records")
     identity = {key: records[0][key] for key in ("profileId", "profileHash", "profileSchemaVersion", "modelVersion", "featureModelVersion")}
-    if identity["profileId"] != EXPECTED_PROFILE_ID or identity["profileHash"] != EXPECTED_PROFILE_HASH:
+    if identity["profileId"] != expected_profile_id or identity["profileHash"] != expected_profile_hash:
         raise FeatureError(f"Compiled profile mismatch: {identity}")
     if identity["featureModelVersion"] != FEATURE_MODEL_VERSION:
         raise FeatureError("Feature model version mismatch")
@@ -640,10 +642,10 @@ def export_command(args: argparse.Namespace) -> None:
     selected_ids={position["positionId"] for position in positions}
     annotations=[record for record in annotation_records if record.get("positionId") in selected_ids]
     if len(annotations)!=len(positions): raise FeatureError(f"Selected {len(positions)} positions but found {len(annotations)} annotations")
-    engine_records,failures,identity=run_engine(engine,positions,registry)
+    engine_records,failures,identity=run_engine(engine,positions,registry,args.expected_profile_id,args.expected_profile_hash)
     fixture_document=read_json(DEFAULT_FIXTURES)
     fixture_positions=[{"positionId":f"synthetic:{fixture['name']}","fen":fixture["fen"]} for fixture in fixture_document.get("fixtures",[])]
-    synthetic_records,synthetic_failures,synthetic_identity=run_engine(engine,fixture_positions,registry)
+    synthetic_records,synthetic_failures,synthetic_identity=run_engine(engine,fixture_positions,registry,args.expected_profile_id,args.expected_profile_hash)
     if synthetic_failures or synthetic_identity != identity:
         raise FeatureError("Synthetic connectivity export failed or changed engine identity")
     joined=join_records(positions,annotations,engine_records,registry)
@@ -693,7 +695,7 @@ def sensitivity_command(args: argparse.Namespace) -> None:
 
 def parser() -> argparse.ArgumentParser:
     result=argparse.ArgumentParser(description=__doc__);sub=result.add_subparsers(dest="command",required=True)
-    export=sub.add_parser("export");export.add_argument("--dataset-dir",default=str(DEFAULT_DATASET));export.add_argument("--annotation-dir",default=str(DEFAULT_ANNOTATIONS));export.add_argument("--engine",default=str(DEFAULT_ENGINE));export.add_argument("--output-dir",default=str(DEFAULT_OUTPUT));export.add_argument("--registry",default=str(DEFAULT_REGISTRY));export.add_argument("--split",choices=(*SPLITS,"all"),default="validation");export.add_argument("--max-positions",type=int,default=100);export.add_argument("--selection-manifest");export.add_argument("--force",action="store_true");export.set_defaults(function=export_command)
+    export=sub.add_parser("export");export.add_argument("--dataset-dir",default=str(DEFAULT_DATASET));export.add_argument("--annotation-dir",default=str(DEFAULT_ANNOTATIONS));export.add_argument("--engine",default=str(DEFAULT_ENGINE));export.add_argument("--output-dir",default=str(DEFAULT_OUTPUT));export.add_argument("--registry",default=str(DEFAULT_REGISTRY));export.add_argument("--split",choices=(*SPLITS,"all"),default="validation");export.add_argument("--max-positions",type=int,default=100);export.add_argument("--selection-manifest");export.add_argument("--expected-profile-id",default=EXPECTED_PROFILE_ID);export.add_argument("--expected-profile-hash",default=EXPECTED_PROFILE_HASH);export.add_argument("--force",action="store_true");export.set_defaults(function=export_command)
     inspect=sub.add_parser("inspect");inspect.add_argument("--feature-dir",default=str(DEFAULT_OUTPUT));inspect.set_defaults(function=inspect_command)
     sensitivity=sub.add_parser("sensitivity");sensitivity.add_argument("--feature-dir",default=str(DEFAULT_OUTPUT));sensitivity.add_argument("--registry",default=str(DEFAULT_REGISTRY));sensitivity.set_defaults(function=sensitivity_command)
     return result

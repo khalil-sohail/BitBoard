@@ -1,4 +1,5 @@
 #include "board.hpp"
+#include "app/uci_telemetry.hpp"
 #include "eval/eval_masks.hpp"
 #include "eval/eval_tables.hpp"
 #include "eval/eval_terms.hpp"
@@ -24,6 +25,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -1820,6 +1822,53 @@ void test_phase14_evaluation_feature_trace_reconstruction() {
             "Black-to-move score must negate canonical White score");
 }
 
+void test_uci_mate_score_formatting() {
+    using UciTelemetry::ScoreBound;
+    const int mate = SearchConstants::MATE_SCORE;
+
+    require(UciTelemetry::formatScore(mate) == "score mate 1", "Mate in one must be positive mate 1");
+    require(UciTelemetry::formatScore(mate - 2) == "score mate 2", "Positive mate distance conversion failed");
+    require(UciTelemetry::formatScore(-mate + 1) == "score mate -1", "Mated in one must be mate -1");
+    require(UciTelemetry::formatScore(-mate + 5) == "score mate -3", "Negative mate distance conversion failed");
+    require(UciTelemetry::formatScore(mate, ScoreBound::Lower) == "score mate 1 lowerbound",
+            "Mate lower bound formatting failed");
+    require(UciTelemetry::formatScore(-mate + 1, ScoreBound::Upper) == "score mate -1 upperbound",
+            "Mate upper bound formatting failed");
+    require(UciTelemetry::formatScore(42) == "score cp 42", "CP formatting failed");
+    require(!UciTelemetry::formatScore(SearchConstants::INF_SCORE).has_value(),
+            "Positive search sentinel must not leak");
+    require(!UciTelemetry::formatScore(-SearchConstants::INF_SCORE).has_value(),
+            "Negative search sentinel must not leak");
+
+    const auto line = UciTelemetry::formatSearchInfo(4, 1, mate, 123, 7, {"g6g7", "h8g8", "g7g8q"});
+    require(line == "info depth 4 multipv 1 score mate 1 nodes 123 time 7 pv g6g7 h8g8 g7g8q",
+            "Mate info line must be assembled completely with a valid PV");
+}
+
+void test_uci_output_line_serialization() {
+    std::ostringstream captured;
+    std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+    const std::string first(4096, 'a');
+    const std::string second(4096, 'b');
+    std::thread one([&] { UciTelemetry::writeLine(first); });
+    std::thread two([&] { UciTelemetry::writeLine(second); });
+    one.join();
+    two.join();
+    UciTelemetry::writeLine("bestmove e2e4");
+    std::cout.rdbuf(previous);
+
+    const std::string output = captured.str();
+    require(!output.empty() && output.back() == '\n', "Every UCI record must be newline terminated");
+    std::istringstream lines(output);
+    std::string line1, line2, line3;
+    require(static_cast<bool>(std::getline(lines, line1)), "Missing first atomic line");
+    require(static_cast<bool>(std::getline(lines, line2)), "Missing second atomic line");
+    require(static_cast<bool>(std::getline(lines, line3)), "Missing bestmove line");
+    require((line1 == first && line2 == second) || (line1 == second && line2 == first),
+            "Concurrent UCI records interleaved");
+    require(line3 == "bestmove e2e4", "bestmove must follow complete info records");
+}
+
 } // namespace
 
 int main() {
@@ -1885,6 +1934,8 @@ int main() {
         {"Phase 5B static evaluation baselines", test_phase5b_static_evaluation_baselines},
         {"Phase 5C PST static evaluation baselines", test_phase5c_piece_square_static_baselines},
         {"Phase 14 evaluation feature trace reconstruction", test_phase14_evaluation_feature_trace_reconstruction},
+        {"UCI mate-score formatting", test_uci_mate_score_formatting},
+        {"UCI output line serialization", test_uci_output_line_serialization},
     };
 
     int passed = 0;

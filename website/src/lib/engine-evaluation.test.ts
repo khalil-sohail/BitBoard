@@ -35,8 +35,8 @@ function testMateNormalization(): void {
   assert.deepEqual(normalizeEngineScore({ mate: -2 }, WHITE_TO_MOVE), mate('black', 4));
   assert.deepEqual(normalizeEngineScore({ mate: 2 }, BLACK_TO_MOVE), mate('black', 4));
   assert.deepEqual(normalizeEngineScore({ mate: -2 }, BLACK_TO_MOVE), mate('white', 4));
-  assert.deepEqual(normalizeEngineScore({ mate: 0 }, WHITE_TO_MOVE), mate('white', 0));
-  assert.deepEqual(normalizeEngineScore({ mate: 0 }, BLACK_TO_MOVE), mate('black', 0));
+  assert.equal(normalizeEngineScore({ mate: 0 }, WHITE_TO_MOVE), null);
+  assert.equal(normalizeEngineScore({ mate: 0 }, BLACK_TO_MOVE), null);
 }
 
 function testInvalidNormalization(): void {
@@ -48,9 +48,12 @@ function testInvalidNormalization(): void {
 }
 
 function testMateParserDoesNotFlattenToCentipawns(): void {
-  const parsed = parseUciInfo('info depth 2 multipv 1 score mate 0 nodes 117 time 0 pv g6f6');
-  assert.equal(parsed?.mate, 0);
+  const parsed = parseUciInfo('info depth 2 multipv 1 score mate -1 upperbound nodes 117 time 0 pv g6f6');
+  assert.equal(parsed?.mate, -1);
   assert.equal(parsed?.score, undefined);
+  assert.equal(parsed?.scoreBound, 'upperbound');
+  assert.equal(parseUciInfo('info depth 2 score mate --499499999 nodes 117 time 0 pv g6f6'), null);
+  assert.equal(parseUciInfo('info depth 2 score mate 0 nodes 117 time 0 pv g6f6'), null);
 }
 
 function testCentipawnMoveLossAndGrades(): void {

@@ -53,7 +53,7 @@ export function normalizeEngineScore(raw: RawEngineScore, rootFen: string): Norm
   if (!rootTurn) return null;
 
   if (raw.mate !== undefined) {
-    if (!Number.isFinite(raw.mate) || !Number.isInteger(raw.mate)) return null;
+    if (!Number.isFinite(raw.mate) || !Number.isInteger(raw.mate) || raw.mate === 0) return null;
     return {
       kind: 'mate',
       plies: Math.abs(raw.mate) * 2,

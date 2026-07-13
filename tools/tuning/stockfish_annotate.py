@@ -211,15 +211,21 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
     binary = validate_engine_binary(path)
     try:
         process = subprocess.Popen([str(path.resolve())], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True, bufsize=1)
+                                   stderr=subprocess.PIPE, bufsize=0)
         assert process.stdin is not None and process.stdout is not None
-        process.stdin.write("uci\n"); process.stdin.flush()
+        process.stdin.write(b"uci\n"); process.stdin.flush()
         name = ""; author = ""; supported: dict[str, dict[str, Any]] = {}
-        while True:
+        deadline = time.monotonic() + timeout
+        def read_with_deadline() -> str:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+                raise AnnotationError(f"Stockfish UCI handshake timed out after {timeout:g} seconds")
             line = process.stdout.readline()
             if not line:
                 raise AnnotationError("Stockfish terminated during UCI handshake")
-            text = line.strip()
+            return line.decode("utf-8", errors="replace").strip()
+        while True:
+            text = read_with_deadline()
             if text.startswith("id name "): name = text[8:]
             elif text.startswith("id author "): author = text[10:]
             elif text.startswith("option name "):
@@ -231,8 +237,8 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
                         item[target]=int(raw) if raw.lstrip("-").isdigit() else raw
                 supported[option_name]=item
             elif text == "uciok": break
-        process.stdin.write("isready\n"); process.stdin.flush()
-        while process.stdout.readline().strip() != "readyok": pass
+        process.stdin.write(b"isready\n"); process.stdin.flush()
+        while read_with_deadline() != "readyok": pass
         if not name:
             raise AnnotationError("Stockfish did not report an engine name")
         if not author:
@@ -252,10 +258,24 @@ def verify_engine(path: Path, timeout: float = 15.0) -> dict[str, Any]:
     finally:
         if 'process' in locals():
             try:
-                assert process.stdin is not None
-                process.stdin.write("quit\n"); process.stdin.flush(); process.wait(timeout=2)
-            except Exception:
-                process.kill()
+                if process.poll() is None and process.stdin is not None:
+                    process.stdin.write(b"quit\n"); process.stdin.flush()
+                process.wait(timeout=min(2.0, max(0.1, timeout)))
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    process.kill(); process.wait(timeout=1.0)
+            except (BrokenPipeError, OSError):
+                if process.poll() is None:
+                    process.terminate()
+                    try: process.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        process.kill(); process.wait(timeout=1.0)
+            finally:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None: stream.close()
 
 
 class StockfishAdapter:
@@ -266,7 +286,7 @@ class StockfishAdapter:
         self.identity = identity
         self.timeout = config.position_timeout_seconds
         try:
-            self.process = subprocess.Popen([str(config.engine_path.resolve())],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1)
+            self.process = subprocess.Popen([str(config.engine_path.resolve())],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0)
             assert self.process.stdin is not None and self.process.stdout is not None
             self._send("uci")
             while self._read() != "uciok": pass
@@ -304,7 +324,7 @@ class StockfishAdapter:
 
     def _send(self, command: str) -> None:
         assert self.process.stdin is not None
-        self.process.stdin.write(command+"\n"); self.process.stdin.flush()
+        self.process.stdin.write((command+"\n").encode()); self.process.stdin.flush()
 
     def _read(self) -> str:
         assert self.process.stdout is not None
@@ -313,7 +333,7 @@ class StockfishAdapter:
             raise AnalysisTimeout("analysis_timeout: Stockfish produced no response before the configured timeout")
         line=self.process.stdout.readline()
         if not line: raise RetryableEngineError("protocol_or_engine_crash: unexpected EOF")
-        return line.strip()
+        return line.decode("utf-8", errors="replace").strip()
 
     def close(self) -> None:
         try:
