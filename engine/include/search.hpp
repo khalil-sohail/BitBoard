@@ -16,6 +16,21 @@ extern std::atomic<uint64_t> deltaPruneSkips;
 extern std::atomic<uint64_t> ttHits;
 extern std::atomic<uint64_t> ttCutoffs;
 extern std::atomic<uint64_t> ttStores;
+extern std::atomic<bool> deadlineActive;
+extern std::atomic<uint64_t> deadlineChecks;
+extern std::atomic<long long> lastDeadlineCheckElapsedMs;
+
+enum class SearchStopReason : int {
+    None,
+    SoftLimit,
+    HardLimit,
+    ImmediateMove,
+    CompletedDepth,
+    ExternalStop,
+    Terminal,
+};
+
+extern std::atomic<SearchStopReason> searchStopReason;
 
 void checkTime();
 
@@ -25,6 +40,9 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier, b
 // Returns {bestMove, ponderMove}.  ponderMove.from == -1 when unavailable.
 // An optional outScore pointer can be provided to retrieve the final search score.
 std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs = 2000, int* outScore = nullptr);
+std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, int* outScore, bool useDeadline);
+
+const char* searchStopReasonName(SearchStopReason reason);
 
 Move findBestMoveCompat(Board& board, int maxDepth, long long timeLimitMs = 2000);
 

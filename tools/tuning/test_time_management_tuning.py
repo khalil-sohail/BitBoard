@@ -7,6 +7,9 @@ import json
 import subprocess
 from pathlib import Path
 
+import chess
+import evaluation_candidate_validate as validation
+
 import time_management_tuning as tuning
 
 def require(value:bool,message:str)->None:
@@ -29,19 +32,32 @@ def main()->int:
     first=tuning.decorate(tuning.query_policy(engine,requests),requests);second=tuning.decorate(tuning.query_policy(engine,requests),requests);require(first==second,"deterministic JSONL")
     require(all(x["profileId"]=="builtin-default-v1" for x in first),"profile identity")
     require(by_one:=(next(x for x in first if x["remainingTimeMs"]==1)),"one-ms record")
-    require(by_one["invariantViolations"]==["hard_reaches_clock"],"one-ms violation must remain explicit")
-    require(all(not x["invariantViolations"] for x in first if x["remainingTimeMs"]!=1),"other allocation invariants")
+    require(by_one["invariantViolations"]==[] and by_one["immediateMove"] and by_one["hardLimitMs"]==0,"one-ms immediate policy")
+    require(all(not x["invariantViolations"] for x in first),"allocation invariants")
     by={x["remainingTimeMs"]:x for x in first if x["incrementMs"]==0}
     require(by[39]["criticalLowTime"] and by[40]["criticalLowTime"] and by[41]["criticalLowTime"] and by[60]["criticalLowTime"],"critical raw clocks")
-    require(by[69]["criticalLowTime"] and not by[70]["criticalLowTime"],"reserve-adjusted discontinuity")
+    require(by[69]["criticalLowTime"] and not by[70]["criticalLowTime"],"documented safe-domain transition")
+    require(abs(by[70]["hardLimitMs"]-by[69]["hardLimitMs"])<=3,"smoothed transition")
+    require(by[60]["hardLimitMs"]<=6,"conservative 60ms policy")
     require(by[39]["softLimitMs"]<=by[39]["hardLimitMs"],"soft/hard invariant")
     invalid=subprocess.run([str(engine.resolve()),"--mode=time-policy"],input="{}\n",text=True,capture_output=True,timeout=5);require(invalid.returncode==0 and not invalid.stdout and "invalid request" in invalid.stderr,"invalid request separation")
-    continuous_requests=[tuning.request(x) for x in range(1,101)];continuous=tuning.decorate(tuning.query_policy(engine,continuous_requests),continuous_requests);metrics=tuning.continuity(continuous);require(metrics["warnings"],"discontinuity detection")
+    continuous_requests=[tuning.request(x) for x in range(1,151)];continuous=tuning.decorate(tuning.query_policy(engine,continuous_requests),continuous_requests);metrics=tuning.continuity(continuous);require(metrics["maximumAbsoluteHardJumpMs"]<=3,"continuity guardrail")
     source=(Path(__file__).parent/"time_management_tuning.py").read_text();lifecycle=(Path(__file__).parent/"evaluation_candidate_validate.py").read_text()
     require("go nodes" not in source,"go nodes forbidden")
     require("search_clock" in source and "go wtime" in lifecycle and "movestogo" in lifecycle,"clock command construction")
     require('promotionEligible":True' not in source.replace(" ",""),"no promotion path")
     require(tuning.SELECTED[2]=="time.criticalLowTimeThresholdMs","critical parameter selected")
+    with validation.UciEngine(engine,5) as uci:
+        board=chess.Board()
+        for clock in (0,1,2,5,10,39,40,41):
+            result=uci.search_clock(board,clock,clock)
+            require(result["legal"],f"legal immediate fallback at {clock}ms")
+            require(result["stopReason"]=="immediate_move",f"immediate stop reason at {clock}ms")
+            require(result["hardBudgetMs"]==0 and result["searchElapsedMs"]==0,f"zero immediate budget at {clock}ms")
+            require(result["deadlineChecks"]==0,"immediate path did not search")
+        terminal=chess.Board("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1")
+        result=uci.search_clock(terminal,1,1)
+        require(result["bestMove"]=="0000" and result["stopReason"]=="terminal","terminal clock handling")
     sample=[{"variantId":"b","policyMetrics":{"maximumAbsoluteHardJumpMs":1,"maximumAbsoluteRatioJump":.1,"meanCriticalHardRatio":.2},"timedMetrics":{"emergencyStops":1,"averageDepth":2,"stockfishAgreement":1}},{"variantId":"a","policyMetrics":{"maximumAbsoluteHardJumpMs":1,"maximumAbsoluteRatioJump":.1,"meanCriticalHardRatio":.2},"timedMetrics":{"emergencyStops":1,"averageDepth":2,"stockfishAgreement":1}}];sample.sort(key=tuning.rank_key);require(sample[0]["variantId"]=="a","deterministic ranking")
     print("Phase 18 time-management tuning tests passed")
     return 0

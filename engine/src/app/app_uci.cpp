@@ -253,6 +253,9 @@ static std::thread g_searchThread;
 
 static void stopSearch() {
     g_isPondering.store(false, std::memory_order_relaxed);
+    if (searchStopReason.load(std::memory_order_relaxed) == SearchStopReason::None) {
+        searchStopReason.store(SearchStopReason::ExternalStop, std::memory_order_relaxed);
+    }
     timeAborted.store(true, std::memory_order_relaxed);
     if (g_searchThread.joinable()) {
         g_searchThread.join();
@@ -567,16 +570,19 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                 : goCommand.blackIncrementMs.value_or(0);
 
             long long timeLimitMs = 2000;
+            bool useDeadline = false;
             if (goCommand.mode == SearchLimitMode::Infinite) {
                 timeLimitMs = 999'999'999LL;
             } else if (goCommand.mode == SearchLimitMode::MoveTime) {
+                useDeadline = true;
                 timeLimitMs = std::max(
                     static_cast<long long>(TIME_TUNING.allocation.minimumMoveTimeMs),
                     static_cast<long long>(*goCommand.moveTimeMs)
                 );
             } else if (goCommand.mode == SearchLimitMode::Depth) {
                 timeLimitMs = 999'999'999LL;
-            } else if (goCommand.mode == SearchLimitMode::Clock && timeLeft > 0) {
+            } else if (goCommand.mode == SearchLimitMode::Clock) {
+                useDeadline = true;
                 int move_number = base_fullmove + (board.sanHistory().size() / 2);
                 const TimeManagement::ClockBudget budget =
                     TimeManagement::calculateClockBudget(
@@ -614,13 +620,32 @@ void runUciMode(Board& board, const AppOptions::Options& options) {
                                           maxDepthToSearch,
                                           timeLimitMs,
                                           realTimeLimitMs,
+                                          useDeadline,
                                           localPonder]() mutable {
                 int searchScore = 0;
                 const long long effectiveTimeLimitMs =
                     (localPonder && !g_isPondering.load(std::memory_order_relaxed))
                         ? realTimeLimitMs
                         : timeLimitMs;
-                auto [bestMove, ponderMove] = findBestMove(boardCopy, maxDepthToSearch, effectiveTimeLimitMs, &searchScore);
+                auto [bestMove, ponderMove] = findBestMove(
+                    boardCopy,
+                    maxDepthToSearch,
+                    effectiveTimeLimitMs,
+                    &searchScore,
+                    useDeadline && !localPonder
+                );
+
+                const auto searchElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    SearchInternal::SearchClock::now() - startTime
+                ).count();
+                std::ostringstream timeInfo;
+                timeInfo << "info string time stopReason "
+                         << searchStopReasonName(searchStopReason.load(std::memory_order_relaxed))
+                         << " hardBudgetMs " << effectiveTimeLimitMs
+                         << " searchElapsedMs " << searchElapsedMs
+                         << " deadlineChecks " << deadlineChecks.load(std::memory_order_relaxed)
+                         << " lastDeadlineCheckMs " << lastDeadlineCheckElapsedMs.load(std::memory_order_relaxed);
+                UciTelemetry::writeLine(timeInfo.str());
 
                 if (!g_isPondering.load(std::memory_order_relaxed)) {
                     if (g_hasOneScore.load(std::memory_order_relaxed)) {

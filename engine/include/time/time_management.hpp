@@ -6,13 +6,22 @@
 namespace TimeManagement {
 
 struct ClockBudget {
-    long long safeTimeLeftMs = 0;
+    long long rawRemainingMs = 0;
+    long long transportReserveMs = 0;
+    long long runtimeReserveMs = 0;
+    long long safeUsableMs = 0;
     int expectedMovesRemaining = 0;
     long long allocatedBeforeCapMs = 0;
     long long maximumCapMs = 0;
-    long long timeLimitMs = 0;
+    long long softBudgetMs = 0;
+    long long hardBudgetMs = 0;
     bool instabilityApplied = false;
     bool criticalLowTime = false;
+    bool immediateMove = false;
+
+    // Compatibility aliases retained for existing diagnostics and callers.
+    long long safeTimeLeftMs = 0;
+    long long timeLimitMs = 0;
 };
 
 struct StopDeadlines {

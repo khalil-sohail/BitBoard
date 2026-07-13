@@ -99,7 +99,7 @@ def phase18_base_engine(root:Path,configured:Path)->Path:
     return local if local.exists() else configured
 
 def violations(row:Mapping[str,Any])->list[str]:
-    out=[];remaining=row["remainingTimeMs"]
+    out=[];remaining=row.get("rawRemainingMs",row["remainingTimeMs"])
     if row["softLimitMs"]<0 or row["hardLimitMs"]<0 or row["reserveMs"]<0:out.append("negative_duration")
     if row["softLimitMs"]>row["hardLimitMs"]:out.append("soft_exceeds_hard")
     if row["hardLimitMs"]>row["maximumSpendMs"]:out.append("hard_exceeds_maximum")
@@ -128,7 +128,7 @@ def continuity(rows:Sequence[dict[str,Any]])->dict[str,Any]:
     return {"maximumAbsoluteHardJumpMs":max(abs(x["hardDeltaMs"]) for x in jumps),"maximumAbsoluteRatioJump":max(abs(x["ratioDelta"]) for x in jumps),"warnings":[x for x in jumps if abs(x["hardDeltaMs"])>5 or abs(x["ratioDelta"])>.15 or x["criticalTransition"]],"jumps":jumps}
 
 def characterize(args:argparse.Namespace)->None:
-    root=Path(args.output_dir);engine=phase18_base_engine(root,Path(args.base_engine));reqs=characterization_requests();rows=decorate(query_policy(engine,reqs),reqs)
+    root=Path(args.output_dir);engine=Path(args.policy_engine);reqs=characterization_requests();rows=decorate(query_policy(engine,reqs),reqs)
     continuity_reqs=[request(x) for x in range(1,101)];continuous=decorate(query_policy(engine,continuity_reqs),continuity_reqs)
     basic={x["remainingTimeMs"]:x for x in continuous};report={"schemaVersion":1,"requests":len(reqs),"records":rows,"continuity":continuity(continuous),"requestedTransitions":{f"{a}-{b}":{"before":basic[a],"after":basic[b]} for a,b in ((39,40),(40,41),(50,60),(69,70))}}
     write(root/"scenarios"/"baseline-characterization.json",pretty(report));print(f"Characterized {len(rows)} baseline policy inputs")
@@ -188,12 +188,12 @@ def run_timed(engine:Path,records:Sequence[dict[str,Any]],annotations:Mapping[st
         for index,record in enumerate(records):
             clock,inc,moves,label=CLOCK_CASES[index%len(CLOCK_CASES)];board=chess.Board(record["fen"]);policy=query_policy(engine,[request(clock,inc,moves,False,board.fullmove_number)])[0]
             try:
-                result=uci.search_clock(board,clock,clock,inc,inc,moves);elapsed_ms=round(result["elapsedSeconds"]*1000,3);after=clock-elapsed_ms+inc;allowance=max(10,policy["hardLimitMs"]*.10);overrun=elapsed_ms>policy["hardLimitMs"]+allowance
+                result=uci.search_clock(board,clock,clock,inc,inc,moves);wall_ms=round(result["elapsedSeconds"]*1000,3);engine_ms=result.get("searchElapsedMs");elapsed_ms=float(engine_ms if engine_ms is not None else wall_ms);after=clock-wall_ms+inc;overrun=engine_ms is not None and engine_ms>policy["hardLimitMs"]
                 failure=[]
                 if not result["legal"]:failure.append("illegal_bestmove")
                 if result["malformedInfoLines"]:failure.append("malformed_telemetry")
                 if after<0:failure.append("flag")
-                rows.append({"positionId":record["positionId"],"fen":record["fen"],"gamePhase":record["gamePhase"],"sideToMove":record["sideToMove"],"clockClass":label,"clockBeforeMs":clock,"incrementMs":inc,"movesToGo":moves,"softLimitMs":policy["softLimitMs"],"hardLimitMs":policy["hardLimitMs"],"actualElapsedMs":elapsed_ms,"bestMoveUci":result["bestMove"],"depth":result["depth"],"seldepth":result["seldepth"],"nodes":result["nodes"],"scoreType":result["scoreType"],"scoreValue":result["scoreValue"],"pv":result["pv"],"clockAfterMs":after,"hardLimitOverrun":overrun,"flag":after<0,"emergencyStop":policy["criticalLowTime"],"stockfishAgreement":result["bestMove"]==annotations.get(record["positionId"],{}).get("bestMoveUci"),"failures":failure});failures.extend({"positionId":record["positionId"],"failure":x} for x in failure)
+                rows.append({"positionId":record["positionId"],"fen":record["fen"],"gamePhase":record["gamePhase"],"sideToMove":record["sideToMove"],"clockClass":label,"clockBeforeMs":clock,"incrementMs":inc,"movesToGo":moves,"rawRemainingMs":policy.get("rawRemainingMs",clock),"safeUsableMs":policy.get("safeUsableMs",policy["maximumSpendMs"]),"softLimitMs":policy["softLimitMs"],"hardLimitMs":policy["hardLimitMs"],"actualElapsedMs":wall_ms,"engineReportedSearchElapsedMs":engine_ms,"uciResponseOverheadMs":result.get("uciResponseOverheadMs"),"deadlineChecks":result.get("deadlineChecks"),"lastDeadlineCheckMs":result.get("lastDeadlineCheckMs"),"stopReason":result.get("stopReason"),"bestMoveUci":result["bestMove"],"depth":result["depth"],"seldepth":result["seldepth"],"nodes":result["nodes"],"scoreType":result["scoreType"],"scoreValue":result["scoreValue"],"pv":result["pv"],"clockAfterMs":after,"hardLimitOverrun":overrun,"flag":after<0,"emergencyStop":policy["criticalLowTime"],"immediateMove":policy.get("immediateMove",False),"stockfishAgreement":result["bestMove"]==annotations.get(record["positionId"],{}).get("bestMoveUci"),"failures":failure});failures.extend({"positionId":record["positionId"],"failure":x} for x in failure)
             except Exception as error:failures.append({"positionId":record["positionId"],"failure":"protocol_failure","detail":str(error)});break
     return rows,failures
 
@@ -287,9 +287,39 @@ def inspect(args:argparse.Namespace)->None:
     artifacts={p.name:sha(p) for p in (root/"manifest.json",root/"suite.jsonl",root/"development.jsonl",root/"holdout.jsonl",root/"variants.json",root/"ranking.json")}
     summary={"schemaVersion":1,"timeEntriesInventoried":13,"parametersSelected":list(SELECTED),"variantsGenerated":len(variants["variants"]),"variantsRejected":sum(not x["eligible"] for x in ranking["ranking"]),"policyScenarios":len(scenario_requests()),"datasetPositions":36,"developmentPositions":24,"holdoutPositions":12,"candidateSelectionOutcome":ranking["outcome"],"selectedCandidate":ranking["selected"],"timedGames":smoke_result["games"] if smoke_result else 0,"flags":smoke_result["flags"] if smoke_result else 0,"developmentOnly":True,"promotionEligible":False,"productionBehaviorChanges":0,"artifacts":artifacts};write(root/"summary.json",pretty(summary));print(f"Phase 18 outcome: {ranking['outcome']}")
 
+def remediation_engine(root:Path)->Path:
+    """Build the corrected engine with the frozen Phase 17 profile."""
+    base=read_json(root/"baseline"/"profile.json")
+    directory=root/"remediation";header=directory/"generated"/"generated_tuning_values.hpp";binary=directory/"chess-engine"
+    write(header,generate_header(base).encode())
+    run=subprocess.run(["make","-C","engine","candidate-build",f"CANDIDATE_HEADER=../{header}",f"CANDIDATE_OUTPUT=../{binary}"],text=True,capture_output=True)
+    if run.returncode:raise TimeTuningError("Remediation engine build failed: "+run.stderr)
+    identity=validation.engine_identity(binary)
+    if (identity["profileId"],identity["profileHash"])!=(BASE_ID,BASE_HASH):raise TimeTuningError("Remediation engine identity mismatch")
+    return binary
+
+def verify_safety(args:argparse.Namespace)->None:
+    root=Path(args.output_dir);old_engine=phase18_base_engine(root,Path(args.base_engine));engine=remediation_engine(root)
+    sweep_requests=[request(x) for x in range(0,151)]+[request(60,10),request(60,0,1),request(2**62,2**60,1)]
+    rows=decorate(query_policy(engine,sweep_requests),sweep_requests);continuous=continuity(rows[1:151])
+    invariant_count=sum(len(row["invariantViolations"]) for row in rows)
+    adjacent_violations=[x for x in continuous["jumps"] if abs(x["hardDeltaMs"])>3]
+    old_boundary=decorate(query_policy(old_engine,[request(x) for x in (1,2,5,10,20,39,40,41,50,60,65,69,70,75,100)]),[request(x) for x in (1,2,5,10,20,39,40,41,50,60,65,69,70,75,100)])
+    new_boundary=decorate(query_policy(engine,[request(x) for x in (1,2,5,10,20,39,40,41,50,60,65,69,70,75,100)]),[request(x) for x in (1,2,5,10,20,39,40,41,50,60,65,69,70,75,100)])
+    records=read_jsonl(root/"development.jsonl");annotations={x["positionId"]:x for x in read_jsonl(Path(args.annotations))}
+    timed,failures=run_timed(engine,records,annotations);metrics=timed_metrics(timed,failures)
+    fixed_records=records;old_fixed=fixed_signature(old_engine,fixed_records);new_fixed=fixed_signature(engine,fixed_records);fixed_mismatches=sum(a!=b for a,b in zip(old_fixed,new_fixed))
+    old_eval=search_tuning.raw_eval(old_engine,fixed_records);new_eval=search_tuning.raw_eval(engine,fixed_records);evaluation_mismatches=sum(search_tuning.eval_signature(a)!=search_tuning.eval_signature(b) for a,b in zip(old_eval,new_eval))
+    continuation=low_continuations(engine,None,read_jsonl(root/"suite.jsonl"))
+    status="time_policy_safe" if not invariant_count and not adjacent_violations and not failures and not metrics["hardLimitOverruns"] and not continuation["failures"] and not fixed_mismatches and not evaluation_mismatches else "time_policy_unsafe"
+    report={"schemaVersion":1,"status":status,"correctedEngine":str(engine),"oldBoundary":old_boundary,"newBoundary":new_boundary,"continuity":{"maximumAbsoluteHardJumpMs":continuous["maximumAbsoluteHardJumpMs"],"guardrailMs":3,"violations":adjacent_violations},"policyInvariantViolations":invariant_count,"timedDevelopment":{"metrics":metrics,"records":timed,"failures":failures},"lowTimeContinuations":continuation,"fixedDepth":{"positions":len(fixed_records),"mismatches":fixed_mismatches},"staticEvaluation":{"positions":len(fixed_records),"mismatches":evaluation_mismatches},"developmentOnly":True,"promotionEligible":False}
+    write(root/"remediation"/"safety-verification.json",pretty(report));write(root/"remediation"/"timed-development.jsonl",jsonl(timed));write(root/"remediation"/"low-time-continuations.json",pretty(continuation))
+    print(status)
+    if status!="time_policy_safe":raise TimeTuningError("Safety verification failed")
+
 def parser()->argparse.ArgumentParser:
     p=argparse.ArgumentParser(description=__doc__);subs=p.add_subparsers(dest="command",required=True)
-    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS))
+    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--policy-engine",default="engine/chess-engine");c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS))
     c=subs.add_parser("characterize");common(c);c.set_defaults(function=characterize)
     c=subs.add_parser("prepare");common(c);c.add_argument("--registry",default=str(DEFAULT_REGISTRY));c.add_argument("--selection",default=str(DEFAULT_SELECTION));c.add_argument("--force",action="store_true");c.set_defaults(function=prepare)
     c=subs.add_parser("run-scenarios");common(c);c.set_defaults(function=run_scenarios)
@@ -297,6 +327,7 @@ def parser()->argparse.ArgumentParser:
     c=subs.add_parser("rank");common(c);c.set_defaults(function=rank)
     c=subs.add_parser("smoke-match");common(c);c.add_argument("--max-plies",type=int,default=160);c.set_defaults(function=smoke)
     c=subs.add_parser("inspect");common(c);c.set_defaults(function=inspect)
+    c=subs.add_parser("verify-safety");common(c);c.set_defaults(function=verify_safety)
     return p
 
 def main(argv:Sequence[str]|None=None)->int:

@@ -32,6 +32,7 @@ extern std::array<std::array<int, 64>, 64> LMR_TABLE;
 
 int getPieceValue(PieceType piece);
 bool shouldAbortSearch();
+bool checkDeadlineBoundary();
 
 int scoreMove(const Board& board, const Move& move, int plyFromRoot);
 bool sameMove(const Move& lhs, const Move& rhs);

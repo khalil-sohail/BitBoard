@@ -69,24 +69,32 @@ int run() {
         const auto deadlines = TimeManagement::calculateStopDeadlines(budget.timeLimitMs);
         const long long configuredSoft = *unstable ? deadlines.unstableSoftMs : deadlines.stableSoftMs;
         const long long effectiveSoft = std::min(configuredSoft, budget.timeLimitMs);
-        const long long reserve = std::max(0LL, *remaining - budget.safeTimeLeftMs);
         std::cout << "{\"schemaVersion\":1"
                   << ",\"profileId\":\"" << identity.profileId << "\""
                   << ",\"profileHash\":\"" << identity.canonicalHash << "\""
-                  << ",\"remainingTimeMs\":" << *remaining
-                  << ",\"safeTimeLeftMs\":" << budget.safeTimeLeftMs
-                  << ",\"reserveMs\":" << reserve
+                  << ",\"rawRemainingMs\":" << budget.rawRemainingMs
+                  << ",\"remainingTimeMs\":" << budget.rawRemainingMs
+                  << ",\"incrementMs\":" << *increment
+                  << ",\"movesToGo\":" << (moves ? std::to_string(*moves) : "null")
+                  << ",\"transportReserveMs\":" << budget.transportReserveMs
+                  << ",\"runtimeReserveMs\":" << budget.runtimeReserveMs
+                  << ",\"safetyReserveMs\":" << (budget.transportReserveMs + budget.runtimeReserveMs)
+                  << ",\"safeUsableMs\":" << budget.safeUsableMs
+                  << ",\"safeTimeLeftMs\":" << budget.safeUsableMs
+                  << ",\"reserveMs\":" << (budget.transportReserveMs + budget.runtimeReserveMs)
                   << ",\"expectedMovesRemaining\":" << budget.expectedMovesRemaining
                   << ",\"allocatedBeforeCapMs\":" << budget.allocatedBeforeCapMs
                   << ",\"normalAllocationCapMs\":" << budget.maximumCapMs
-                  << ",\"maximumSpendMs\":" << budget.safeTimeLeftMs
+                  << ",\"maximumSpendMs\":" << budget.safeUsableMs
                   << ",\"allocatedTimeMs\":" << budget.timeLimitMs
                   << ",\"softLimitMs\":" << effectiveSoft
                   << ",\"stableSoftLimitMs\":" << deadlines.stableSoftMs
                   << ",\"unstableSoftLimitMs\":" << deadlines.unstableSoftMs
-                  << ",\"hardLimitMs\":" << budget.timeLimitMs
+                  << ",\"hardLimitMs\":" << budget.hardBudgetMs
                   << ",\"iterationHardStopMs\":" << deadlines.hardMs
                   << ",\"criticalLowTime\":" << (budget.criticalLowTime ? "true" : "false")
+                  << ",\"immediateMove\":" << (budget.immediateMove ? "true" : "false")
+                  << ",\"allocationMode\":\"" << (budget.immediateMove ? "immediate_move" : budget.criticalLowTime ? "critical" : "normal") << "\""
                   << ",\"instabilityApplied\":" << (budget.instabilityApplied ? "true" : "false")
                   << ",\"criticalThresholdMs\":" << time.stopPolicy.criticalLowTimeThresholdMs
                   << "}\n";

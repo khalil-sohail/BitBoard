@@ -326,8 +326,17 @@ class UciEngine:
             if predicate(line):return lines
     def _search_command(self,board:chess.Board,command:str)->dict[str,Any]:
         malformed_before=self.malformed_info_lines;self.send("ucinewgame");self.send("position fen "+board.fen(en_passant="legal"));start=time.monotonic();self.send(command);lines=self._until(lambda line:line.startswith("bestmove "));elapsed=time.monotonic()-start
-        info={};mate_scores=[];best_line=lines[-1]
+        info={};mate_scores=[];best_line=lines[-1];time_info={}
         for line in lines:
+            tokens=line.split()
+            if tokens[:4]==["info","string","time","stopReason"]:
+                try:
+                    time_info={"stopReason":tokens[4]}
+                    for key in ("hardBudgetMs","searchElapsedMs","deadlineChecks","lastDeadlineCheckMs"):
+                        index=tokens.index(key);time_info[key]=int(tokens[index+1])
+                except (ValueError,IndexError):
+                    self.malformed_info_lines+=1;self.malformed_info_records.append(line)
+                continue
             try:item=parse_uci_search_info(line)
             except ValidationError:
                 self.malformed_info_lines+=1;self.malformed_info_records.append(line);continue
@@ -339,7 +348,8 @@ class UciEngine:
         if not legal and not board.is_game_over(claim_draw=True):raise ValidationError(f"Illegal bestmove {move_text} for {board.fen()}")
         score_stm=info.get("scoreValue") if info.get("scoreType")=="cp" else None
         status="forced_legal_move" if info.get("depth") is None and board.legal_moves.count()==1 else "complete"
-        return {"bestMove":move_text,"move":move,"legal":legal,"depth":info.get("depth"),"seldepth":info.get("seldepth"),"nodes":info.get("nodes"),"tbhits":info.get("tbhits",0),"pv":info.get("pv",[]),"reportedTimeMs":info.get("time"),"elapsedSeconds":elapsed,"nps":(info.get("nodes",0)/elapsed if elapsed else None),"scoreType":info.get("scoreType"),"scoreValue":info.get("scoreValue"),"scoreFromSideToMove":score_stm,"scoreWhiteCp":score_stm if board.turn else (-score_stm if score_stm is not None else None),"mateScores":mate_scores,"malformedInfoLines":self.malformed_info_lines-malformed_before,"terminationStatus":status}
+        response_overhead=max(0.0,elapsed*1000-time_info.get("searchElapsedMs",elapsed*1000))
+        return {"bestMove":move_text,"move":move,"legal":legal,"depth":info.get("depth"),"seldepth":info.get("seldepth"),"nodes":info.get("nodes"),"tbhits":info.get("tbhits",0),"pv":info.get("pv",[]),"reportedTimeMs":info.get("time"),"elapsedSeconds":elapsed,"nps":(info.get("nodes",0)/elapsed if elapsed else None),"scoreType":info.get("scoreType"),"scoreValue":info.get("scoreValue"),"scoreFromSideToMove":score_stm,"scoreWhiteCp":score_stm if board.turn else (-score_stm if score_stm is not None else None),"mateScores":mate_scores,"malformedInfoLines":self.malformed_info_lines-malformed_before,"terminationStatus":status,**time_info,"uciResponseOverheadMs":response_overhead}
     def search(self,board:chess.Board,depth:int)->dict[str,Any]:
         return self._search_command(board,f"go depth {depth}")
     def search_clock(self,board:chess.Board,white_time_ms:int,black_time_ms:int,white_increment_ms:int=0,black_increment_ms:int=0,moves_to_go:int|None=None)->dict[str,Any]:

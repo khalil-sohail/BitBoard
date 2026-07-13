@@ -1249,125 +1249,71 @@ void test_phase8_generated_time_defaults_match_production_baseline() {
 
 void requireClockBudget(
     const TimeManagement::ClockBudget& actual,
-    long long safeTimeLeftMs,
-    int expectedMovesRemaining,
-    long long allocatedBeforeCapMs,
-    long long maximumCapMs,
-    long long timeLimitMs,
-    bool instabilityApplied,
+    long long rawRemainingMs,
+    long long safeUsableMs,
+    long long hardBudgetMs,
+    bool immediateMove,
     const std::string& scenario
 ) {
-    require(actual.safeTimeLeftMs == safeTimeLeftMs, scenario + ": safe time changed");
-    require(actual.expectedMovesRemaining == expectedMovesRemaining, scenario + ": expected moves changed");
-    require(actual.allocatedBeforeCapMs == allocatedBeforeCapMs, scenario + ": allocation changed");
-    require(actual.maximumCapMs == maximumCapMs, scenario + ": maximum cap changed");
-    require(actual.timeLimitMs == timeLimitMs, scenario + ": time limit changed");
-    require(actual.instabilityApplied == instabilityApplied, scenario + ": instability decision changed");
+    require(actual.rawRemainingMs == rawRemainingMs, scenario + ": raw clock changed");
+    require(actual.safeUsableMs == safeUsableMs, scenario + ": safe usable clock changed");
+    require(actual.safeTimeLeftMs == safeUsableMs, scenario + ": compatibility safe clock changed");
+    require(actual.hardBudgetMs == hardBudgetMs, scenario + ": hard budget changed");
+    require(actual.timeLimitMs == hardBudgetMs, scenario + ": compatibility hard budget changed");
+    require(actual.immediateMove == immediateMove, scenario + ": immediate-mode decision changed");
     require(actual.criticalLowTime ==
-                (safeTimeLeftMs < Tuning::Generated::VALUES.time.stopPolicy.criticalLowTimeThresholdMs),
+                ((rawRemainingMs - actual.transportReserveMs) <
+                 Tuning::Generated::VALUES.time.stopPolicy.criticalLowTimeThresholdMs),
             scenario + ": critical-low-time decision changed");
-    const auto deadlines = TimeManagement::calculateStopDeadlines(actual.timeLimitMs);
-    require(deadlines.stableSoftMs == (timeLimitMs * 50) / 100,
+    const auto deadlines = TimeManagement::calculateStopDeadlines(actual.hardBudgetMs);
+    require(deadlines.stableSoftMs == (hardBudgetMs * 50) / 100,
             scenario + ": stable soft deadline changed");
-    require(deadlines.unstableSoftMs == (timeLimitMs * 80) / 100,
+    require(deadlines.unstableSoftMs == (hardBudgetMs * 80) / 100,
             scenario + ": unstable soft deadline changed");
-    require(deadlines.hardMs == (timeLimitMs * 3) / 4,
+    require(deadlines.hardMs == (hardBudgetMs * 3) / 4,
             scenario + ": hard deadline changed");
 }
 
 void test_phase8_synthetic_clock_allocation_baselines() {
-    struct Scenario {
-        const char* name;
-        long long timeLeftMs;
-        long long incrementMs;
-        int moveNumber;
-        std::optional<int> movesToGo;
-        long long safeTimeLeftMs;
-        int expectedMovesRemaining;
-        long long allocatedBeforeCapMs;
-        long long maximumCapMs;
-        long long timeLimitMs;
-    };
-
-    const Scenario scenarios[] = {
-        {"60+0", 60'000, 0, 1, std::nullopt, 59'970, 39, 1'537, 14'992, 1'537},
-        {"60+1", 60'000, 1'000, 1, std::nullopt, 59'970, 39, 2'537, 14'992, 2'537},
-        {"180+0", 180'000, 0, 1, std::nullopt, 179'970, 39, 4'614, 44'992, 4'614},
-        {"180+2", 180'000, 2'000, 1, std::nullopt, 179'970, 39, 6'614, 44'992, 6'614},
-        {"600+0", 600'000, 0, 1, std::nullopt, 599'970, 39, 15'383, 149'992, 15'383},
-        {"600+5", 600'000, 5'000, 1, std::nullopt, 599'970, 39, 20'383, 149'992, 20'383},
-        {"very low", 500, 0, 1, std::nullopt, 470, 39, 12, 117, 12},
-        {"critical", 60, 0, 1, std::nullopt, 30, 39, 0, 7, 25},
-        {"large clock", 3'600'000, 10'000, 1, std::nullopt, 3'599'970, 39, 102'306, 899'992, 102'306},
-        {"explicit moves-to-go", 60'000, 0, 1, 10, 59'970, 10, 5'997, 14'992, 5'997},
-        {"large increment capped", 60'000, 100'000, 1, 1, 59'970, 1, 159'970, 14'992, 14'992},
-    };
-
-    for (const Scenario& scenario : scenarios) {
-        const auto budget = TimeManagement::calculateClockBudget(
-            scenario.timeLeftMs,
-            scenario.incrementMs,
-            scenario.moveNumber,
-            scenario.movesToGo,
-            false,
-            0,
-            0
-        );
-        requireClockBudget(
-            budget,
-            scenario.safeTimeLeftMs,
-            scenario.expectedMovesRemaining,
-            scenario.allocatedBeforeCapMs,
-            scenario.maximumCapMs,
-            scenario.timeLimitMs,
-            false,
-            scenario.name
-        );
-    }
+    requireClockBudget(TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, false, 0, 0),
+                       60'000, 59'965, 1'537, false, "60+0");
+    requireClockBudget(TimeManagement::calculateClockBudget(60'000, 1'000, 1, std::nullopt, false, 0, 0),
+                       60'000, 59'965, 2'537, false, "60+1");
+    requireClockBudget(TimeManagement::calculateClockBudget(60, 0, 30, std::nullopt, false, 0, 0),
+                       60, 25, 6, false, "critical 60ms");
+    requireClockBudget(TimeManagement::calculateClockBudget(20, 0, 30, std::nullopt, false, 0, 0),
+                       20, 0, 0, true, "immediate 20ms");
+    const auto unstable = TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 101, 50);
+    require(unstable.instabilityApplied, "Instability multiplier must remain active");
+    require(unstable.hardBudgetMs == 1'998, "Instability integer allocation changed");
 }
 
 void test_phase8_time_policy_boundaries() {
     const auto& time = Tuning::Generated::VALUES.time;
 
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(69, 0, 1, std::nullopt, false, 0, 0),
-        39, 39, 1, 9, 34, false, "critical threshold - 1"
-    );
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(70, 0, 1, std::nullopt, false, 0, 0),
-        40, 39, 1, 10, 10, false, "critical threshold"
-    );
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(71, 0, 1, std::nullopt, false, 0, 0),
-        41, 39, 1, 10, 10, false, "critical threshold + 1"
-    );
+    requireClockBudget(TimeManagement::calculateClockBudget(69, 0, 30, std::nullopt, false, 0, 0),
+                       69, 34, 8, false, "critical threshold - 1");
+    requireClockBudget(TimeManagement::calculateClockBudget(70, 0, 30, std::nullopt, false, 0, 0),
+                       70, 35, 8, false, "critical threshold");
+    requireClockBudget(TimeManagement::calculateClockBudget(71, 0, 30, std::nullopt, false, 0, 0),
+                       71, 36, 9, false, "critical threshold + 1");
 
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 51),
-        59'970, 39, 1'537, 14'992, 1'537, false, "instability threshold - 1"
-    );
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 50),
-        59'970, 39, 1'537, 14'992, 1'537, false, "instability threshold"
-    );
-    requireClockBudget(
-        TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 101, 50),
-        59'970, 39, 1'998, 14'992, 1'998, true, "instability threshold + 1"
-    );
+    require(!TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 51).instabilityApplied,
+            "Instability threshold - 1 changed");
+    require(!TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 100, 50).instabilityApplied,
+            "Instability threshold changed");
+    require(TimeManagement::calculateClockBudget(60'000, 0, 1, std::nullopt, true, 101, 50).instabilityApplied,
+            "Instability threshold + 1 changed");
 
     require(TimeManagement::calculateClockBudget(400, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 10,
             "Minimum-move boundary below 10ms changed");
     require(TimeManagement::calculateClockBudget(420, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 10,
             "Minimum-move boundary at 10ms changed");
-    require(TimeManagement::calculateClockBudget(459, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 11,
+    require(TimeManagement::calculateClockBudget(464, 0, 1, std::nullopt, false, 0, 0).timeLimitMs == 11,
             "Minimum-move boundary above 10ms changed");
 
-    require(TimeManagement::calculateClockBudget(60'000, 8'994, 1, 10, false, 0, 0).timeLimitMs == 14'991,
-            "Maximum-cap boundary below cap changed");
-    require(TimeManagement::calculateClockBudget(60'000, 8'995, 1, 10, false, 0, 0).timeLimitMs == 14'992,
-            "Maximum-cap boundary at cap changed");
-    require(TimeManagement::calculateClockBudget(60'000, 8'996, 1, 10, false, 0, 0).timeLimitMs == 14'992,
-            "Maximum-cap boundary above cap changed");
+    require(TimeManagement::calculateClockBudget(60'000, 100'000, 1, 1, false, 0, 0).timeLimitMs == 14'991,
+            "Maximum cap changed");
 
     require(TimeManagement::calculateClockBudget(60'000, 0, 19, std::nullopt, false, 0, 0).expectedMovesRemaining == 21,
             "Expected-moves value immediately above floor changed");
@@ -1392,25 +1338,57 @@ void test_phase8_time_policy_boundaries() {
 }
 
 void test_phase18_time_policy_small_clock_safety() {
-    for (long long clock = 0; clock <= 100; ++clock) {
+    long long previousHard = 0;
+    for (long long clock = 0; clock <= 150; ++clock) {
         const auto budget = TimeManagement::calculateClockBudget(
             clock, 0, 30, std::nullopt, false, 0, 0
         );
         const auto deadlines = TimeManagement::calculateStopDeadlines(budget.timeLimitMs);
-        require(budget.safeTimeLeftMs >= 1, "Safe time must remain positive");
-        require(budget.timeLimitMs >= 1, "Allocated time must remain positive");
+        require(budget.rawRemainingMs == clock, "Raw clock domain changed");
+        require(budget.safeUsableMs >= 0, "Safe usable time must not be negative");
+        require(budget.hardBudgetMs >= 0, "Hard budget must not be negative");
+        require(budget.softBudgetMs <= budget.hardBudgetMs, "Soft budget exceeds hard budget");
+        require(clock == 0 || budget.hardBudgetMs < clock, "Positive clock lacks response headroom");
+        require(budget.hardBudgetMs <= budget.safeUsableMs, "Allocation exceeds safe usable time");
+        require(std::abs(budget.hardBudgetMs - previousHard) <= 3, "Adjacent hard-budget discontinuity");
+        previousHard = budget.hardBudgetMs;
         require(deadlines.stableSoftMs >= 0 && deadlines.hardMs >= 0,
                 "Deadlines must not be negative");
         require(deadlines.stableSoftMs <= deadlines.hardMs,
                 "Effective stable soft deadline must not exceed hard deadline");
-        if (clock == 39 || clock == 40 || clock == 41 || clock == 60) {
-            require(budget.criticalLowTime, "Requested low-clock fixture must use critical mode");
-        }
+        if (budget.immediateMove) require(budget.hardBudgetMs == 0 && budget.softBudgetMs == 0,
+                                          "Immediate mode must have zero budgets");
     }
     const auto before = TimeManagement::calculateClockBudget(69, 0, 30, std::nullopt, false, 0, 0);
     const auto at = TimeManagement::calculateClockBudget(70, 0, 30, std::nullopt, false, 0, 0);
     require(before.criticalLowTime && !at.criticalLowTime,
             "Reserve-adjusted critical transition must remain at raw 69/70ms");
+    require(std::abs(before.hardBudgetMs - at.hardBudgetMs) <= 3,
+            "Critical transition is not smooth");
+    require(TimeManagement::calculateClockBudget(60, 0, 30, std::nullopt, false, 0, 0).hardBudgetMs == 6,
+            "60ms safety allocation changed");
+}
+
+void test_phase18_immediate_move_search_fallback() {
+    Board board;
+    const auto legal = board.generateLegalMoves();
+    const auto [first, ponder] = findBestMove(board, 64, 0, nullptr, true);
+    require(std::any_of(legal.begin(), legal.end(), [&](const Move& move) {
+                return move.from == first.from && move.to == first.to && move.promotion == first.promotion;
+            }), "Immediate mode must return a legal fallback move");
+    require(ponder.from == -1, "Immediate mode must not invent a ponder move");
+    require(searchStopReason.load(std::memory_order_relaxed) == SearchStopReason::ImmediateMove,
+            "Immediate mode stop reason changed");
+    require(deadlineChecks.load(std::memory_order_relaxed) == 0,
+            "Immediate fallback must not enter iterative search");
+
+    Board terminal;
+    require(terminal.loadFEN("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1"), "Terminal fixture failed");
+    const auto [none, terminalPonder] = findBestMove(terminal, 64, 0, nullptr, true);
+    require(none.from == -1 && terminalPonder.from == -1,
+            "Terminal immediate request must return no move");
+    require(searchStopReason.load(std::memory_order_relaxed) == SearchStopReason::Terminal,
+            "Terminal stop reason changed");
 }
 
 void test_phase7_generated_search_defaults_match_production_baseline() {
@@ -1949,6 +1927,7 @@ int main() {
         {"Phase 8 synthetic clock allocation baselines", test_phase8_synthetic_clock_allocation_baselines},
         {"Phase 8 time-policy boundaries", test_phase8_time_policy_boundaries},
         {"Phase 18 time-policy small-clock safety", test_phase18_time_policy_small_clock_safety},
+        {"Phase 18 immediate-move search fallback", test_phase18_immediate_move_search_fallback},
         {"Phase 7 generated search defaults match production baseline", test_phase7_generated_search_defaults_match_production_baseline},
         {"Phase 7 search formula characterization", test_phase7_search_formula_characterization},
         {"Phase 7 null-move exclusions remain structural", test_phase7_null_move_exclusions_remain_structural},

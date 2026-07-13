@@ -91,10 +91,26 @@ bool shouldAbortSearch() {
     }
 
     ++g_nodesSearched;
-    if ((g_nodesSearched & TIME_TUNING.polling.nodeMask) == 0ULL) {
+    std::uint64_t pollingMask = TIME_TUNING.polling.nodeMask;
+    if (deadlineActive.load(std::memory_order_relaxed)) {
+        const long long budget = allocatedTimeMs.load(std::memory_order_relaxed);
+        if (budget <= 10) pollingMask = std::min<std::uint64_t>(pollingMask, 63ULL);
+        else if (budget <= 50) pollingMask = std::min<std::uint64_t>(pollingMask, 127ULL);
+        else if (budget <= 500) pollingMask = std::min<std::uint64_t>(pollingMask, 255ULL);
+        else if (budget <= 5'000) pollingMask = std::min<std::uint64_t>(pollingMask, 1023ULL);
+    }
+    if ((g_nodesSearched & pollingMask) == 0ULL) {
         checkTime();
     }
 
+    return timeAborted.load(std::memory_order_relaxed);
+}
+
+bool checkDeadlineBoundary() {
+    if (!deadlineActive.load(std::memory_order_relaxed)) {
+        return timeAborted.load(std::memory_order_relaxed);
+    }
+    checkTime();
     return timeAborted.load(std::memory_order_relaxed);
 }
 
@@ -108,6 +124,10 @@ std::atomic<uint64_t> deltaPruneSkips{0};
 std::atomic<uint64_t> ttHits{0};
 std::atomic<uint64_t> ttCutoffs{0};
 std::atomic<uint64_t> ttStores{0};
+std::atomic<bool> deadlineActive{false};
+std::atomic<uint64_t> deadlineChecks{0};
+std::atomic<long long> lastDeadlineCheckElapsedMs{0};
+std::atomic<SearchStopReason> searchStopReason{SearchStopReason::None};
 
 // Tracking for Complexity Extension (moved to app_uci.cpp)
 
@@ -118,7 +138,28 @@ void checkTime() {
 
     const auto now = SearchInternal::SearchClock::now();
     const long long usedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
-    if (usedMs >= allocatedTimeMs.load(std::memory_order_relaxed)) {
+    deadlineChecks.fetch_add(1, std::memory_order_relaxed);
+    lastDeadlineCheckElapsedMs.store(usedMs, std::memory_order_relaxed);
+    const long long budgetMs = allocatedTimeMs.load(std::memory_order_relaxed);
+    // Millisecond clocks are truncated.  Begin unwinding one millisecond
+    // before the advertised hard search budget so the completed command stays
+    // within that budget instead of detecting expiry after it.
+    const long long enforcementMs = budgetMs > 2 ? budgetMs - 2 : 0;
+    if (usedMs >= enforcementMs) {
+        searchStopReason.store(SearchStopReason::HardLimit, std::memory_order_relaxed);
         timeAborted.store(true, std::memory_order_relaxed);
     }
+}
+
+const char* searchStopReasonName(SearchStopReason reason) {
+    switch (reason) {
+        case SearchStopReason::SoftLimit: return "soft_limit";
+        case SearchStopReason::HardLimit: return "hard_limit";
+        case SearchStopReason::ImmediateMove: return "immediate_move";
+        case SearchStopReason::CompletedDepth: return "completed_depth";
+        case SearchStopReason::ExternalStop: return "external_stop";
+        case SearchStopReason::Terminal: return "terminal";
+        case SearchStopReason::None: return "none";
+    }
+    return "none";
 }

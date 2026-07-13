@@ -69,6 +69,10 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
         const int score = -quiescenceSearch(board, -beta, -alpha, plyFromRoot + 1);
         board.undoMove();
 
+        if (timeAborted.load(std::memory_order_relaxed)) {
+            return 0;
+        }
+
         if (score >= beta) {
             return beta;
         }

@@ -88,31 +88,44 @@ done:
 
 
 std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, int* outScore) {
+    return findBestMove(board, maxDepth, timeLimitMs, outScore, true);
+}
+
+std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLimitMs, int* outScore, bool useDeadline) {
     qNodes.store(0, std::memory_order_relaxed);
     deltaPruneSkips.store(0, std::memory_order_relaxed);
     ttHits.store(0, std::memory_order_relaxed);
     ttCutoffs.store(0, std::memory_order_relaxed);
     ttStores.store(0, std::memory_order_relaxed);
+    deadlineChecks.store(0, std::memory_order_relaxed);
+    lastDeadlineCheckElapsedMs.store(0, std::memory_order_relaxed);
+    searchStopReason.store(SearchStopReason::None, std::memory_order_relaxed);
+    deadlineActive.store(useDeadline, std::memory_order_relaxed);
+    allocatedTimeMs.store(std::max(0LL, timeLimitMs), std::memory_order_relaxed);
+    startTime = SearchInternal::SearchClock::now();
+    SearchInternal::g_nodesSearched = 0;
+    timeAborted.store(false, std::memory_order_relaxed);
 
     std::vector<Move> rootMoves = board.generateLegalMoves();
     if (rootMoves.empty()) {
+        searchStopReason.store(SearchStopReason::Terminal, std::memory_order_relaxed);
         return {Move{}, Move{}};
     }
+    if (useDeadline && timeLimitMs <= 0) {
+        searchStopReason.store(SearchStopReason::ImmediateMove, std::memory_order_relaxed);
+        return {rootMoves.front(), Move{}};
+    }
     if (rootMoves.size() == 1) {
+        searchStopReason.store(SearchStopReason::CompletedDepth, std::memory_order_relaxed);
         return {rootMoves.front(), Move{}};
     }
 
-    allocatedTimeMs.store(std::max(1LL, timeLimitMs), std::memory_order_relaxed);
     Move bestMoveLastIteration{};
     int stableCount = 0;
     int softLimitFraction =
         TIME_TUNING.stopPolicy.stableSoftStopFraction.numerator * 100 /
         TIME_TUNING.stopPolicy.stableSoftStopFraction.denominator;
     const int rootColorMultiplier = (board.sideToMove() == Color::White) ? 1 : -1;
-    startTime = SearchInternal::SearchClock::now();
-    SearchInternal::g_nodesSearched = 0;
-    timeAborted.store(false, std::memory_order_relaxed);
-
     SearchInternal::sortMovesByScore(board, rootMoves, Move{}, 0);
 
     Move previousIterationBest = rootMoves.front();
@@ -176,7 +189,7 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             int    localAlpha  = alpha;
 
             for (const Move& move : candidates) {
-                if (SearchInternal::shouldAbortSearch()) {
+                if (SearchInternal::checkDeadlineBoundary() || SearchInternal::shouldAbortSearch()) {
                     completedDepth = false;
                     break;
                 }
@@ -216,7 +229,7 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
                 pvBestMove  = candidates.front();
 
                 for (const Move& move : candidates) {
-                    if (SearchInternal::shouldAbortSearch()) {
+                    if (SearchInternal::checkDeadlineBoundary() || SearchInternal::shouldAbortSearch()) {
                         completedDepth = false;
                         break;
                     }
@@ -297,10 +310,25 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
 
         long long currentHardLimit = allocatedTimeMs.load(std::memory_order_relaxed);
         long long currentSoftLimit = (currentHardLimit * softLimitFraction) / 100;
-        if (elapsedMs > currentSoftLimit && stableCount >= 2) break;
+        if (elapsedMs > currentSoftLimit && stableCount >= 2) {
+            searchStopReason.store(SearchStopReason::SoftLimit, std::memory_order_relaxed);
+            break;
+        }
         if (elapsedMs >
             (currentHardLimit * TIME_TUNING.stopPolicy.hardStopFraction.numerator /
-             TIME_TUNING.stopPolicy.hardStopFraction.denominator)) break;
+             TIME_TUNING.stopPolicy.hardStopFraction.denominator)) {
+            searchStopReason.store(SearchStopReason::SoftLimit, std::memory_order_relaxed);
+            break;
+        }
+    }
+
+    if (searchStopReason.load(std::memory_order_relaxed) == SearchStopReason::None) {
+        searchStopReason.store(
+            timeAborted.load(std::memory_order_relaxed)
+                ? SearchStopReason::HardLimit
+                : SearchStopReason::CompletedDepth,
+            std::memory_order_relaxed
+        );
     }
 
     const auto totalElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(

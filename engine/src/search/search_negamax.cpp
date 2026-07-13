@@ -100,6 +100,10 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         );
         board.undoNullMove();
 
+        if (timeAborted.load(std::memory_order_relaxed)) {
+            return 0;
+        }
+
         if (nullScore >= beta) {
             return beta;
         }
@@ -142,6 +146,10 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
             ttBestMove,         // exclude the TT move
             true                // don't write results to TT
         );
+
+        if (timeAborted.load(std::memory_order_relaxed)) {
+            return 0;
+        }
 
         // If every other move failed to reach singBeta, the TT move is singular.
         if (singScore < singBeta) {
@@ -252,6 +260,10 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         }
 
         board.undoMove();
+
+        if (timeAborted.load(std::memory_order_relaxed)) {
+            return 0;
+        }
 
         if (score > bestScore) {
             bestScore           = score;
