@@ -4,7 +4,8 @@ TUNE_NAME = chess-engine-tune
 
 SRCS = $(wildcard src/*.cpp src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp)
 ENGINE_SRCS = src/Board.cpp src/openingBook.cpp src/printers.cpp $(wildcard src/app/*.cpp src/eval/*.cpp src/search/*.cpp src/move/*.cpp)
-TEST_SRCS = $(ENGINE_SRCS) tests.cpp
+TUNING_MODEL_SRCS = src/tuning/tuning_validation.cpp
+TEST_SRCS = $(ENGINE_SRCS) $(TUNING_MODEL_SRCS) tests.cpp
 TUNE_SRCS = $(ENGINE_SRCS) src/tuning/eval_param_registry.cpp src/tuning/texel_main.cpp
 
 OBJS = $(SRCS:.cpp=.o)

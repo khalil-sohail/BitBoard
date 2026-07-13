@@ -1,0 +1,3232 @@
+{
+  "schemaVersion": 1,
+  "engineBaseline": "builtin-default-v1",
+  "classification": {
+    "currentFoundationStatus": "metadata-only",
+    "placeholderParameters": [
+      {
+        "name": "eval.tempo",
+        "status": "placeholder",
+        "reason": "Declared in engine/include/tuning/engine_tuning.hpp and absent from production evaluation consumers."
+      }
+    ]
+  },
+  "parameters": [
+    {
+      "name": "evaluation.bishop.badHeavyPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 100,
+      "minimum": 0,
+      "maximum": 200,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 89,
+        "symbol": "EvalWeights::BAD_BISHOP_HEAVY_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 222,
+        "function": "EvalTerms::badBishopPenalty"
+      },
+      "connectivity": "Specific bishop-pawn block patterns add this penalty to MG and EG.",
+      "dataRequirements": [
+        "bad bishop pattern fixtures"
+      ],
+      "recommendedMethod": "fixture-backed-coordinate-search"
+    },
+    {
+      "name": "evaluation.bishop.badLightPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 60,
+      "minimum": 0,
+      "maximum": 160,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 90,
+        "symbol": "EvalWeights::BAD_BISHOP_LIGHT_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 224,
+        "function": "EvalTerms::badBishopPenalty"
+      },
+      "connectivity": "Specific lighter bishop-pawn block patterns add this penalty to MG and EG.",
+      "dataRequirements": [
+        "bad bishop pattern fixtures"
+      ],
+      "recommendedMethod": "fixture-backed-coordinate-search"
+    },
+    {
+      "name": "evaluation.bishopPair.eg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 80,
+      "minimum": 0,
+      "maximum": 160,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 70,
+        "symbol": "EvalWeights::BISHOP_PAIR_BONUS_EG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 54,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Side with two or more bishops receives this EG bonus before tapering.",
+      "dataRequirements": [
+        "bishop pair endgame fixtures",
+        "labeled positions"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.bishopPair.mg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 70,
+      "minimum": 0,
+      "maximum": 150,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 69,
+        "symbol": "EvalWeights::BISHOP_PAIR_BONUS_MG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 53,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Side with two or more bishops receives this MG bonus before tapering.",
+      "dataRequirements": [
+        "bishop pair fixtures",
+        "labeled positions"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.endgame.latePhaseMax",
+      "category": "evaluation.phase",
+      "type": "integer",
+      "unit": "phase unit",
+      "currentValue": 8,
+      "minimum": 0,
+      "maximum": 24,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 98,
+        "symbol": "EvalWeights::LATE_ENDGAME_PHASE_MAX"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 214,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Controls whether mop-up and low-material scaling logic is active.",
+      "dataRequirements": [
+        "phase-diverse positions",
+        "endgame fixtures"
+      ],
+      "recommendedMethod": "grid-search-with-endgame-characterization"
+    },
+    {
+      "name": "evaluation.endgame.mopUpEgMargin",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 220,
+      "minimum": 0,
+      "maximum": 800,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 99,
+        "symbol": "EvalWeights::MOP_UP_EG_MARGIN"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 215,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "EG score must exceed this absolute margin before mop-up terms are applied.",
+      "dataRequirements": [
+        "winning endgame positions"
+      ],
+      "recommendedMethod": "grid-search"
+    },
+    {
+      "name": "evaluation.endgame.mopUpMaterialMargin",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 350,
+      "minimum": 0,
+      "maximum": 1200,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 100,
+        "symbol": "EvalWeights::MOP_UP_MATERIAL_MARGIN"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 215,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Endgame material advantage must exceed this margin before mop-up terms are applied.",
+      "dataRequirements": [
+        "winning endgame positions"
+      ],
+      "recommendedMethod": "grid-search"
+    },
+    {
+      "name": "evaluation.endgame.mopUpWeights",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn formula weights",
+      "currentValue": [
+        15,
+        10,
+        20,
+        7,
+        10,
+        25,
+        12
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        80,
+        80,
+        80,
+        14,
+        80,
+        80,
+        80
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 106,
+        "symbol": "EvalWeights::MOP_UP_*"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_endgame.cpp",
+        "line": 142,
+        "function": "EvalTerms::mopUpEval"
+      },
+      "connectivity": "Mop-up center, edge, corner, and king-distance terms are combined into EG bonus in won low-phase endings.",
+      "dataRequirements": [
+        "won king-and-piece endgames"
+      ],
+      "recommendedMethod": "grouped-grid-search",
+      "array": {
+        "dimensions": [
+          7
+        ],
+        "indexing": "centerDistanceWeight, edgeDistanceBase, edgePressureWeight, cornerDistanceCap, cornerPressureWeight, kingDistanceBase, kingDistanceWeight",
+        "recommendedFutureRepresentation": "named struct or fixed-order array"
+      }
+    },
+    {
+      "name": "evaluation.endgame.scaleMinorOnlyClearEdge",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "scaled score numerator",
+      "currentValue": 80,
+      "minimum": 0,
+      "maximum": 128,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 104,
+        "symbol": "EvalWeights::SCALE_MINOR_ONLY_CLEAR_EDGE"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_endgame.cpp",
+        "line": 104,
+        "function": "EvalTerms::lowMaterialScaleFactor"
+      },
+      "connectivity": "No-pawn minor-only endings with two-minor difference clamp low-material scale to this numerator.",
+      "dataRequirements": [
+        "minor-piece-only endgames"
+      ],
+      "recommendedMethod": "fixture-backed-grid-search"
+    },
+    {
+      "name": "evaluation.endgame.scaleMinorOnlyNearEqual",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "scaled score numerator",
+      "currentValue": 64,
+      "minimum": 0,
+      "maximum": 128,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 103,
+        "symbol": "EvalWeights::SCALE_MINOR_ONLY_NEAR_EQUAL"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_endgame.cpp",
+        "line": 102,
+        "function": "EvalTerms::lowMaterialScaleFactor"
+      },
+      "connectivity": "No-pawn minor-only endings with minor difference at most one clamp low-material scale to this numerator.",
+      "dataRequirements": [
+        "minor-piece-only endgames"
+      ],
+      "recommendedMethod": "fixture-backed-grid-search"
+    },
+    {
+      "name": "evaluation.endgame.scaleOppositeBishopsLowPawns",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "scaled score numerator",
+      "currentValue": 72,
+      "minimum": 0,
+      "maximum": 128,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 102,
+        "symbol": "EvalWeights::SCALE_OPPOSITE_BISHOPS_LOW_PAWNS"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_endgame.cpp",
+        "line": 118,
+        "function": "EvalTerms::lowMaterialScaleFactor"
+      },
+      "connectivity": "Opposite-colored bishop endings with up to six total pawns clamp low-material scale to this numerator.",
+      "dataRequirements": [
+        "opposite-colored bishop endgames"
+      ],
+      "recommendedMethod": "fixture-backed-grid-search"
+    },
+    {
+      "name": "evaluation.endgame.scaleOppositeBishopsMinPawns",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "scaled score numerator",
+      "currentValue": 56,
+      "minimum": 0,
+      "maximum": 128,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 101,
+        "symbol": "EvalWeights::SCALE_OPPOSITE_BISHOPS_MIN_PAWNS"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_endgame.cpp",
+        "line": 117,
+        "function": "EvalTerms::lowMaterialScaleFactor"
+      },
+      "connectivity": "Opposite-colored bishop endings with two or fewer total pawns clamp low-material scale to this numerator.",
+      "dataRequirements": [
+        "opposite-colored bishop endgames"
+      ],
+      "recommendedMethod": "fixture-backed-grid-search"
+    },
+    {
+      "name": "evaluation.king.attackPressure",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn penalty by attacker count",
+      "currentValue": [
+        0,
+        40,
+        165,
+        400,
+        400,
+        400,
+        160,
+        200,
+        240
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        500,
+        500,
+        500,
+        500,
+        500,
+        500,
+        500,
+        500
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-king-safety",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 65,
+        "symbol": "EvalWeights::KING_ATTACK_PRESSURE_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_king.cpp",
+        "line": 74,
+        "function": "EvalTerms::kingAttackPressure"
+      },
+      "connectivity": "Enemy pieces attacking the king zone select this penalty array, which is subtracted from MG evaluation.",
+      "dataRequirements": [
+        "king attack positions",
+        "tactical validation"
+      ],
+      "recommendedMethod": "constrained-texel-plus-tactical-suite",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "attacker count clamped to 0..8",
+        "monotonicity": "not currently enforced; future tuning should consider monotone constraints",
+        "recommendedFutureRepresentation": "attacker-count indexed array"
+      }
+    },
+    {
+      "name": "evaluation.king.shieldMaxPawns",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "pawn count cap",
+      "currentValue": 3,
+      "minimum": 0,
+      "maximum": 8,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-king-safety",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 72,
+        "symbol": "EvalWeights::KING_SHIELD_MAX_PAWNS"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_king.cpp",
+        "line": 81,
+        "function": "EvalTerms::kingPawnShieldBonus"
+      },
+      "connectivity": "King-zone pawn count is capped before multiplying by the per-pawn shield bonus.",
+      "dataRequirements": [
+        "king safety positions"
+      ],
+      "recommendedMethod": "constrained-grid-search"
+    },
+    {
+      "name": "evaluation.king.shieldPerPawnBonus",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn per pawn",
+      "currentValue": 27,
+      "minimum": 0,
+      "maximum": 80,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-king-safety",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 73,
+        "symbol": "EvalWeights::KING_SHIELD_PER_PAWN_BONUS"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_king.cpp",
+        "line": 81,
+        "function": "EvalTerms::kingPawnShieldBonus"
+      },
+      "connectivity": "Capped shield pawn count is multiplied by this bonus and added to MG evaluation.",
+      "dataRequirements": [
+        "king safety positions"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.king.uncastledCenterPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 50,
+      "minimum": 0,
+      "maximum": 150,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-king-safety",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 94,
+        "symbol": "EvalWeights::UNCASTLED_KING_CENTER_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 257,
+        "function": "EvalTerms::uncastledKingPenalty"
+      },
+      "connectivity": "King on files c through f receives this MG penalty.",
+      "dataRequirements": [
+        "king safety and castling fixtures"
+      ],
+      "recommendedMethod": "texel-logistic-plus-tactical-suite"
+    },
+    {
+      "name": "evaluation.king.uncastledLostRightsPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 66,
+      "minimum": 0,
+      "maximum": 180,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-king-safety",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 95,
+        "symbol": "EvalWeights::UNCASTLED_KING_LOST_RIGHTS_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 260,
+        "function": "EvalTerms::uncastledKingPenalty"
+      },
+      "connectivity": "Uncastled king in the center with no castling rights receives this additional MG penalty.",
+      "dataRequirements": [
+        "king safety and castling fixtures"
+      ],
+      "recommendedMethod": "texel-logistic-plus-tactical-suite"
+    },
+    {
+      "name": "evaluation.material.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn",
+      "currentValue": [
+        160,
+        200,
+        269,
+        650,
+        1150,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        500,
+        1000,
+        1000,
+        1500,
+        2500,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 9,
+        "symbol": "EvalWeights::EG_VALUE"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 138,
+        "function": "EvalTables::pieceScoreDelta"
+      },
+      "connectivity": "EG_VALUE[piece] is added to EG_PESTO and also used by endgameMaterialValue for mop-up eligibility.",
+      "dataRequirements": [
+        "labeled endgame positions",
+        "reference evaluations or game results"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order: pawn, knight, bishop, rook, queen, king",
+        "sentinels": [
+          "king value must remain 0"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed integer array with king fixed"
+      }
+    },
+    {
+      "name": "evaluation.material.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn",
+      "currentValue": [
+        150,
+        250,
+        284,
+        490,
+        839,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        500,
+        1000,
+        1000,
+        1500,
+        2500,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 5,
+        "symbol": "EvalWeights::MG_VALUE"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 137,
+        "function": "EvalTables::pieceScoreDelta"
+      },
+      "connectivity": "MG_VALUE[piece] is added to MG_PESTO for each piece and accumulated into Board::m_mgScore; static eval and search scores change.",
+      "dataRequirements": [
+        "labeled positions",
+        "reference evaluations or game results"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order: pawn, knight, bishop, rook, queen, king",
+        "sentinels": [
+          "king value must remain 0"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed integer array with king fixed"
+      }
+    },
+    {
+      "name": "evaluation.mobility.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn per legal destination",
+      "currentValue": [
+        0,
+        10,
+        10,
+        8,
+        8,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        30,
+        30,
+        30,
+        30,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-mobility",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 21,
+        "symbol": "EvalWeights::MOBILITY_BONUS_EG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 135,
+        "function": "EvalTerms::mobilityTermsForSide"
+      },
+      "connectivity": "Per-piece mobility counts are multiplied by this EG array and added to tapered evaluation.",
+      "dataRequirements": [
+        "endgame and low-material positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order",
+        "sentinels": [
+          "pawn and king mobility are not consumed"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed integer array for knight through queen"
+      }
+    },
+    {
+      "name": "evaluation.mobility.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn per legal destination",
+      "currentValue": [
+        0,
+        3,
+        10,
+        8,
+        5,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        30,
+        30,
+        30,
+        30,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-mobility",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 17,
+        "symbol": "EvalWeights::MOBILITY_BONUS_MG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 134,
+        "function": "EvalTerms::mobilityTermsForSide"
+      },
+      "connectivity": "Per-piece mobility counts are multiplied by this MG array and added to tapered evaluation.",
+      "dataRequirements": [
+        "quiet middlegame positions",
+        "reference evaluations"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order",
+        "sentinels": [
+          "pawn and king mobility are not consumed"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed integer array for knight through queen"
+      }
+    },
+    {
+      "name": "evaluation.pawns.backwardByRank.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn penalty by relative rank",
+      "currentValue": [
+        0,
+        0,
+        30,
+        30,
+        30,
+        0,
+        0,
+        0,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 57,
+        "symbol": "EvalWeights::BACKWARD_PAWN_PENALTY_EG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 217,
+        "function": "EvalTerms::backwardPawnsPenaltyEg"
+      },
+      "connectivity": "Backward pawn detection indexes this array by relative rank and subtracts EG penalties.",
+      "dataRequirements": [
+        "backward pawn endgames"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8",
+        "recommendedFutureRepresentation": "rank-indexed penalty array"
+      }
+    },
+    {
+      "name": "evaluation.pawns.backwardByRank.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn penalty by relative rank",
+      "currentValue": [
+        0,
+        0,
+        40,
+        20,
+        10,
+        40,
+        0,
+        0,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 53,
+        "symbol": "EvalWeights::BACKWARD_PAWN_PENALTY_MG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 213,
+        "function": "EvalTerms::backwardPawnsPenalty"
+      },
+      "connectivity": "Backward pawn detection indexes this array by relative rank and subtracts MG penalties.",
+      "dataRequirements": [
+        "backward pawn fixtures"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8",
+        "recommendedFutureRepresentation": "rank-indexed penalty array"
+      }
+    },
+    {
+      "name": "evaluation.pawns.candidateByRank.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn by relative rank",
+      "currentValue": [
+        0,
+        0,
+        0,
+        50,
+        50,
+        50,
+        50,
+        0,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 49,
+        "symbol": "EvalWeights::CANDIDATE_PAWN_BONUS_EG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 209,
+        "function": "EvalTerms::candidatePawnsBonusEg"
+      },
+      "connectivity": "Candidate passer detection indexes this array by relative rank and adds EG bonuses.",
+      "dataRequirements": [
+        "candidate passer endgames"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8",
+        "recommendedFutureRepresentation": "rank-indexed array"
+      }
+    },
+    {
+      "name": "evaluation.pawns.candidateByRank.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn by relative rank",
+      "currentValue": [
+        0,
+        0,
+        0,
+        40,
+        40,
+        40,
+        40,
+        0,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 45,
+        "symbol": "EvalWeights::CANDIDATE_PAWN_BONUS_MG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 205,
+        "function": "EvalTerms::candidatePawnsBonus"
+      },
+      "connectivity": "Candidate passer detection indexes this array by relative rank and adds MG bonuses.",
+      "dataRequirements": [
+        "candidate passer positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8",
+        "recommendedFutureRepresentation": "rank-indexed array"
+      }
+    },
+    {
+      "name": "evaluation.pawns.connectedByRank.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn by relative rank",
+      "currentValue": [
+        0,
+        0,
+        0,
+        0,
+        80,
+        80,
+        80,
+        80,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 41,
+        "symbol": "EvalWeights::CONNECTED_PAWN_BONUS_EG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 201,
+        "function": "EvalTerms::connectedPawnsBonusEg"
+      },
+      "connectivity": "Connected pawns are indexed by relative rank and summed into EG evaluation.",
+      "dataRequirements": [
+        "pawn endgame positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8; legal chess ranks use 1..8",
+        "sentinels": [
+          "rank 0 unreachable"
+        ],
+        "recommendedFutureRepresentation": "rank-indexed array with sentinel metadata"
+      }
+    },
+    {
+      "name": "evaluation.pawns.connectedByRank.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn by relative rank",
+      "currentValue": [
+        0,
+        0,
+        0,
+        21,
+        60,
+        60,
+        60,
+        0,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        0,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 37,
+        "symbol": "EvalWeights::CONNECTED_PAWN_BONUS_MG_BY_RANK"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 197,
+        "function": "EvalTerms::connectedPawnsBonus"
+      },
+      "connectivity": "Connected pawns are indexed by relative rank and summed into MG evaluation.",
+      "dataRequirements": [
+        "pawn-structure positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          9
+        ],
+        "indexing": "relative rank 0..8; legal chess ranks use 1..8",
+        "sentinels": [
+          "rank 0 unreachable"
+        ],
+        "monotonicity": "not currently enforced",
+        "recommendedFutureRepresentation": "rank-indexed array with sentinel metadata"
+      }
+    },
+    {
+      "name": "evaluation.pawns.doubledPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 30,
+      "minimum": 0,
+      "maximum": 120,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 75,
+        "symbol": "EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 240,
+        "function": "EvalTerms::pawnStructurePenalty"
+      },
+      "connectivity": "Each extra pawn on a file adds this penalty and is subtracted from MG and EG.",
+      "dataRequirements": [
+        "pawn structure fixtures"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.islandPenalty.eg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn per extra pawn island",
+      "currentValue": 20,
+      "minimum": 0,
+      "maximum": 80,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 62,
+        "symbol": "EvalWeights::PAWN_ISLAND_PENALTY_EG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 225,
+        "function": "EvalTerms::pawnIslandPenalty"
+      },
+      "connectivity": "Extra pawn islands multiply this EG penalty and are subtracted before tapering.",
+      "dataRequirements": [
+        "pawn island endgames"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.islandPenalty.mg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn per extra pawn island",
+      "currentValue": 20,
+      "minimum": 0,
+      "maximum": 80,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 61,
+        "symbol": "EvalWeights::PAWN_ISLAND_PENALTY_MG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 224,
+        "function": "EvalTerms::pawnIslandPenalty"
+      },
+      "connectivity": "Extra pawn islands multiply this MG penalty and are subtracted before tapering.",
+      "dataRequirements": [
+        "pawn island fixtures"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.isolatedPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 30,
+      "minimum": 0,
+      "maximum": 120,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 76,
+        "symbol": "EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 252,
+        "function": "EvalTerms::pawnStructurePenalty"
+      },
+      "connectivity": "Pawns with no adjacent-file friendly pawns add this penalty and are subtracted from MG and EG.",
+      "dataRequirements": [
+        "pawn structure fixtures"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.passedBlockedDivisor",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "divisor",
+      "currentValue": 2,
+      "minimum": 1,
+      "maximum": 8,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 84,
+        "symbol": "EvalWeights::PASSED_PAWN_BLOCKED_DIVISOR"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 296,
+        "function": "EvalTerms::passedPawnBonus"
+      },
+      "connectivity": "If the forward square is enemy-occupied, the passed-pawn bonus is divided by this value.",
+      "dataRequirements": [
+        "blocked and unblocked passed pawn positions"
+      ],
+      "recommendedMethod": "grid-search"
+    },
+    {
+      "name": "evaluation.pawns.passedCountBonus.eg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn per passed pawn count difference",
+      "currentValue": 6,
+      "minimum": 0,
+      "maximum": 120,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 80,
+        "symbol": "EvalWeights::PASSED_PAWN_COUNT_BONUS_EG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 171,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Passed-pawn count difference is multiplied by this EG value and added before rank-based passed-pawn bonuses.",
+      "dataRequirements": [
+        "passed pawn endgames"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.passedCountBonus.mg",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn per passed pawn count difference",
+      "currentValue": 0,
+      "minimum": 0,
+      "maximum": 80,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 79,
+        "symbol": "EvalWeights::PASSED_PAWN_COUNT_BONUS_MG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 170,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Passed-pawn count difference is multiplied by this MG value and added before rank-based passed-pawn bonuses.",
+      "dataRequirements": [
+        "passed pawn positions"
+      ],
+      "recommendedMethod": "texel-logistic"
+    },
+    {
+      "name": "evaluation.pawns.passedEgMultiplier",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "multiplier",
+      "currentValue": 4,
+      "minimum": 1,
+      "maximum": 8,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 81,
+        "symbol": "EvalWeights::PASSED_PAWN_EG_MULTIPLIER"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 177,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Rank-square passed-pawn bonus is multiplied by this value when applied to EG evaluation.",
+      "dataRequirements": [
+        "passed pawn endgames"
+      ],
+      "recommendedMethod": "grid-or-coordinate-search"
+    },
+    {
+      "name": "evaluation.pawns.passedRankSquareMultiplier",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn multiplier by relative-rank squared",
+      "currentValue": 5,
+      "minimum": 0,
+      "maximum": 20,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-pawns",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 83,
+        "symbol": "EvalWeights::PASSED_PAWN_RANK_SQUARE_MULTIPLIER"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_pawns.cpp",
+        "line": 291,
+        "function": "EvalTerms::passedPawnBonus"
+      },
+      "connectivity": "relativeRank^2 is multiplied by this scalar to produce the base passed-pawn bonus.",
+      "dataRequirements": [
+        "passed pawn positions by rank"
+      ],
+      "recommendedMethod": "constrained-coordinate-search"
+    },
+    {
+      "name": "evaluation.phase.increments",
+      "category": "evaluation.phase",
+      "type": "integer array",
+      "unit": "phase unit",
+      "currentValue": [
+        0,
+        1,
+        1,
+        2,
+        4,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        0,
+        4,
+        4,
+        8,
+        16,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 13,
+        "symbol": "EvalWeights::GAME_PHASE_INC"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 139,
+        "function": "EvalTables::pieceScoreDelta"
+      },
+      "connectivity": "GAME_PHASE_INC accumulates m_gamePhase and controls MG/EG interpolation in applyBonusTermsAndTaper.",
+      "dataRequirements": [
+        "phase-balanced labeled positions"
+      ],
+      "recommendedMethod": "coordinate-search-with-characterization",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order",
+        "sentinels": [
+          "pawn and king phase increments are fixed at 0 unless phase model changes"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed phase array"
+      }
+    },
+    {
+      "name": "evaluation.pst.egPesto",
+      "category": "evaluation.piece_square_table",
+      "type": "integer array",
+      "unit": "centipawn by piece and square",
+      "currentValue": "source-table:EvalTables::EG_PESTO",
+      "minimum": null,
+      "maximum": null,
+      "step": 1,
+      "boundsStatus": "unknown",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-pst",
+      "source": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 69,
+        "symbol": "EvalTables::EG_PESTO"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 138,
+        "function": "EvalTables::pieceScoreDelta"
+      },
+      "connectivity": "EG_PESTO[piece][pestoSquare(color, square)] is added to material for each piece in incremental and static evaluation.",
+      "dataRequirements": [
+        "large labeled endgame-inclusive position corpus",
+        "symmetry-aware regularization"
+      ],
+      "recommendedMethod": "basis-or-grouped-texel-before-entrywise-tuning",
+      "array": {
+        "dimensions": [
+          6,
+          64
+        ],
+        "indexing": "piece index then white-oriented A1..H8 square index",
+        "blackMirroring": "black uses Eval::mirrorSquare before indexing",
+        "sentinels": [
+          "pawn first and eighth ranks are present but unreachable in legal positions"
+        ],
+        "independentParameterCount": 384,
+        "symmetryTiedCountEstimate": 192,
+        "recommendedGroupedCountEstimate": 96,
+        "recommendedFutureRepresentation": "piece-square table with file symmetry or region basis"
+      }
+    },
+    {
+      "name": "evaluation.pst.mgPesto",
+      "category": "evaluation.piece_square_table",
+      "type": "integer array",
+      "unit": "centipawn by piece and square",
+      "currentValue": "source-table:EvalTables::MG_PESTO",
+      "minimum": null,
+      "maximum": null,
+      "step": 1,
+      "boundsStatus": "unknown",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-pst",
+      "source": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 6,
+        "symbol": "EvalTables::MG_PESTO"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_tables.cpp",
+        "line": 137,
+        "function": "EvalTables::pieceScoreDelta"
+      },
+      "connectivity": "MG_PESTO[piece][pestoSquare(color, square)] is added to material for each piece in incremental and static evaluation.",
+      "dataRequirements": [
+        "large labeled position corpus",
+        "symmetry-aware regularization"
+      ],
+      "recommendedMethod": "basis-or-grouped-texel-before-entrywise-tuning",
+      "array": {
+        "dimensions": [
+          6,
+          64
+        ],
+        "indexing": "piece index then white-oriented A1..H8 square index",
+        "blackMirroring": "black uses Eval::mirrorSquare before indexing",
+        "sentinels": [
+          "pawn first and eighth ranks are present but unreachable in legal positions"
+        ],
+        "independentParameterCount": 384,
+        "symmetryTiedCountEstimate": 192,
+        "recommendedGroupedCountEstimate": 96,
+        "recommendedFutureRepresentation": "piece-square table with file symmetry or region basis"
+      }
+    },
+    {
+      "name": "evaluation.queen.earlyUndevelopedMinorPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty per extra undeveloped minor",
+      "currentValue": 50,
+      "minimum": 0,
+      "maximum": 150,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-material",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 92,
+        "symbol": "EvalWeights::EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 244,
+        "function": "EvalTerms::earlyQueenPenalty"
+      },
+      "connectivity": "A queen moved off the starting rank while at least two minors remain undeveloped receives this MG penalty.",
+      "dataRequirements": [
+        "opening development fixtures"
+      ],
+      "recommendedMethod": "fixture-backed-coordinate-search"
+    },
+    {
+      "name": "evaluation.rook.trappedPenalty",
+      "category": "evaluation.scalar",
+      "type": "integer",
+      "unit": "centipawn penalty",
+      "currentValue": 10,
+      "minimum": 0,
+      "maximum": 120,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-rook-activity",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 87,
+        "symbol": "EvalWeights::TRAPPED_ROOK_PENALTY"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 211,
+        "function": "EvalTerms::trappedRookPenalty"
+      },
+      "connectivity": "Rooks in corner squares trapped by own king receive this MG penalty.",
+      "dataRequirements": [
+        "castling/trapped rook fixtures"
+      ],
+      "recommendedMethod": "fixture-backed-coordinate-search"
+    },
+    {
+      "name": "evaluation.rookActivity.eg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn",
+      "currentValue": [
+        40,
+        0,
+        50
+      ],
+      "minimum": [
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        120,
+        120,
+        120
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-rook-activity",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 33,
+        "symbol": "EvalWeights::ROOK_ACTIVITY_BONUS_EG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 186,
+        "function": "EvalTerms::rookActivityTermsForSide"
+      },
+      "connectivity": "Open-file, semi-open-file, and seventh-rank rook bonuses are added to EG evaluation.",
+      "dataRequirements": [
+        "rook endgame positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          3
+        ],
+        "indexing": "0=open file, 1=semi-open file, 2=seventh rank",
+        "recommendedFutureRepresentation": "named 3-entry integer array"
+      }
+    },
+    {
+      "name": "evaluation.rookActivity.mg",
+      "category": "evaluation.array",
+      "type": "integer array",
+      "unit": "centipawn",
+      "currentValue": [
+        40,
+        30,
+        50
+      ],
+      "minimum": [
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        120,
+        120,
+        120
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "evaluation-rook-activity",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 29,
+        "symbol": "EvalWeights::ROOK_ACTIVITY_BONUS_MG"
+      },
+      "consumer": {
+        "file": "engine/src/eval/eval_terms_piece_activity.cpp",
+        "line": 185,
+        "function": "EvalTerms::rookActivityTermsForSide"
+      },
+      "connectivity": "Open-file, semi-open-file, and seventh-rank rook bonuses are added to MG evaluation.",
+      "dataRequirements": [
+        "rook activity fixtures",
+        "labeled middlegame positions"
+      ],
+      "recommendedMethod": "texel-logistic",
+      "array": {
+        "dimensions": [
+          3
+        ],
+        "indexing": "0=open file, 1=semi-open file, 2=seventh rank",
+        "recommendedFutureRepresentation": "named 3-entry integer array"
+      }
+    },
+    {
+      "name": "evaluation.taper.scale",
+      "category": "evaluation.phase",
+      "type": "integer",
+      "unit": "scale denominator",
+      "currentValue": 128,
+      "minimum": 1,
+      "maximum": 512,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "evaluation-endgame",
+      "source": {
+        "file": "engine/src/eval/eval_weights.cpp",
+        "line": 97,
+        "symbol": "EvalWeights::TAPER_SCALE"
+      },
+      "consumer": {
+        "file": "engine/src/eval/board_eval_pipeline.cpp",
+        "line": 244,
+        "function": "Board::applyBonusTermsAndTaper"
+      },
+      "connectivity": "Low-material scale factor multiplies final tapered score and divides by this denominator.",
+      "dataRequirements": [
+        "low-material endgame positions"
+      ],
+      "recommendedMethod": "manual-or-grid-validation-before-optimization"
+    },
+    {
+      "name": "opening.bookDepth",
+      "category": "opening.selection",
+      "type": "integer",
+      "unit": "plies in SAN history",
+      "currentValue": 30,
+      "minimum": 0,
+      "maximum": 100,
+      "step": 1,
+      "boundsStatus": "verified",
+      "requiresRebuild": false,
+      "runtimeMutable": true,
+      "risk": "low",
+      "tuningGroup": "opening-strength",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 23,
+        "symbol": "SearchConstants::MAX_BOOK_DEPTH"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 492,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Opening book is used only while sanHistory().size() is below this value; UCI BookDepth writes it directly.",
+      "dataRequirements": [
+        "opening outcome telemetry"
+      ],
+      "recommendedMethod": "policy grid-search"
+    },
+    {
+      "name": "opening.enabled",
+      "category": "opening.selection",
+      "type": "boolean",
+      "unit": "uci option",
+      "currentValue": true,
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "boundsStatus": "verified",
+      "requiresRebuild": false,
+      "runtimeMutable": true,
+      "risk": "low",
+      "tuningGroup": "opening-strength",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 22,
+        "symbol": "SearchConstants::USE_OPENING_BOOK"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 490,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "UCI OwnBook toggles whether runUciMode consults OpeningBook before launching search.",
+      "dataRequirements": [
+        "opening outcome telemetry"
+      ],
+      "recommendedMethod": "policy choice, not optimizer scalar"
+    },
+    {
+      "name": "opening.seed",
+      "category": "opening.randomness",
+      "type": "unsigned integer",
+      "unit": "uint32 seed",
+      "currentValue": 1592594996,
+      "minimum": 0,
+      "maximum": 2147483647,
+      "step": 1,
+      "boundsStatus": "verified",
+      "requiresRebuild": false,
+      "runtimeMutable": true,
+      "risk": "low",
+      "tuningGroup": "opening-variety",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 285,
+        "symbol": "BookSeed UCI default"
+      },
+      "consumer": {
+        "file": "engine/src/openingBook.cpp",
+        "line": 127,
+        "function": "OpeningBook::setSeed"
+      },
+      "connectivity": "UCI BookSeed reseeds OpeningBook::m_rng, changing deterministic weighted selection sequence.",
+      "dataRequirements": [
+        "reproducibility tests"
+      ],
+      "recommendedMethod": "experiment seed, not strength optimization"
+    },
+    {
+      "name": "opening.selectionMode",
+      "category": "opening.selection",
+      "type": "enum",
+      "unit": "uci combo",
+      "currentValue": "weighted",
+      "allowedValues": [
+        "best",
+        "weighted",
+        "top-n-weighted"
+      ],
+      "minimum": null,
+      "maximum": null,
+      "step": null,
+      "boundsStatus": "verified",
+      "requiresRebuild": false,
+      "runtimeMutable": true,
+      "risk": "low",
+      "tuningGroup": "opening-variety",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 249,
+        "symbol": "bookSelectionMode local default"
+      },
+      "consumer": {
+        "file": "engine/src/openingBook.cpp",
+        "line": 257,
+        "function": "OpeningBook::selectBookMove"
+      },
+      "connectivity": "Selection mode chooses best, weighted, or top-N weighted behavior for legal book candidates.",
+      "dataRequirements": [
+        "opening variety and result telemetry"
+      ],
+      "recommendedMethod": "policy comparison"
+    },
+    {
+      "name": "opening.selectionTopN",
+      "category": "opening.selection",
+      "type": "integer",
+      "unit": "candidate count",
+      "currentValue": 4,
+      "minimum": 1,
+      "maximum": 32,
+      "step": 1,
+      "boundsStatus": "verified",
+      "requiresRebuild": false,
+      "runtimeMutable": true,
+      "risk": "low",
+      "tuningGroup": "opening-variety",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 250,
+        "symbol": "bookSelectionTopN local default"
+      },
+      "consumer": {
+        "file": "engine/src/openingBook.cpp",
+        "line": 262,
+        "function": "OpeningBook::selectBookMove"
+      },
+      "connectivity": "TopNWeighted mode truncates legal sorted candidates to this count before weighted random selection.",
+      "dataRequirements": [
+        "opening variety telemetry"
+      ],
+      "recommendedMethod": "policy grid-search"
+    },
+    {
+      "name": "search.aspiration.windowCp",
+      "category": "search.pruning",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 75,
+      "minimum": 0,
+      "maximum": 500,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-aspiration",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 16,
+        "symbol": "SearchConstants::ASPIRATION_WINDOW_SIZE"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 155,
+        "function": "findBestMove"
+      },
+      "connectivity": "Previous iteration score plus/minus this window sets alpha/beta for PV-1 from depth 4 onward; fail high/low triggers full-window re-search.",
+      "dataRequirements": [
+        "fixed-depth search fixtures",
+        "node/time telemetry"
+      ],
+      "recommendedMethod": "sprt-or-node-limited-grid"
+    },
+    {
+      "name": "search.futility.forwardMarginPerDepthCp",
+      "category": "search.pruning",
+      "type": "integer",
+      "unit": "centipawn per depth",
+      "currentValue": 100,
+      "minimum": 0,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-pruning",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 15,
+        "symbol": "SearchConstants::FORWARD_FUTILITY_MARGIN"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 204,
+        "function": "negamax"
+      },
+      "connectivity": "Quiet non-check moves at depth <= 3 can be skipped when staticEval + depth*margin <= alpha.",
+      "dataRequirements": [
+        "tactical suite",
+        "node telemetry"
+      ],
+      "recommendedMethod": "guarded-grid-search"
+    },
+    {
+      "name": "search.futility.reverseMarginPerDepthCp",
+      "category": "search.pruning",
+      "type": "integer",
+      "unit": "centipawn per depth",
+      "currentValue": 80,
+      "minimum": 0,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-pruning",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 14,
+        "symbol": "SearchConstants::REVERSE_FUTILITY_MARGIN"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 155,
+        "function": "negamax"
+      },
+      "connectivity": "At non-PV non-check nodes with depth <= 6, staticEval - depth*margin can return early.",
+      "dataRequirements": [
+        "tactical suite",
+        "node telemetry",
+        "evaluation scale tracking"
+      ],
+      "recommendedMethod": "guarded-grid-search"
+    },
+    {
+      "name": "search.history.cap",
+      "category": "search.move_ordering",
+      "type": "integer",
+      "unit": "history score absolute cap",
+      "currentValue": 16384,
+      "minimum": 1024,
+      "maximum": 65536,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 260,
+        "symbol": "history cap literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 260,
+        "function": "negamax"
+      },
+      "connectivity": "Quiet beta cutoffs add depth^2 history bonus and failed quiets subtract it, both clamped to +/- this cap.",
+      "dataRequirements": [
+        "node telemetry",
+        "ordering hit rates"
+      ],
+      "recommendedMethod": "instrumented-grid-search"
+    },
+    {
+      "name": "search.lmr.baseScaled100",
+      "category": "search.reduction",
+      "type": "fixed-point/scaled integer",
+      "unit": "base * 100",
+      "currentValue": 75,
+      "minimum": 0,
+      "maximum": 300,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-reductions",
+      "source": {
+        "file": "engine/src/search/search_state.cpp",
+        "line": 17,
+        "symbol": "SearchInternal::initLMR local base"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_state.cpp",
+        "line": 21,
+        "function": "SearchInternal::initLMR"
+      },
+      "connectivity": "LMR_TABLE[depth][moveCount] is initialized from base + log(depth)*log(moveCount), then consumed by negamax reductions.",
+      "dataRequirements": [
+        "fixed-depth node telemetry",
+        "tactical suite"
+      ],
+      "recommendedMethod": "generated-table-validation"
+    },
+    {
+      "name": "search.nullMove.reduction",
+      "category": "search.reduction",
+      "type": "integer",
+      "unit": "ply",
+      "currentValue": 2,
+      "minimum": 0,
+      "maximum": 6,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-reductions",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 12,
+        "symbol": "SearchConstants::NULL_MOVE_REDUCTION"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 86,
+        "function": "negamax"
+      },
+      "connectivity": "Null-move search uses depth - 1 - reduction; beta cutoff changes nodes and tactical behavior.",
+      "dataRequirements": [
+        "zugzwang/tactical suite",
+        "node telemetry"
+      ],
+      "recommendedMethod": "fixed-depth tactical validation before self-play"
+    },
+    {
+      "name": "search.ordering.captureScores",
+      "category": "search.move_ordering",
+      "type": "integer array",
+      "unit": "relative move-ordering score",
+      "currentValue": [
+        800000,
+        -100000,
+        10
+      ],
+      "minimum": [
+        1,
+        -1000000,
+        0
+      ],
+      "maximum": [
+        1200000,
+        0,
+        100
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 63,
+        "symbol": "capture ordering literals"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 63,
+        "function": "SearchInternal::scoreMove"
+      },
+      "connectivity": "SEE-nonnegative captures receive winning base plus SEE*multiplier plus MVV-LVA; losing captures receive losing base plus SEE*multiplier plus MVV-LVA.",
+      "dataRequirements": [
+        "ordering telemetry",
+        "tactical suite"
+      ],
+      "recommendedMethod": "relative-priority-normalization",
+      "array": {
+        "dimensions": [
+          3
+        ],
+        "indexing": "winningCaptureBase, losingCaptureBase, seeMultiplier",
+        "recommendedFutureRepresentation": "named struct"
+      }
+    },
+    {
+      "name": "search.ordering.mvvLva",
+      "category": "search.move_ordering",
+      "type": "integer array",
+      "unit": "relative move-ordering score",
+      "currentValue": "source-table:SearchConstants::MVV_LVA",
+      "minimum": null,
+      "maximum": null,
+      "step": 1,
+      "boundsStatus": "unknown",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 26,
+        "symbol": "SearchConstants::MVV_LVA"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 59,
+        "function": "SearchInternal::scoreMove"
+      },
+      "connectivity": "Capture victim/attacker matrix is added to capture ordering score after SEE component.",
+      "dataRequirements": [
+        "capture ordering telemetry"
+      ],
+      "recommendedMethod": "keep-derived-or-normalized-before-tuning",
+      "array": {
+        "dimensions": [
+          6,
+          6
+        ],
+        "indexing": "victim PieceType then attacker PieceType",
+        "recommendedFutureRepresentation": "derived formula or normalized table"
+      }
+    },
+    {
+      "name": "search.ordering.promotionBase",
+      "category": "search.move_ordering",
+      "type": "integer",
+      "unit": "relative move-ordering score",
+      "currentValue": 700,
+      "minimum": 0,
+      "maximum": 10000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "low",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 17,
+        "symbol": "promotion base literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 17,
+        "function": "SearchInternal::scoreMove"
+      },
+      "connectivity": "Promotion moves add this base plus promoted piece value to ordering score.",
+      "dataRequirements": [
+        "promotion ordering fixtures"
+      ],
+      "recommendedMethod": "relative-priority-normalization"
+    },
+    {
+      "name": "search.ordering.quietScores",
+      "category": "search.move_ordering",
+      "type": "integer array",
+      "unit": "relative move-ordering score",
+      "currentValue": [
+        900000,
+        850000,
+        50000
+      ],
+      "minimum": [
+        1,
+        1,
+        0
+      ],
+      "maximum": [
+        1200000,
+        1200000,
+        900000
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 22,
+        "symbol": "quiet ordering literals"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 13,
+        "function": "SearchInternal::scoreMove"
+      },
+      "connectivity": "Primary killer, secondary killer, and countermove quiet bonuses are added before history score.",
+      "dataRequirements": [
+        "ordering telemetry",
+        "node count comparisons"
+      ],
+      "recommendedMethod": "relative-priority-normalization",
+      "array": {
+        "dimensions": [
+          3
+        ],
+        "indexing": "primaryKiller, secondaryKiller, counterMove",
+        "recommendedFutureRepresentation": "named struct; tune as relative ordering group"
+      }
+    },
+    {
+      "name": "search.ordering.ttMoveScore",
+      "category": "search.move_ordering",
+      "type": "integer",
+      "unit": "relative move-ordering score",
+      "currentValue": 1000000,
+      "minimum": 1,
+      "maximum": 2000000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 20,
+        "symbol": "SearchConstants::TT_MOVE_SCORE"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 81,
+        "function": "SearchInternal::sortMovesByScore"
+      },
+      "connectivity": "TT move receives this score in sortMovesByScore and should outrank ordinary ordering terms.",
+      "dataRequirements": [
+        "move ordering telemetry"
+      ],
+      "recommendedMethod": "relative-priority-normalization"
+    },
+    {
+      "name": "search.quiescence.deltaPruningMarginCp",
+      "category": "search.quiescence",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 260,
+      "minimum": 0,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-pruning",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 13,
+        "symbol": "SearchConstants::DELTA_PRUNING_MARGIN"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_quiescence.cpp",
+        "line": 44,
+        "function": "quiescenceSearch"
+      },
+      "connectivity": "Captures can be skipped when standPat + capturedValue + this margin < alpha.",
+      "dataRequirements": [
+        "quiescence horizon fixtures",
+        "delta skip telemetry"
+      ],
+      "recommendedMethod": "tactical-validation-grid"
+    },
+    {
+      "name": "search.see.pieceValues",
+      "category": "search.move_ordering",
+      "type": "integer array",
+      "unit": "centipawn exchange value",
+      "currentValue": [
+        100,
+        320,
+        330,
+        500,
+        900,
+        0
+      ],
+      "minimum": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maximum": [
+        500,
+        1000,
+        1000,
+        1500,
+        2500,
+        0
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-ordering",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 35,
+        "symbol": "SearchConstants::PIECE_VALUES"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_move_ordering.cpp",
+        "line": 10,
+        "function": "SearchInternal::getPieceValue"
+      },
+      "connectivity": "SEE, delta pruning capturedValue, and promotion ordering use these exchange values.",
+      "dataRequirements": [
+        "capture/SEE tactical suite"
+      ],
+      "recommendedMethod": "tie-to-evaluation-material-or-validate-separately",
+      "array": {
+        "dimensions": [
+          6
+        ],
+        "indexing": "PieceType order",
+        "sentinels": [
+          "king value fixed at 0"
+        ],
+        "recommendedFutureRepresentation": "piece-indexed array; dependency on evaluation material scale"
+      }
+    },
+    {
+      "name": "search.singular.marginCp",
+      "category": "search.extension",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 100,
+      "minimum": 0,
+      "maximum": 500,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "search-reductions",
+      "source": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 120,
+        "symbol": "singular margin literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_negamax.cpp",
+        "line": 121,
+        "function": "negamax"
+      },
+      "connectivity": "TT score minus this margin sets singular-extension exclusion search beta.",
+      "dataRequirements": [
+        "tactical suite",
+        "singular extension counters"
+      ],
+      "recommendedMethod": "instrumented-grid-search"
+    },
+    {
+      "name": "time.criticalLowTimeReserveMs",
+      "category": "time.deadline",
+      "type": "integer",
+      "unit": "millisecond",
+      "currentValue": 5,
+      "minimum": 0,
+      "maximum": 200,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 558,
+        "symbol": "critical low-time reserve literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 558,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Panic allocation uses max(1, safeTimeLeft - this reserve).",
+      "dataRequirements": [
+        "flag telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis"
+    },
+    {
+      "name": "time.criticalLowTimeThresholdMs",
+      "category": "time.deadline",
+      "type": "integer",
+      "unit": "millisecond",
+      "currentValue": 40,
+      "minimum": 1,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 557,
+        "symbol": "critical low-time threshold literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 557,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "When safeTimeLeft is below this threshold, normal allocation is replaced by panic allocation.",
+      "dataRequirements": [
+        "flag telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis"
+    },
+    {
+      "name": "time.expectedMovesBase",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "moves",
+      "currentValue": 40,
+      "minimum": 1,
+      "maximum": 120,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 536,
+        "symbol": "expected moves base literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 536,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Expected moves remaining is max(floor, base - moveNumber) unless movestogo is supplied.",
+      "dataRequirements": [
+        "time-control telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    },
+    {
+      "name": "time.expectedMovesFloor",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "moves",
+      "currentValue": 20,
+      "minimum": 1,
+      "maximum": 80,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 536,
+        "symbol": "expected moves floor literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 536,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Expected moves remaining is max(floor, base - moveNumber) unless movestogo is supplied.",
+      "dataRequirements": [
+        "time-control telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    },
+    {
+      "name": "time.hardStopFraction",
+      "category": "time.deadline",
+      "type": "integer array",
+      "unit": "fraction numerator denominator",
+      "currentValue": [
+        3,
+        4
+      ],
+      "minimum": [
+        1,
+        1
+      ],
+      "maximum": [
+        99,
+        100
+      ],
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 298,
+        "symbol": "hard stop fraction literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 298,
+        "function": "findBestMove"
+      },
+      "connectivity": "Iterative deepening exits after elapsed time exceeds currentHardLimit * 3 / 4.",
+      "dataRequirements": [
+        "time overshoot telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis",
+      "array": {
+        "dimensions": [
+          2
+        ],
+        "indexing": "numerator, denominator",
+        "recommendedFutureRepresentation": "rational integer pair"
+      }
+    },
+    {
+      "name": "time.instabilityMultiplierPermille",
+      "category": "time.allocation",
+      "type": "fixed-point/scaled integer",
+      "unit": "multiplier * 1000",
+      "currentValue": 1300,
+      "minimum": 1000,
+      "maximum": 3000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 545,
+        "symbol": "1.3 instability multiplier literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 545,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Unstable score history multiplies allocated_time by 1.3 before hard cap; future model should use fixed-point integer.",
+      "dataRequirements": [
+        "search score and time telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    },
+    {
+      "name": "time.instabilityThresholdCp",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "centipawn",
+      "currentValue": 50,
+      "minimum": 0,
+      "maximum": 500,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 544,
+        "symbol": "score instability literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 544,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "If previous two search scores differ by more than this threshold, allocated time is multiplied.",
+      "dataRequirements": [
+        "search score and time telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    },
+    {
+      "name": "time.maxClockFractionDenominator",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "denominator",
+      "currentValue": 4,
+      "minimum": 1,
+      "maximum": 20,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 549,
+        "symbol": "hard_cap denominator literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 549,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Normal clock allocation is capped at safeTimeLeft divided by this denominator.",
+      "dataRequirements": [
+        "flag and time-usage telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis"
+    },
+    {
+      "name": "time.minimumMoveTimeMs",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "millisecond",
+      "currentValue": 10,
+      "minimum": 1,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 527,
+        "symbol": "minimum movetime literal"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 527,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "go movetime and clock allocation clamp to this minimum in normal cases.",
+      "dataRequirements": [
+        "time usage telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis"
+    },
+    {
+      "name": "time.polling.nodeMask",
+      "category": "time.polling",
+      "type": "unsigned integer",
+      "unit": "bitmask",
+      "currentValue": 8191,
+      "minimum": 0,
+      "maximum": 1048575,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/include/search/search_constants.hpp",
+        "line": 17,
+        "symbol": "SearchConstants::TIME_CHECK_MASK"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_state.cpp",
+        "line": 84,
+        "function": "SearchInternal::shouldAbortSearch"
+      },
+      "connectivity": "Search calls checkTime when (nodesSearched & mask) == 0; affects stop latency and overhead.",
+      "dataRequirements": [
+        "time overshoot telemetry"
+      ],
+      "recommendedMethod": "latency-benchmarks"
+    },
+    {
+      "name": "time.safetyReserveMs",
+      "category": "time.allocation",
+      "type": "integer",
+      "unit": "millisecond",
+      "currentValue": 30,
+      "minimum": 0,
+      "maximum": 1000,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "high",
+      "tuningGroup": "time-allocation",
+      "source": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 533,
+        "symbol": "safeTimeLeft literal reserve"
+      },
+      "consumer": {
+        "file": "engine/src/app/app_uci.cpp",
+        "line": 533,
+        "function": "AppUci::runUciMode"
+      },
+      "connectivity": "Clock mode subtracts this reserve from remaining time before allocation.",
+      "dataRequirements": [
+        "time usage and flag telemetry"
+      ],
+      "recommendedMethod": "safety-first-telemetry-analysis"
+    },
+    {
+      "name": "time.softStop.stablePercent",
+      "category": "time.deadline",
+      "type": "integer",
+      "unit": "percent",
+      "currentValue": 50,
+      "minimum": 1,
+      "maximum": 100,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 98,
+        "symbol": "softLimitFraction initial literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 296,
+        "function": "findBestMove"
+      },
+      "connectivity": "If best move is stable for enough iterations, search may stop after elapsed time exceeds this fraction of hard limit.",
+      "dataRequirements": [
+        "iterative deepening stability telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    },
+    {
+      "name": "time.softStop.unstablePercent",
+      "category": "time.deadline",
+      "type": "integer",
+      "unit": "percent",
+      "currentValue": 80,
+      "minimum": 1,
+      "maximum": 100,
+      "step": 1,
+      "boundsStatus": "provisional",
+      "requiresRebuild": true,
+      "runtimeMutable": false,
+      "risk": "medium",
+      "tuningGroup": "time-stop-policy",
+      "source": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 260,
+        "symbol": "softLimitFraction unstable literal"
+      },
+      "consumer": {
+        "file": "engine/src/search/search_root.cpp",
+        "line": 296,
+        "function": "findBestMove"
+      },
+      "connectivity": "When best move changes, soft stop fraction is set to this higher percent.",
+      "dataRequirements": [
+        "iterative deepening stability telemetry"
+      ],
+      "recommendedMethod": "telemetry-grid-search"
+    }
+  ],
+  "excludedGroups": [
+    {
+      "name": "eval.tempo",
+      "category": "unused",
+      "reason": "No production evaluation consumer exists; retaining it would expose a placeholder."
+    },
+    {
+      "name": "board geometry and masks",
+      "category": "rule.invariant",
+      "examples": [
+        "Board::FILE_A",
+        "Board::RANK_1",
+        "square indexing",
+        "move encoding"
+      ],
+      "reason": "Chess rules and bitboard layout depend on fixed 8x8 geometry."
+    },
+    {
+      "name": "castling and promotion encodings",
+      "category": "rule.invariant",
+      "examples": [
+        "CASTLE_WK",
+        "CASTLE_WQ",
+        "PolyGlot promotion code mapping"
+      ],
+      "reason": "Protocol and legal move generation require fixed meanings."
+    },
+    {
+      "name": "mate, infinity, and draw scores",
+      "category": "safety.invariant",
+      "examples": [
+        "SearchConstants::MATE_SCORE",
+        "SearchConstants::INF_SCORE",
+        "stalemate/repetition score 0"
+      ],
+      "reason": "Search correctness and mate-distance comparisons require stable score bands."
+    },
+    {
+      "name": "Polyglot random keys",
+      "category": "rule.invariant",
+      "examples": [
+        "kPolyglotRandom"
+      ],
+      "reason": "Book lookup integrity depends on standard Polyglot hashing."
+    },
+    {
+      "name": "transposition table structural masks",
+      "category": "safety.invariant",
+      "examples": [
+        "TT_SIZE_MASK"
+      ],
+      "reason": "Mask must track TT size as power-of-two storage layout, not strength tuning."
+    },
+    {
+      "name": "parser and UCI protocol syntax",
+      "category": "protocol.invariant",
+      "examples": [
+        "FEN token counts",
+        "UCI option names",
+        "move string coordinates"
+      ],
+      "reason": "External protocol compatibility and validation constraints."
+    },
+    {
+      "name": "diagnostic counters",
+      "category": "diagnostic",
+      "examples": [
+        "qNodes",
+        "deltaPruneSkips",
+        "ttHits",
+        "ttStores"
+      ],
+      "reason": "Telemetry values observe behavior and are not configuration inputs."
+    },
+    {
+      "name": "watchdog and backend safety ceilings",
+      "category": "safety.invariant",
+      "examples": [
+        "external process watchdogs",
+        "server request limits"
+      ],
+      "reason": "Operational safety limits should remain runtime safety configuration, not engine-strength tuning."
+    }
+  ],
+  "oldRegistryComparison": [
+    {
+      "registryName": "MG_VALUE_PAWN",
+      "registryDefault": 82,
+      "currentProductionValue": 150,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "MG_VALUE_KNIGHT",
+      "registryDefault": 337,
+      "currentProductionValue": 250,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "MG_VALUE_BISHOP",
+      "registryDefault": 365,
+      "currentProductionValue": 284,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "MG_VALUE_ROOK",
+      "registryDefault": 477,
+      "currentProductionValue": 490,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "MG_VALUE_QUEEN",
+      "registryDefault": 1025,
+      "currentProductionValue": 839,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "EG_VALUE_PAWN",
+      "registryDefault": 94,
+      "currentProductionValue": 160,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "EG_VALUE_KNIGHT",
+      "registryDefault": 281,
+      "currentProductionValue": 200,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "EG_VALUE_BISHOP",
+      "registryDefault": 297,
+      "currentProductionValue": 269,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "EG_VALUE_ROOK",
+      "registryDefault": 512,
+      "currentProductionValue": 650,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "EG_VALUE_QUEEN",
+      "registryDefault": 936,
+      "currentProductionValue": 1150,
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "MOBILITY_BONUS_MG_BISHOP",
+      "registryDefault": 2,
+      "currentProductionValue": 10,
+      "currentConsumer": "EvalTerms::mobilityTermsForSide",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "BISHOP_PAIR_BONUS_MG",
+      "registryDefault": 30,
+      "currentProductionValue": 70,
+      "currentConsumer": "Board::applyBonusTermsAndTaper",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "BISHOP_PAIR_BONUS_EG",
+      "registryDefault": 40,
+      "currentProductionValue": 80,
+      "currentConsumer": "Board::applyBonusTermsAndTaper",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "KING_ATTACK_PRESSURE_PENALTY",
+      "registryDefault": [
+        0,
+        8,
+        22,
+        45,
+        80,
+        120,
+        160,
+        200,
+        240
+      ],
+      "currentProductionValue": [
+        0,
+        40,
+        165,
+        400,
+        400,
+        400,
+        160,
+        200,
+        240
+      ],
+      "currentConsumer": "EvalTerms::kingAttackPressure",
+      "status": "outdated default"
+    },
+    {
+      "registryName": "GAME_PHASE_INC",
+      "registryDefault": null,
+      "currentProductionValue": [
+        0,
+        1,
+        1,
+        2,
+        4,
+        0
+      ],
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "missing from old registry"
+    },
+    {
+      "registryName": "MG_PESTO/EG_PESTO",
+      "registryDefault": null,
+      "currentProductionValue": "source tables",
+      "currentConsumer": "EvalTables::pieceScoreDelta",
+      "status": "missing from old registry"
+    }
+  ],
+  "dependencyGroups": [
+    {
+      "group": "evaluation-material",
+      "dependsOn": [
+        "evaluation-pst",
+        "search-pruning",
+        "search.see.pieceValues"
+      ],
+      "note": "Evaluation scale changes pruning margins and SEE/delta assumptions."
+    },
+    {
+      "group": "evaluation-pawns",
+      "dependsOn": [
+        "evaluation-endgame"
+      ],
+      "note": "Passed-pawn count, rank bonus, EG multiplier, and endgame scaling are tightly coupled."
+    },
+    {
+      "group": "evaluation-king-safety",
+      "dependsOn": [
+        "search-pruning"
+      ],
+      "note": "Large king safety swings affect static-eval pruning safety."
+    },
+    {
+      "group": "search-pruning",
+      "dependsOn": [
+        "evaluation-material",
+        "search-ordering"
+      ],
+      "note": "Margins must be validated against evaluation scale and move ordering."
+    },
+    {
+      "group": "search-reductions",
+      "dependsOn": [
+        "search-ordering"
+      ],
+      "note": "LMR and null move rely on good ordering and tactical guards."
+    },
+    {
+      "group": "time-allocation",
+      "dependsOn": [
+        "time-stop-policy"
+      ],
+      "note": "Allocation and stop thresholds jointly determine time safety."
+    },
+    {
+      "group": "opening-variety",
+      "dependsOn": [
+        "opening-strength"
+      ],
+      "note": "Top-N and seed only matter when book use and selection mode permit random choice."
+    }
+  ],
+  "recommendedMigrationOrder": [
+    "evaluation-material",
+    "evaluation-mobility",
+    "evaluation-pawns",
+    "evaluation-rook-activity",
+    "evaluation-king-safety",
+    "evaluation-endgame",
+    "search-aspiration",
+    "search-pruning",
+    "search-reductions",
+    "search-ordering",
+    "time-allocation",
+    "time-stop-policy",
+    "opening-strength",
+    "opening-variety",
+    "evaluation-pst"
+  ]
+}

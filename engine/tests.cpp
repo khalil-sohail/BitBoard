@@ -1,6 +1,11 @@
 #include "board.hpp"
+#include "eval/eval_weights.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
+#include "search/search_constants.hpp"
+#include "tuning/engine_tuning.hpp"
+#include "tuning/tuning_metadata.hpp"
+#include "tuning/tuning_validation.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -704,6 +709,129 @@ void test_opening_book_zero_weight_and_top_n_policy() {
     }
 }
 
+void test_tuning_model_constructs_and_validates_default() {
+    Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    const Tuning::TuningValidationResult result = Tuning::validateTuning(tuning);
+    require(result.valid(), "BUILTIN_DEFAULT_V1_MODEL should validate");
+    require(Tuning::kDefaultProfileId == "builtin-default-v1", "Default profile id should remain builtin-default-v1");
+}
+
+void test_tuning_metadata_field_coverage_and_ordering() {
+    require(Tuning::TUNING_FIELDS.size() == 76, "Expected 76 typed tuning field mappings");
+    require(static_cast<size_t>(Tuning::TuningFieldId::Count) == 76, "TuningFieldId count should match registry entries");
+    require(Tuning::tuningFieldNamesAreUnique(), "Stable tuning field names should be unique");
+    require(Tuning::tuningFieldsAreInRegistryOrder(), "Stable tuning field names should be in registry order");
+    require(!Tuning::hasFieldNamed("eval.tempo"), "eval.tempo must not exist in typed model");
+    require(!Tuning::hasFieldNamed("SearchConstants::MATE_SCORE"), "Excluded invariants must not exist in typed model");
+}
+
+void test_tuning_array_dimensions() {
+    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    require(tuning.evaluation.material.middlegame.size() == 6, "Material MG dimension should be 6");
+    require(tuning.evaluation.mobility.endgame.size() == 6, "Mobility EG dimension should be 6");
+    require(tuning.evaluation.pawns.connectedMgByRank.size() == 9, "Connected pawn rank dimension should be 9");
+    require(tuning.evaluation.pawns.backwardEgByRank.size() == 9, "Backward pawn rank dimension should be 9");
+    require(tuning.evaluation.kingSafety.attackPressure.size() == 9, "King pressure dimension should be 9");
+    require(Tuning::PieceSquareTuning::pieceCount == 6, "PST piece dimension should be 6");
+    require(Tuning::PieceSquareTuning::squareCount == 64, "PST square dimension should be 64");
+    require(tuning.search.moveOrdering.mvvLva.size() == 6, "MVV-LVA victim dimension should be 6");
+    require(tuning.search.moveOrdering.mvvLva[0].size() == 6, "MVV-LVA attacker dimension should be 6");
+}
+
+void test_tuning_fraction_representations_are_exact() {
+    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    require(tuning.search.lateMoveReduction.base.equals(3, 4), "LMR base should represent 0.75 as 3/4");
+    require(tuning.time.allocation.instabilityMultiplier.equals(13, 10), "Instability multiplier should represent 1.3 as 13/10");
+    require(tuning.time.stopPolicy.stableSoftStopFraction.equals(1, 2), "Stable soft stop should represent 0.5 as 1/2");
+    require(tuning.time.stopPolicy.unstableSoftStopFraction.equals(4, 5), "Unstable soft stop should represent 0.8 as 4/5");
+    require(tuning.time.allocation.maximumClockFraction.equals(1, 4), "Max clock fraction should represent 0.25 as 1/4");
+}
+
+void test_tuning_validation_rejects_malformed_values() {
+    {
+        Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+        tuning.search.lateMoveReduction.base.denominator = 0;
+        require(!Tuning::validateTuning(tuning).valid(), "Zero LMR denominator should be rejected");
+    }
+    {
+        Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+        tuning.opening.selectionMode = static_cast<Tuning::BookSelectionMode>(99);
+        require(!Tuning::validateTuning(tuning).valid(), "Invalid opening enum should be rejected");
+    }
+    {
+        Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+        tuning.opening.selectionTopN = 0;
+        require(!Tuning::validateTuning(tuning).valid(), "Opening top-N zero should be rejected");
+    }
+    {
+        Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+        tuning.time.stopPolicy.stableSoftStopFraction = {9, 10};
+        tuning.time.stopPolicy.unstableSoftStopFraction = {1, 2};
+        require(!Tuning::validateTuning(tuning).valid(), "Stable soft-stop later than unstable should be rejected");
+    }
+    {
+        Tuning::EngineTuning tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+        tuning.evaluation.material.middlegame[5] = 1;
+        require(!Tuning::validateTuning(tuning).valid(), "King material value must remain fixed at 0");
+    }
+}
+
+void test_tuning_defaults_match_production_evaluation_values() {
+    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    require(tuning.evaluation.material.middlegame == EvalWeights::MG_VALUE, "Typed MG material should mirror EvalWeights::MG_VALUE");
+    require(tuning.evaluation.material.endgame == EvalWeights::EG_VALUE, "Typed EG material should mirror EvalWeights::EG_VALUE");
+    require(tuning.evaluation.phase.increments == EvalWeights::GAME_PHASE_INC, "Typed phase increments should mirror EvalWeights::GAME_PHASE_INC");
+    require(tuning.evaluation.mobility.middlegame == EvalWeights::MOBILITY_BONUS_MG, "Typed MG mobility should mirror EvalWeights::MOBILITY_BONUS_MG");
+    require(tuning.evaluation.mobility.endgame == EvalWeights::MOBILITY_BONUS_EG, "Typed EG mobility should mirror EvalWeights::MOBILITY_BONUS_EG");
+    require(tuning.evaluation.rookActivity.middlegameArray() == EvalWeights::ROOK_ACTIVITY_BONUS_MG, "Typed MG rook activity should mirror production");
+    require(tuning.evaluation.rookActivity.endgameArray() == EvalWeights::ROOK_ACTIVITY_BONUS_EG, "Typed EG rook activity should mirror production");
+    require(tuning.evaluation.pawns.connectedMgByRank == EvalWeights::CONNECTED_PAWN_BONUS_MG_BY_RANK, "Typed connected MG pawns should mirror production");
+    require(tuning.evaluation.pawns.connectedEgByRank == EvalWeights::CONNECTED_PAWN_BONUS_EG_BY_RANK, "Typed connected EG pawns should mirror production");
+    require(tuning.evaluation.pawns.candidateMgByRank == EvalWeights::CANDIDATE_PAWN_BONUS_MG_BY_RANK, "Typed candidate MG pawns should mirror production");
+    require(tuning.evaluation.pawns.candidateEgByRank == EvalWeights::CANDIDATE_PAWN_BONUS_EG_BY_RANK, "Typed candidate EG pawns should mirror production");
+    require(tuning.evaluation.pawns.backwardMgByRank == EvalWeights::BACKWARD_PAWN_PENALTY_MG_BY_RANK, "Typed backward MG pawns should mirror production");
+    require(tuning.evaluation.pawns.backwardEgByRank == EvalWeights::BACKWARD_PAWN_PENALTY_EG_BY_RANK, "Typed backward EG pawns should mirror production");
+    require(tuning.evaluation.kingSafety.attackPressure == EvalWeights::KING_ATTACK_PRESSURE_PENALTY, "Typed king pressure should mirror production");
+    require(tuning.evaluation.bishopPair.middlegame == EvalWeights::BISHOP_PAIR_BONUS_MG, "Typed bishop pair MG should mirror production");
+    require(tuning.evaluation.bishopPair.endgame == EvalWeights::BISHOP_PAIR_BONUS_EG, "Typed bishop pair EG should mirror production");
+    require(tuning.evaluation.pawns.doubledPenalty == EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY, "Typed doubled pawn penalty should mirror production");
+    require(tuning.evaluation.pawns.isolatedPenalty == EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY, "Typed isolated pawn penalty should mirror production");
+    require(tuning.evaluation.endgame.taperScale == EvalWeights::TAPER_SCALE, "Typed taper scale should mirror production");
+}
+
+void test_tuning_defaults_match_production_search_time_and_opening_values() {
+    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    require(tuning.search.aspiration.windowCp == SearchConstants::ASPIRATION_WINDOW_SIZE, "Typed aspiration window should mirror production");
+    require(tuning.search.nullMove.reduction == SearchConstants::NULL_MOVE_REDUCTION, "Typed null-move reduction should mirror production");
+    require(tuning.search.futility.reverseMarginPerDepthCp == SearchConstants::REVERSE_FUTILITY_MARGIN, "Typed reverse futility margin should mirror production");
+    require(tuning.search.futility.forwardMarginPerDepthCp == SearchConstants::FORWARD_FUTILITY_MARGIN, "Typed forward futility margin should mirror production");
+    require(tuning.search.quiescence.deltaMarginCp == SearchConstants::DELTA_PRUNING_MARGIN, "Typed delta pruning margin should mirror production");
+    require(tuning.search.moveOrdering.transpositionMoveScore == SearchConstants::TT_MOVE_SCORE, "Typed TT move score should mirror production");
+    require(tuning.search.moveOrdering.mvvLva == SearchConstants::MVV_LVA, "Typed MVV-LVA table should mirror production");
+    require(tuning.search.moveOrdering.seePieceValues == SearchConstants::PIECE_VALUES, "Typed SEE values should mirror production");
+    require(tuning.time.polling.nodeMask == SearchConstants::TIME_CHECK_MASK, "Typed time polling mask should mirror production");
+    require(tuning.time.allocation.safetyReserveMs == 30, "Typed safety reserve should mirror production literal");
+    require(tuning.time.allocation.expectedMovesBase == 40, "Typed expected moves base should mirror production literal");
+    require(tuning.time.allocation.expectedMovesFloor == 20, "Typed expected moves floor should mirror production literal");
+    require(tuning.time.stopPolicy.criticalLowTimeThresholdMs == 40, "Typed critical low-time threshold should mirror production literal");
+    require(tuning.time.stopPolicy.criticalLowTimeReserveMs == 5, "Typed critical low-time reserve should mirror production literal");
+    require(tuning.opening.enabled == true, "Typed opening enabled should mirror production default");
+    require(tuning.opening.depthPlies == SearchConstants::MAX_BOOK_DEPTH, "Typed book depth should mirror production default");
+    require(tuning.opening.selectionMode == Tuning::BookSelectionMode::Weighted, "Typed book selection mode should mirror production default");
+    require(tuning.opening.selectionTopN == 4, "Typed selection top-N should mirror production default");
+    require(tuning.opening.seed == 1592594996U, "Typed seed should mirror UCI default");
+}
+
+void test_tuning_model_does_not_use_old_texel_defaults() {
+    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
+    require(tuning.evaluation.material.middlegame[0] == 150, "Typed MG pawn value should use production default");
+    require(tuning.evaluation.material.middlegame[0] != 82, "Typed MG pawn value must not use old Texel default");
+    require(tuning.evaluation.material.endgame[4] == 1150, "Typed EG queen value should use production default");
+    require(tuning.evaluation.material.endgame[4] != 936, "Typed EG queen value must not use old Texel default");
+    require(tuning.evaluation.bishopPair.middlegame == 70, "Typed bishop pair MG should use production default");
+    require(tuning.evaluation.bishopPair.middlegame != 30, "Typed bishop pair MG must not use old Texel default");
+}
+
 } // namespace
 
 int main() {
@@ -736,6 +864,14 @@ int main() {
         {"Opening book deterministic single/best selection", test_opening_book_single_candidate_and_best_are_deterministic},
         {"Opening book seeded weighted selection", test_opening_book_weighted_selector_is_seeded_and_weighted},
         {"Opening book zero-weight and top-N policy", test_opening_book_zero_weight_and_top_n_policy},
+        {"Tuning model constructs and validates default", test_tuning_model_constructs_and_validates_default},
+        {"Tuning metadata field coverage and ordering", test_tuning_metadata_field_coverage_and_ordering},
+        {"Tuning array dimensions", test_tuning_array_dimensions},
+        {"Tuning rational fraction representations", test_tuning_fraction_representations_are_exact},
+        {"Tuning validation rejects malformed values", test_tuning_validation_rejects_malformed_values},
+        {"Tuning defaults match production evaluation values", test_tuning_defaults_match_production_evaluation_values},
+        {"Tuning defaults match production search/time/opening values", test_tuning_defaults_match_production_search_time_and_opening_values},
+        {"Tuning model does not use old Texel defaults", test_tuning_model_does_not_use_old_texel_defaults},
     };
 
     int passed = 0;
