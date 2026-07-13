@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.bitboard/tuning/profile.schema.json",
+  "title": "Bitboard Engine Tuning Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "canonicalHash",
+    "description",
+    "engineVersion",
+    "modelVersion",
+    "parameters",
+    "parentProfileId",
+    "profileId",
+    "registryVersion",
+    "schemaVersion",
+    "sourceBaseline"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "profileId": {
+      "type": "string",
+      "pattern": "^(builtin-default-v1|candidate-[a-z0-9-]+-[0-9]{4,})$"
+    },
+    "parentProfileId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engineVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "sourceBaseline": {
+      "type": "string"
+    },
+    "registryVersion": {
+      "const": 1
+    },
+    "modelVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(evaluation|opening|search|time)\\.[A-Za-z0-9_.]+$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/rational"
+          },
+          {
+            "$ref": "#/$defs/integerArray"
+          }
+        ]
+      }
+    },
+    "canonicalHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "rational": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "properties": {
+        "numerator": {
+          "type": "integer"
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "integerArray": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "$ref": "#/$defs/integerArray"
+          }
+        ]
+      }
+    }
+  }
+}
