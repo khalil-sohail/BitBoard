@@ -2033,13 +2033,13 @@
       "risk": "medium",
       "tuningGroup": "search-aspiration",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 16,
-        "symbol": "SearchConstants::ASPIRATION_WINDOW_SIZE"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 118,
+        "symbol": "Tuning::Generated::VALUES.search.aspiration.windowCp"
       },
       "consumer": {
         "file": "engine/src/search/search_root.cpp",
-        "line": 155,
+        "line": 162,
         "function": "findBestMove"
       },
       "connectivity": "Previous iteration score plus/minus this window sets alpha/beta for PV-1 from depth 4 onward; fail high/low triggers full-window re-search.",
@@ -2064,13 +2064,13 @@
       "risk": "high",
       "tuningGroup": "search-pruning",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 15,
-        "symbol": "SearchConstants::FORWARD_FUTILITY_MARGIN"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 125,
+        "symbol": "Tuning::Generated::VALUES.search.futility.forwardMarginPerDepthCp"
       },
       "consumer": {
         "file": "engine/src/search/search_negamax.cpp",
-        "line": 204,
+        "line": 211,
         "function": "negamax"
       },
       "connectivity": "Quiet non-check moves at depth <= 3 can be skipped when staticEval + depth*margin <= alpha.",
@@ -2095,13 +2095,13 @@
       "risk": "high",
       "tuningGroup": "search-pruning",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 14,
-        "symbol": "SearchConstants::REVERSE_FUTILITY_MARGIN"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 124,
+        "symbol": "Tuning::Generated::VALUES.search.futility.reverseMarginPerDepthCp"
       },
       "consumer": {
         "file": "engine/src/search/search_negamax.cpp",
-        "line": 155,
+        "line": 162,
         "function": "negamax"
       },
       "connectivity": "At non-PV non-check nodes with depth <= 6, staticEval - depth*margin can return early.",
@@ -2127,13 +2127,13 @@
       "risk": "medium",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/src/search/search_negamax.cpp",
-        "line": 260,
-        "symbol": "history cap literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 149,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.historyLimit"
       },
       "consumer": {
         "file": "engine/src/search/search_negamax.cpp",
-        "line": 260,
+        "line": 267,
         "function": "negamax"
       },
       "connectivity": "Quiet beta cutoffs add depth^2 history bonus and failed quiets subtract it, both clamped to +/- this cap.",
@@ -2158,13 +2158,13 @@
       "risk": "high",
       "tuningGroup": "search-reductions",
       "source": {
-        "file": "engine/src/search/search_state.cpp",
-        "line": 17,
-        "symbol": "SearchInternal::initLMR local base"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 128,
+        "symbol": "Tuning::Generated::VALUES.search.lateMoveReduction.base"
       },
       "consumer": {
         "file": "engine/src/search/search_state.cpp",
-        "line": 21,
+        "line": 24,
         "function": "SearchInternal::initLMR"
       },
       "connectivity": "LMR_TABLE[depth][moveCount] is initialized from base + log(depth)*log(moveCount), then consumed by negamax reductions.",
@@ -2189,13 +2189,13 @@
       "risk": "high",
       "tuningGroup": "search-reductions",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 12,
-        "symbol": "SearchConstants::NULL_MOVE_REDUCTION"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 121,
+        "symbol": "Tuning::Generated::VALUES.search.nullMove.reduction"
       },
       "consumer": {
         "file": "engine/src/search/search_negamax.cpp",
-        "line": 86,
+        "line": 93,
         "function": "negamax"
       },
       "connectivity": "Null-move search uses depth - 1 - reduction; beta cutoff changes nodes and tactical behavior.",
@@ -2232,13 +2232,13 @@
       "risk": "medium",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 63,
-        "symbol": "capture ordering literals"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 144,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.capture"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 63,
+        "line": 70,
         "function": "SearchInternal::scoreMove"
       },
       "connectivity": "SEE-nonnegative captures receive winning base plus SEE*multiplier plus MVV-LVA; losing captures receive losing base plus SEE*multiplier plus MVV-LVA.",
@@ -2260,7 +2260,7 @@
       "category": "search.move_ordering",
       "type": "integer array",
       "unit": "relative move-ordering score",
-      "currentValue": "source-table:SearchConstants::MVV_LVA",
+      "currentValue": "source-table:Tuning::Generated::VALUES.search.moveOrdering.mvvLva",
       "minimum": null,
       "maximum": null,
       "step": 1,
@@ -2270,13 +2270,13 @@
       "risk": "medium",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 26,
-        "symbol": "SearchConstants::MVV_LVA"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 150,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.mvvLva"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 59,
+        "line": 66,
         "function": "SearchInternal::scoreMove"
       },
       "connectivity": "Capture victim/attacker matrix is added to capture ordering score after SEE component.",
@@ -2308,13 +2308,13 @@
       "risk": "low",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 17,
-        "symbol": "promotion base literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 148,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.promotionBaseScore"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 17,
+        "line": 24,
         "function": "SearchInternal::scoreMove"
       },
       "connectivity": "Promotion moves add this base plus promoted piece value to ordering score.",
@@ -2350,13 +2350,13 @@
       "risk": "medium",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 22,
-        "symbol": "quiet ordering literals"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 139,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.quiet"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 13,
+        "line": 29,
         "function": "SearchInternal::scoreMove"
       },
       "connectivity": "Primary killer, secondary killer, and countermove quiet bonuses are added before history score.",
@@ -2388,13 +2388,13 @@
       "risk": "medium",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 20,
-        "symbol": "SearchConstants::TT_MOVE_SCORE"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 137,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.transpositionMoveScore"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 81,
+        "line": 90,
         "function": "SearchInternal::sortMovesByScore"
       },
       "connectivity": "TT move receives this score in sortMovesByScore and should outrank ordinary ordering terms.",
@@ -2418,13 +2418,13 @@
       "risk": "high",
       "tuningGroup": "search-pruning",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 13,
-        "symbol": "SearchConstants::DELTA_PRUNING_MARGIN"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 131,
+        "symbol": "Tuning::Generated::VALUES.search.quiescence.deltaMarginCp"
       },
       "consumer": {
         "file": "engine/src/search/search_quiescence.cpp",
-        "line": 44,
+        "line": 51,
         "function": "quiescenceSearch"
       },
       "connectivity": "Captures can be skipped when standPat + capturedValue + this margin < alpha.",
@@ -2470,13 +2470,13 @@
       "risk": "high",
       "tuningGroup": "search-ordering",
       "source": {
-        "file": "engine/include/search/search_constants.hpp",
-        "line": 35,
-        "symbol": "SearchConstants::PIECE_VALUES"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 158,
+        "symbol": "Tuning::Generated::VALUES.search.moveOrdering.seePieceValues"
       },
       "consumer": {
         "file": "engine/src/search/search_move_ordering.cpp",
-        "line": 10,
+        "line": 17,
         "function": "SearchInternal::getPieceValue"
       },
       "connectivity": "SEE, delta pruning capturedValue, and promotion ordering use these exchange values.",
@@ -2510,13 +2510,13 @@
       "risk": "high",
       "tuningGroup": "search-reductions",
       "source": {
-        "file": "engine/src/search/search_negamax.cpp",
-        "line": 120,
-        "symbol": "singular margin literal"
+        "file": "engine/include/tuning/generated_tuning_values.hpp",
+        "line": 134,
+        "symbol": "Tuning::Generated::VALUES.search.singularExtension.marginCp"
       },
       "consumer": {
         "file": "engine/src/search/search_negamax.cpp",
-        "line": 121,
+        "line": 127,
         "function": "negamax"
       },
       "connectivity": "TT score minus this margin sets singular-extension exclusion search beta.",

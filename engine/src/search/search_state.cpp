@@ -1,6 +1,13 @@
 #include "search/search_internal.hpp"
+#include "tuning/generated_tuning_values.hpp"
 #include <algorithm>
 #include <cmath>
+
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
 
 namespace SearchInternal {
 
@@ -14,7 +21,9 @@ uint64_t g_nodesSearched = 0;
 std::array<std::array<int, 64>, 64> LMR_TABLE{};
 
 void initLMR() {
-    const double base = 0.75;
+    const auto& baseRatio = SEARCH_TUNING.lateMoveReduction.base;
+    const double base = static_cast<double>(baseRatio.numerator) /
+                        static_cast<double>(baseRatio.denominator);
     for (int depth = 0; depth < 64; ++depth) {
         for (int moveCount = 0; moveCount < 64; ++moveCount) {
             if (depth > 0 && moveCount > 0) {

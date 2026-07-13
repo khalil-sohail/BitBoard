@@ -53,10 +53,10 @@ def registry_parameter_names(registry: dict[str, Any]) -> list[str]:
 
 
 def production_mvv_lva_table() -> list[list[int]]:
-    search_constants = read_repo_file("engine/include/search/search_constants.hpp")
-    match = re.search(r"MVV_LVA\s*=\s*\{\{(?P<body>.*?)\}\};", search_constants, re.DOTALL)
+    generated = read_repo_file("engine/include/tuning/generated_tuning_values.hpp")
+    match = re.search(r"\.mvvLva\s*=\s*\{\{(?P<body>.*?)\}\},\n\s*\.seePieceValues", generated, re.DOTALL)
     if not match:
-        raise ProfileError("Could not find MVV_LVA table")
+        raise ProfileError("Could not find generated MVV-LVA table")
     values = [int(item) for item in re.findall(r"-?\d+", match.group("body"))]
     if len(values) != 36:
         raise ProfileError(f"MVV_LVA has {len(values)} values, expected 36")

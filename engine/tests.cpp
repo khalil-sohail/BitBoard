@@ -5,6 +5,7 @@
 #include "openingBook.hpp"
 #include "search.hpp"
 #include "search/search_constants.hpp"
+#include "search/search_internal.hpp"
 #include "tuning/engine_tuning.hpp"
 #include "tuning/generated_tuning_values.hpp"
 #include "tuning/tuning_metadata.hpp"
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -1029,15 +1031,7 @@ void test_generated_evaluation_defaults_match_production_baseline() {
 }
 
 void test_tuning_defaults_match_production_search_time_and_opening_values() {
-    const Tuning::EngineTuning& tuning = Tuning::BUILTIN_DEFAULT_V1_MODEL;
-    require(tuning.search.aspiration.windowCp == SearchConstants::ASPIRATION_WINDOW_SIZE, "Typed aspiration window should mirror production");
-    require(tuning.search.nullMove.reduction == SearchConstants::NULL_MOVE_REDUCTION, "Typed null-move reduction should mirror production");
-    require(tuning.search.futility.reverseMarginPerDepthCp == SearchConstants::REVERSE_FUTILITY_MARGIN, "Typed reverse futility margin should mirror production");
-    require(tuning.search.futility.forwardMarginPerDepthCp == SearchConstants::FORWARD_FUTILITY_MARGIN, "Typed forward futility margin should mirror production");
-    require(tuning.search.quiescence.deltaMarginCp == SearchConstants::DELTA_PRUNING_MARGIN, "Typed delta pruning margin should mirror production");
-    require(tuning.search.moveOrdering.transpositionMoveScore == SearchConstants::TT_MOVE_SCORE, "Typed TT move score should mirror production");
-    require(tuning.search.moveOrdering.mvvLva == SearchConstants::MVV_LVA, "Typed MVV-LVA table should mirror production");
-    require(tuning.search.moveOrdering.seePieceValues == SearchConstants::PIECE_VALUES, "Typed SEE values should mirror production");
+    const Tuning::EngineTuning& tuning = Tuning::Generated::VALUES;
     require(tuning.time.polling.nodeMask == SearchConstants::TIME_CHECK_MASK, "Typed time polling mask should mirror production");
     require(tuning.time.allocation.safetyReserveMs == 30, "Typed safety reserve should mirror production literal");
     require(tuning.time.allocation.expectedMovesBase == 40, "Typed expected moves base should mirror production literal");
@@ -1049,6 +1043,167 @@ void test_tuning_defaults_match_production_search_time_and_opening_values() {
     require(tuning.opening.selectionMode == Tuning::BookSelectionMode::Weighted, "Typed book selection mode should mirror production default");
     require(tuning.opening.selectionTopN == 4, "Typed selection top-N should mirror production default");
     require(tuning.opening.seed == 1592594996U, "Typed seed should mirror UCI default");
+}
+
+void test_phase7_generated_search_defaults_match_production_baseline() {
+    const auto& search = Tuning::Generated::VALUES.search;
+    require(search.aspiration.windowCp == 75, "Generated aspiration window changed from 75 cp");
+    require(search.nullMove.reduction == 2, "Generated null-move reduction changed from 2 plies");
+    require(search.futility.reverseMarginPerDepthCp == 80, "Generated reverse-futility margin changed from 80 cp/depth");
+    require(search.futility.forwardMarginPerDepthCp == 100, "Generated forward-futility margin changed from 100 cp/depth");
+    require(search.lateMoveReduction.base.equals(3, 4), "Generated LMR base changed from 0.75");
+    require(search.quiescence.deltaMarginCp == 260, "Generated delta-pruning margin changed from 260 cp");
+    require(search.singularExtension.marginCp == 100, "Generated singular-extension margin changed from 100 cp");
+    require(search.moveOrdering.transpositionMoveScore == 1'000'000, "Generated TT move score changed");
+    require(search.moveOrdering.quiet.firstKillerScore == 900'000, "Generated first-killer score changed");
+    require(search.moveOrdering.quiet.secondKillerScore == 850'000, "Generated second-killer score changed");
+    require(search.moveOrdering.quiet.counterMoveScore == 50'000, "Generated countermove score changed");
+    require(search.moveOrdering.capture.winningCaptureBaseScore == 800'000, "Generated winning-capture base changed");
+    require(search.moveOrdering.capture.losingCaptureBaseScore == -100'000, "Generated losing-capture base changed");
+    require(search.moveOrdering.capture.seeScoreMultiplier == 10, "Generated SEE multiplier changed");
+    require(search.moveOrdering.promotionBaseScore == 700, "Generated promotion base changed");
+    require(search.moveOrdering.historyLimit == 16'384, "Generated history cap changed");
+    require(search.moveOrdering.mvvLva == Tuning::MvvLvaTable{{
+        {{105, 205, 305, 405, 505, 605}},
+        {{104, 204, 304, 404, 504, 604}},
+        {{103, 203, 303, 403, 503, 603}},
+        {{102, 202, 302, 402, 502, 602}},
+        {{101, 201, 301, 401, 501, 601}},
+        {{100, 200, 300, 400, 500, 600}},
+    }}, "Generated MVV-LVA table changed");
+    require(search.moveOrdering.seePieceValues == Tuning::PieceValueArray{100, 320, 330, 500, 900, 0},
+            "Generated SEE piece values changed");
+}
+
+void test_phase7_search_formula_characterization() {
+    const auto& search = Tuning::Generated::VALUES.search;
+
+    const int previousScore = 37;
+    require(previousScore - search.aspiration.windowCp == -38 &&
+            previousScore + search.aspiration.windowCp == 112,
+            "Aspiration alpha/beta arithmetic changed");
+    require(5 - 1 - search.nullMove.reduction == 2,
+            "Null-move reduced-depth arithmetic changed");
+    require(6 * search.futility.reverseMarginPerDepthCp == 480,
+            "Reverse-futility margin arithmetic changed");
+    require(3 * search.futility.forwardMarginPerDepthCp == 300,
+            "Forward-futility margin arithmetic changed");
+    require(420 + 100 + search.quiescence.deltaMarginCp == 780,
+            "Delta-pruning comparison arithmetic changed");
+    require(250 - search.singularExtension.marginCp == 150,
+            "Singular-extension beta arithmetic changed");
+
+    SearchInternal::initLMR();
+    const double oldBase = 0.75;
+    for (int depth = 0; depth < 64; ++depth) {
+        for (int moveCount = 0; moveCount < 64; ++moveCount) {
+            int expected = 1;
+            if (depth > 0 && moveCount > 0) {
+                const int reduction = static_cast<int>(oldBase + std::log(depth) * std::log(moveCount));
+                expected = std::max(1, std::min(reduction, depth - 1));
+            }
+            require(SearchInternal::LMR_TABLE[depth][moveCount] == expected,
+                    "Generated LMR rational changed a baseline table entry");
+        }
+    }
+}
+
+void test_phase7_null_move_exclusions_remain_structural() {
+    Board inCheck;
+    require(inCheck.loadFEN("4r1k1/8/8/8/8/8/8/4K3 w - - 0 1"), "Failed to load in-check null-move fixture");
+    require(inCheck.inCheck(Color::White), "In-check null-move exclusion fixture must be checked");
+
+    Board pawnOnly;
+    require(pawnOnly.loadFEN("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"), "Failed to load pawn-only null-move fixture");
+    require(!pawnOnly.hasNonPawnMaterial(Color::White),
+            "Pawn-only/zugzwang safeguard must continue to disable null move");
+
+    Board eligible;
+    require(eligible.loadFEN("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1"), "Failed to load null-move eligibility fixture");
+    require(!eligible.inCheck(Color::White) && eligible.hasNonPawnMaterial(Color::White),
+            "Non-check position with non-pawn material must remain null-move eligible");
+}
+
+Move parsedMove(Board& board, const std::string& text) {
+    ParseResult parsed = board.parseMove(text);
+    require(parsed.move.has_value(), "Failed to parse move-ordering fixture move: " + text);
+    return *parsed.move;
+}
+
+void test_phase7_move_ordering_characterization() {
+    const auto& ordering = Tuning::Generated::VALUES.search.moveOrdering;
+    Board board;
+    SearchInternal::clearKillers();
+    SearchInternal::clearHistory();
+
+    const Move firstKiller = parsedMove(board, "e2e4");
+    const Move secondKiller = parsedMove(board, "d2d4");
+    const Move counter = parsedMove(board, "g1f3");
+    const Move history = parsedMove(board, "b1c3");
+    const Move ordinary = parsedMove(board, "a2a3");
+
+    SearchInternal::g_killerMoves[1][0] = firstKiller;
+    SearchInternal::g_killerMoves[1][1] = secondKiller;
+    SearchInternal::g_movesPlayed[0] = ordinary;
+    SearchInternal::g_countermoveTable[ordinary.from][ordinary.to] = counter;
+    SearchInternal::g_historyTable[static_cast<int>(Color::White)][history.from][history.to] = 123;
+
+    require(SearchInternal::scoreMove(board, firstKiller, 1) == ordering.quiet.firstKillerScore,
+            "First-killer production score changed");
+    require(SearchInternal::scoreMove(board, secondKiller, 1) == ordering.quiet.secondKillerScore,
+            "Second-killer production score changed");
+    require(SearchInternal::scoreMove(board, counter, 1) == ordering.quiet.counterMoveScore,
+            "Countermove production score changed");
+    require(SearchInternal::scoreMove(board, history, 1) == 123,
+            "History-scored quiet move changed");
+    require(SearchInternal::scoreMove(board, ordinary, 1) == 0,
+            "Ordinary quiet move score changed");
+
+    std::vector<Move> ordered{firstKiller, ordinary, secondKiller};
+    SearchInternal::sortMovesByScore(board, ordered, ordinary, 1);
+    require(sameMove(ordered.front(), ordinary), "TT move must remain ahead of both killer moves");
+
+    Board captureBoard;
+    require(captureBoard.loadFEN("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1"),
+            "Failed to load winning-capture ordering fixture");
+    const Move capture = parsedMove(captureBoard, "e4d5");
+    require(SearchInternal::scoreMove(captureBoard, capture, 0) == 801'105,
+            "Winning-capture base, SEE multiplier, or MVV-LVA contribution changed");
+
+    Board promotionBoard;
+    require(promotionBoard.loadFEN("4k3/P7/8/8/8/8/8/4K3 w - - 0 1"),
+            "Failed to load promotion ordering fixture");
+    const Move promotion = parsedMove(promotionBoard, "a7a8q");
+    require(SearchInternal::scoreMove(promotionBoard, promotion, 0) ==
+                ordering.promotionBaseScore + SearchInternal::getPieceValue(PieceType::Queen),
+            "Promotion ordering base changed");
+
+    require(ordering.transpositionMoveScore > ordering.quiet.firstKillerScore &&
+            ordering.quiet.firstKillerScore > ordering.quiet.secondKillerScore &&
+            ordering.capture.winningCaptureBaseScore > ordering.promotionBaseScore &&
+            ordering.quiet.counterMoveScore > ordering.historyLimit,
+            "Accepted move-ordering priority relationships changed");
+}
+
+void test_phase7_fixed_depth_search_baseline() {
+    Board board;
+    SearchInternal::clearTT();
+    SearchInternal::clearKillers();
+    SearchInternal::clearHistory();
+    SearchInternal::initLMR();
+    SearchConstants::MULTI_PV = 1;
+
+    int score = SearchConstants::INF_SCORE;
+    const auto [bestMove, ponderMove] = findBestMove(board, 4, 30'000, &score);
+    require(moveKey(bestMove) == "b1c3", "Phase 7 fixed-depth start-position best move changed");
+    require(moveKey(ponderMove) == "g8f6", "Phase 7 fixed-depth start-position PV continuation changed");
+    require(score == 0, "Phase 7 fixed-depth start-position score changed");
+    require(SearchInternal::g_nodesSearched == 10'598,
+            "Phase 7 fixed-depth start-position deterministic node count changed");
+    require(qNodes.load(std::memory_order_relaxed) == 3'828,
+            "Phase 7 fixed-depth start-position quiescence node count changed");
+    require(deltaPruneSkips.load(std::memory_order_relaxed) == 15,
+            "Phase 7 fixed-depth start-position delta-prune count changed");
 }
 
 void test_phase5a_scalar_term_characterization() {
@@ -1321,6 +1476,11 @@ int main() {
         {"Tuning validation rejects malformed values", test_tuning_validation_rejects_malformed_values},
         {"Generated evaluation defaults match production baseline", test_generated_evaluation_defaults_match_production_baseline},
         {"Tuning defaults match production search/time/opening values", test_tuning_defaults_match_production_search_time_and_opening_values},
+        {"Phase 7 generated search defaults match production baseline", test_phase7_generated_search_defaults_match_production_baseline},
+        {"Phase 7 search formula characterization", test_phase7_search_formula_characterization},
+        {"Phase 7 null-move exclusions remain structural", test_phase7_null_move_exclusions_remain_structural},
+        {"Phase 7 move-ordering characterization", test_phase7_move_ordering_characterization},
+        {"Phase 7 fixed-depth search baseline", test_phase7_fixed_depth_search_baseline},
         {"Phase 5A scalar term characterization", test_phase5a_scalar_term_characterization},
         {"Phase 5A static evaluation baselines", test_phase5a_static_evaluation_baselines},
         {"Phase 5B grouped evaluation characterization", test_phase5b_grouped_evaluation_characterization},

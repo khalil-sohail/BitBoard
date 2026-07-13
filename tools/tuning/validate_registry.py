@@ -88,17 +88,6 @@ def read_repo_file(relative: str) -> str:
     return (repo_root() / relative).read_text(encoding="utf-8")
 
 
-def parse_int_array_initializer(text: str, symbol: str) -> list[int]:
-    pattern = re.compile(
-        r"(?:std::array<[^=]+>\s+)?" + re.escape(symbol) + r"\s*=\s*\{(?P<body>.*?)\};",
-        re.DOTALL,
-    )
-    match = pattern.search(text)
-    if not match:
-        raise RegistryError(f"Could not find array initializer for {symbol}")
-    return [int(item) for item in re.findall(r"-?\d+", match.group("body"))]
-
-
 def parse_int_assignment(text: str, symbol: str) -> int:
     pattern = re.compile(
         r"(?:inline\s+constexpr\s+|inline\s+|int\s+|size_t\s+|uint64_t\s+|const\s+double\s+)*"
@@ -120,43 +109,87 @@ def parse_int_assignment(text: str, symbol: str) -> int:
     return int(float(raw))
 
 
+def generated_search_values() -> dict[str, Any]:
+    generated = read_repo_file("engine/include/tuning/generated_tuning_values.hpp")
+    match = re.search(r"\n    \.search = \{(?P<body>.*?)\n    \},\n    \.time = \{", generated, re.DOTALL)
+    if not match:
+        raise RegistryError("Could not find generated search tuning block")
+    search = match.group("body")
+
+    def scalar(field: str) -> int:
+        field_match = re.search(r"\." + re.escape(field) + r"\s*=\s*(-?[0-9']+)", search)
+        if not field_match:
+            raise RegistryError(f"Could not find generated search field {field}")
+        return int(field_match.group(1).replace("'", ""))
+
+    def array(field: str, count: int) -> list[int]:
+        field_match = re.search(
+            r"\." + re.escape(field) + r"\s*=\s*\{(?P<body>.*?)\}",
+            search,
+            re.DOTALL,
+        )
+        if not field_match:
+            raise RegistryError(f"Could not find generated search array {field}")
+        values = [int(item) for item in re.findall(r"-?\d+", field_match.group("body"))]
+        if len(values) != count:
+            raise RegistryError(f"Generated search array {field} has {len(values)} values, expected {count}")
+        return values
+
+    mvv_lva_match = re.search(
+        r"\.mvvLva\s*=\s*\{\{(?P<body>.*?)\}\},\n\s*\.seePieceValues",
+        search,
+        re.DOTALL,
+    )
+    if not mvv_lva_match:
+        raise RegistryError("Could not find generated search MVV-LVA table")
+    mvv_lva = [int(item) for item in re.findall(r"-?\d+", mvv_lva_match.group("body"))]
+    if len(mvv_lva) != 36:
+        raise RegistryError(f"Generated search MVV-LVA table has {len(mvv_lva)} values, expected 36")
+
+    base_match = re.search(r"\.base\s*=\s*RationalValue<int>\{(-?\d+),\s*(-?\d+)\}", search)
+    if not base_match:
+        raise RegistryError("Could not find generated LMR rational")
+    base_numerator, base_denominator = (int(value) for value in base_match.groups())
+
+    return {
+        "search.aspiration.windowCp": scalar("windowCp"),
+        "search.nullMove.reduction": scalar("reduction"),
+        "search.futility.reverseMarginPerDepthCp": scalar("reverseMarginPerDepthCp"),
+        "search.futility.forwardMarginPerDepthCp": scalar("forwardMarginPerDepthCp"),
+        "search.lmr.baseScaled100": base_numerator * 100 // base_denominator,
+        "search.quiescence.deltaPruningMarginCp": scalar("deltaMarginCp"),
+        "search.singular.marginCp": scalar("marginCp"),
+        "search.history.cap": scalar("historyLimit"),
+        "search.ordering.ttMoveScore": scalar("transpositionMoveScore"),
+        "search.ordering.quietScores": [
+            scalar("firstKillerScore"),
+            scalar("secondKillerScore"),
+            scalar("counterMoveScore"),
+        ],
+        "search.ordering.captureScores": [
+            scalar("winningCaptureBaseScore"),
+            scalar("losingCaptureBaseScore"),
+            scalar("seeScoreMultiplier"),
+        ],
+        "search.ordering.promotionBase": scalar("promotionBaseScore"),
+        "search.see.pieceValues": array("seePieceValues", 6),
+    }
+
+
 def production_values() -> dict[str, Any]:
     search_constants = read_repo_file("engine/include/search/search_constants.hpp")
     app_uci = read_repo_file("engine/src/app/app_uci.cpp")
-    search_state = read_repo_file("engine/src/search/search_state.cpp")
-    search_negamax = read_repo_file("engine/src/search/search_negamax.cpp")
-    search_ordering = read_repo_file("engine/src/search/search_move_ordering.cpp")
     search_root = read_repo_file("engine/src/search/search_root.cpp")
 
-    values: dict[str, Any] = {
-        "search.aspiration.windowCp": parse_int_assignment(search_constants, "ASPIRATION_WINDOW_SIZE"),
-        "search.nullMove.reduction": parse_int_assignment(search_constants, "NULL_MOVE_REDUCTION"),
-        "search.futility.reverseMarginPerDepthCp": parse_int_assignment(search_constants, "REVERSE_FUTILITY_MARGIN"),
-        "search.futility.forwardMarginPerDepthCp": parse_int_assignment(search_constants, "FORWARD_FUTILITY_MARGIN"),
-        "search.quiescence.deltaPruningMarginCp": parse_int_assignment(search_constants, "DELTA_PRUNING_MARGIN"),
-        "search.ordering.ttMoveScore": parse_int_assignment(search_constants, "TT_MOVE_SCORE"),
-        "search.see.pieceValues": parse_int_array_initializer(search_constants, "PIECE_VALUES"),
+    values: dict[str, Any] = generated_search_values()
+    values.update({
         "time.polling.nodeMask": parse_int_assignment(search_constants, "TIME_CHECK_MASK"),
         "opening.enabled": bool(parse_int_assignment(search_constants, "USE_OPENING_BOOK")),
         "opening.bookDepth": parse_int_assignment(search_constants, "MAX_BOOK_DEPTH"),
-        "search.lmr.baseScaled100": int(float(re.search(r"const double base = ([0-9.]+);", search_state).group(1)) * 100),
-        "search.singular.marginCp": int(re.search(r"const int margin\s+=\s+(\d+); // one pawn", search_negamax).group(1)),
-        "search.history.cap": int(re.search(r"std::min\((\d+), hist \+ bonus\)", search_negamax).group(1)),
-        "search.ordering.quietScores": [
-            int(re.search(r"score \+= (\d+);\n\s+} else if", search_ordering).group(1)),
-            int(re.search(r"score \+= (\d+);\n\s+}\n\n\s+bool isCounterMove", search_ordering).group(1)),
-            int(re.search(r"score \+= (\d+);\n\s+}\n\s+\n\s+score \+= SearchInternal::g_historyTable", search_ordering).group(1)),
-        ],
-        "search.ordering.captureScores": [
-            int(re.search(r"score \+= (\d+) \+ seeVal \* 10 \+ mvvLva;", search_ordering).group(1)),
-            int(re.search(r"score \+= (-\d+) \+ seeVal \* 10 \+ mvvLva;", search_ordering).group(1)),
-            10,
-        ],
-        "search.ordering.promotionBase": int(re.search(r"score \+= (\d+) \+ getPieceValue", search_ordering).group(1)),
         "time.softStop.stablePercent": int(re.search(r"int softLimitFraction = (\d+);", search_root).group(1)),
         "time.softStop.unstablePercent": int(re.search(r"stableCount = 0;\n\s+softLimitFraction = (\d+);", search_root).group(1)),
         "time.hardStopFraction": [3, 4],
-    }
+    })
 
     literal_checks = {
         "time.safetyReserveMs": r"timeLeft - (\d+)LL",

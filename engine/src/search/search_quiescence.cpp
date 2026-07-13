@@ -1,5 +1,12 @@
 #include "search/search_internal.hpp"
 #include "search/search_see.hpp"
+#include "tuning/generated_tuning_values.hpp"
+
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
 
 int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
     if (SearchInternal::shouldAbortSearch()) {
@@ -41,7 +48,7 @@ int quiescenceSearch(Board& board, int alpha, int beta, int plyFromRoot) {
                 }
             }
 
-            if (standPat + capturedValue + SearchConstants::DELTA_PRUNING_MARGIN < alpha) {
+            if (standPat + capturedValue + SEARCH_TUNING.quiescence.deltaMarginCp < alpha) {
                 deltaPruneSkips.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }

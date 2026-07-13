@@ -1,7 +1,14 @@
 #include "search/search_internal.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <cstddef>
 #include <cstdint>
+
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
 
 // Helper: returns true if 'move' matches 'ref' (both are valid and identical).
 static inline bool isSameMove(const Move& move, const Move& ref) {
@@ -83,7 +90,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         board.makeNullMove();
         const int nullScore = -negamax(
             board,
-            depth - 1 - SearchConstants::NULL_MOVE_REDUCTION,
+            depth - 1 - SEARCH_TUNING.nullMove.reduction,
             -beta,
             -beta + 1,
             -colorMultiplier,
@@ -117,7 +124,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
 
         // Clamp the TT score so we don't use a mate score as our margin base.
         const int ttScore  = entry.score;
-        const int margin   = 100; // one pawn
+        const int margin   = SEARCH_TUNING.singularExtension.marginCp; // one pawn
         const int singBeta = ttScore - margin;
 
         // Exclusion search: search all moves *except* ttBestMove at reduced
@@ -152,7 +159,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
         staticEvalComputed = true;
         
         if (depth <= 6) {
-            const int margin = depth * SearchConstants::REVERSE_FUTILITY_MARGIN;
+            const int margin = depth * SEARCH_TUNING.futility.reverseMarginPerDepthCp;
             if (staticEval - margin >= beta) {
                 return staticEval - margin;
             }
@@ -201,7 +208,7 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
             bool isKiller = isSameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0]) ||
                             isSameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1]);
             if (!isKiller && staticEvalComputed) {
-                const int margin = depth * SearchConstants::FORWARD_FUTILITY_MARGIN;
+                const int margin = depth * SEARCH_TUNING.futility.forwardMarginPerDepthCp;
                 if (staticEval + margin <= alpha) {
                     board.undoMove();
                     continue;
@@ -257,11 +264,11 @@ int negamax(Board& board, int depth, int alpha, int beta, int colorMultiplier,
             if (isQuiet) {
                 int bonus = depth * depth;
                 int& hist = SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to];
-                hist = std::min(16384, hist + bonus);
+                hist = std::min(SEARCH_TUNING.moveOrdering.historyLimit, hist + bonus);
 
                 for (const Move& qm : quietMovesSearched) {
                     int& penaltyHist = SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][qm.from][qm.to];
-                    penaltyHist = std::max(-16384, penaltyHist - bonus);
+                    penaltyHist = std::max(-SEARCH_TUNING.moveOrdering.historyLimit, penaltyHist - bonus);
                 }
 
                 if (plyFromRoot > 0) {

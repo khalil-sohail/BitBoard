@@ -1,16 +1,22 @@
 #include "search/search_see.hpp"
-#include "search/search_constants.hpp"
 #include "move/movegen_attacks.hpp"
 #include "move/movegen_constants.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <cstdint>
+
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
 
 namespace SearchInternal {
 
 static inline int getPieceValueFast(PieceType pt) {
     if (pt == PieceType::Count) return 0;
-    return SearchConstants::PIECE_VALUES[static_cast<size_t>(pt)];
+    return SEARCH_TUNING.moveOrdering.seePieceValues[static_cast<size_t>(pt)];
 }
 
 static std::pair<PieceType, int> getLeastValuableAttacker(const Board& board, int square, Color color, uint64_t occ) {

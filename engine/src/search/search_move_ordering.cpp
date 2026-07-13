@@ -1,27 +1,34 @@
 #include "search/search_internal.hpp"
 #include "search/search_see.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <cstddef>
 
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
+
 namespace SearchInternal {
 
 int getPieceValue(PieceType piece) {
-    return SearchConstants::PIECE_VALUES[static_cast<size_t>(piece)];
+    return SEARCH_TUNING.moveOrdering.seePieceValues[static_cast<size_t>(piece)];
 }
 
 int scoreMove(const Board& board, const Move& move, int plyFromRoot) {
     int score = 0;
 
     if (move.promotion.has_value()) {
-        score += 700 + getPieceValue(*move.promotion);
+        score += SEARCH_TUNING.moveOrdering.promotionBaseScore + getPieceValue(*move.promotion);
     }
 
     if (!move.isCapture) {
         if (sameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][0])) {
-            score += 900000;
+            score += SEARCH_TUNING.moveOrdering.quiet.firstKillerScore;
         } else if (sameMove(move, SearchInternal::g_killerMoves[static_cast<size_t>(plyFromRoot)][1])) {
-            score += 850000;
+            score += SEARCH_TUNING.moveOrdering.quiet.secondKillerScore;
         }
 
         bool isCounterMove = false;
@@ -36,7 +43,7 @@ int scoreMove(const Board& board, const Move& move, int plyFromRoot) {
         }
         
         if (isCounterMove) {
-            score += 50000;
+            score += SEARCH_TUNING.moveOrdering.quiet.counterMoveScore;
         }
         
         score += SearchInternal::g_historyTable[static_cast<int>(board.sideToMove())][move.from][move.to];
@@ -56,14 +63,16 @@ int scoreMove(const Board& board, const Move& move, int plyFromRoot) {
     }
     const int victimIdx = static_cast<int>(victim);
     const int attackerIdx = static_cast<int>(move.piece);
-    const int mvvLva = SearchConstants::MVV_LVA[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
+    const int mvvLva = SEARCH_TUNING.moveOrdering.mvvLva[static_cast<size_t>(victimIdx)][static_cast<size_t>(attackerIdx)];
 
     if (seeVal >= 0) {
         // Winning or equal capture: sort high
-        score += 800000 + seeVal * 10 + mvvLva;
+        score += SEARCH_TUNING.moveOrdering.capture.winningCaptureBaseScore
+               + seeVal * SEARCH_TUNING.moveOrdering.capture.seeScoreMultiplier + mvvLva;
     } else {
         // Losing capture: sort low, below quiet moves
-        score += -100000 + seeVal * 10 + mvvLva;
+        score += SEARCH_TUNING.moveOrdering.capture.losingCaptureBaseScore
+               + seeVal * SEARCH_TUNING.moveOrdering.capture.seeScoreMultiplier + mvvLva;
     }
 
     return score;
@@ -78,8 +87,8 @@ bool sameMove(const Move& lhs, const Move& rhs) {
 
 void sortMovesByScore(const Board& board, std::vector<Move>& moves, Move ttMove, int plyFromRoot) {
     std::stable_sort(moves.begin(), moves.end(), [&](const Move& lhs, const Move& rhs) {
-        const int lhsScore = sameMove(lhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, lhs, plyFromRoot);
-        const int rhsScore = sameMove(rhs, ttMove) ? SearchConstants::TT_MOVE_SCORE : scoreMove(board, rhs, plyFromRoot);
+        const int lhsScore = sameMove(lhs, ttMove) ? SEARCH_TUNING.moveOrdering.transpositionMoveScore : scoreMove(board, lhs, plyFromRoot);
+        const int rhsScore = sameMove(rhs, ttMove) ? SEARCH_TUNING.moveOrdering.transpositionMoveScore : scoreMove(board, rhs, plyFromRoot);
         return lhsScore > rhsScore;
     });
 }

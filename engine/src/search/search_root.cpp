@@ -1,9 +1,16 @@
 #include "search/search_internal.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <string>
+
+namespace {
+
+constexpr const auto& SEARCH_TUNING = Tuning::Generated::VALUES.search;
+
+}
 
 static std::vector<std::string> extractPV(Board& board, const Move& rootMove, int maxPVLength) {
     auto moveToUciStr = [](const Move& move) {
@@ -152,8 +159,8 @@ std::pair<Move, Move> findBestMove(Board& board, int maxDepth, long long timeLim
             // Aspiration window only for the best (first) PV line
             int alpha, beta;
             if (pvIdx == 0 && currentDepth >= 4) {
-                alpha = previousIterationScore - SearchConstants::ASPIRATION_WINDOW_SIZE;
-                beta  = previousIterationScore + SearchConstants::ASPIRATION_WINDOW_SIZE;
+                alpha = previousIterationScore - SEARCH_TUNING.aspiration.windowCp;
+                beta  = previousIterationScore + SEARCH_TUNING.aspiration.windowCp;
             } else {
                 alpha = -SearchConstants::INF_SCORE;
                 beta  =  SearchConstants::INF_SCORE;
