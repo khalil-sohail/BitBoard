@@ -1,5 +1,6 @@
 #include "board.hpp"
 #include "eval/eval_tables.hpp"
+#include "eval/eval_terms.hpp"
 #include "eval/eval_weights.hpp"
 #include "openingBook.hpp"
 #include "search.hpp"
@@ -952,6 +953,148 @@ void test_tuning_model_does_not_use_old_texel_defaults() {
     require(tuning.evaluation.bishopPair.middlegame != 30, "Typed bishop pair MG must not use old Texel default");
 }
 
+void test_phase5a_legacy_scalar_bridges_match_generated_values() {
+    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
+
+    require(EvalWeights::ROOK_ACTIVITY_BONUS_MG == evaluation.rookActivity.middlegameArray(),
+            "Legacy MG rook activity bridge should initialize from generated values");
+    require(EvalWeights::ROOK_ACTIVITY_BONUS_EG == evaluation.rookActivity.endgameArray(),
+            "Legacy EG rook activity bridge should initialize from generated values");
+    require(EvalWeights::BISHOP_PAIR_BONUS_MG == evaluation.bishopPair.middlegame,
+            "Legacy bishop-pair MG bridge should initialize from generated values");
+    require(EvalWeights::BISHOP_PAIR_BONUS_EG == evaluation.bishopPair.endgame,
+            "Legacy bishop-pair EG bridge should initialize from generated values");
+
+    require(EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY == evaluation.pawns.doubledPenalty,
+            "Legacy doubled-pawn bridge should initialize from generated values");
+    require(EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY == evaluation.pawns.isolatedPenalty,
+            "Legacy isolated-pawn bridge should initialize from generated values");
+    require(EvalWeights::PAWN_ISLAND_PENALTY_MG == evaluation.pawns.islandPenaltyMg,
+            "Legacy pawn-island MG bridge should initialize from generated values");
+    require(EvalWeights::PAWN_ISLAND_PENALTY_EG == evaluation.pawns.islandPenaltyEg,
+            "Legacy pawn-island EG bridge should initialize from generated values");
+    require(EvalWeights::PASSED_PAWN_COUNT_BONUS_MG == evaluation.pawns.passedCountBonusMg,
+            "Legacy passed-count MG bridge should initialize from generated values");
+    require(EvalWeights::PASSED_PAWN_COUNT_BONUS_EG == evaluation.pawns.passedCountBonusEg,
+            "Legacy passed-count EG bridge should initialize from generated values");
+    require(EvalWeights::PASSED_PAWN_EG_MULTIPLIER == evaluation.pawns.passedEgMultiplier,
+            "Legacy passed-pawn EG multiplier bridge should initialize from generated values");
+    require(EvalWeights::PASSED_PAWN_RANK_SQUARE_MULTIPLIER == evaluation.pawns.passedRankSquareMultiplier,
+            "Legacy passed-rank multiplier bridge should initialize from generated values");
+    require(EvalWeights::PASSED_PAWN_BLOCKED_DIVISOR == evaluation.pawns.passedBlockedDivisor,
+            "Legacy blocked-passer divisor bridge should initialize from generated values");
+
+    require(EvalWeights::TRAPPED_ROOK_PENALTY == evaluation.piecePlacement.trappedRookPenalty,
+            "Legacy trapped-rook bridge should initialize from generated values");
+    require(EvalWeights::BAD_BISHOP_HEAVY_PENALTY == evaluation.piecePlacement.badBishopHeavyPenalty,
+            "Legacy heavy bad-bishop bridge should initialize from generated values");
+    require(EvalWeights::BAD_BISHOP_LIGHT_PENALTY == evaluation.piecePlacement.badBishopLightPenalty,
+            "Legacy light bad-bishop bridge should initialize from generated values");
+    require(EvalWeights::EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY == evaluation.piecePlacement.earlyQueenUndevelopedMinorPenalty,
+            "Legacy early-queen bridge should initialize from generated values");
+    require(EvalWeights::UNCASTLED_KING_CENTER_PENALTY == evaluation.kingSafety.uncastledCenterPenalty,
+            "Legacy uncastled-center bridge should initialize from generated values");
+    require(EvalWeights::UNCASTLED_KING_LOST_RIGHTS_PENALTY == evaluation.kingSafety.uncastledLostRightsPenalty,
+            "Legacy lost-castling-rights bridge should initialize from generated values");
+
+    require(EvalWeights::TAPER_SCALE == evaluation.endgame.taperScale,
+            "Legacy taper-scale bridge should initialize from generated values");
+    require(EvalWeights::LATE_ENDGAME_PHASE_MAX == evaluation.endgame.latePhaseMax,
+            "Legacy late-phase bridge should initialize from generated values");
+    require(EvalWeights::MOP_UP_EG_MARGIN == evaluation.endgame.mopUpEgMargin,
+            "Legacy mop-up EG margin bridge should initialize from generated values");
+    require(EvalWeights::MOP_UP_MATERIAL_MARGIN == evaluation.endgame.mopUpMaterialMargin,
+            "Legacy mop-up material margin bridge should initialize from generated values");
+    require(EvalWeights::SCALE_OPPOSITE_BISHOPS_MIN_PAWNS == evaluation.endgame.scaleOppositeBishopsMinPawns,
+            "Legacy opposite-bishop minimum-pawn scale bridge should initialize from generated values");
+    require(EvalWeights::SCALE_OPPOSITE_BISHOPS_LOW_PAWNS == evaluation.endgame.scaleOppositeBishopsLowPawns,
+            "Legacy opposite-bishop low-pawn scale bridge should initialize from generated values");
+    require(EvalWeights::SCALE_MINOR_ONLY_NEAR_EQUAL == evaluation.endgame.scaleMinorOnlyNearEqual,
+            "Legacy near-equal minor scale bridge should initialize from generated values");
+    require(EvalWeights::SCALE_MINOR_ONLY_CLEAR_EDGE == evaluation.endgame.scaleMinorOnlyClearEdge,
+            "Legacy clear-edge minor scale bridge should initialize from generated values");
+}
+
+void test_phase5a_scalar_term_characterization() {
+    const auto& evaluation = Tuning::Generated::VALUES.evaluation;
+
+    const Eval::TaperTerms openFile = EvalTerms::rookActivityTermsForSide(Color::White, 1ULL, 0ULL, 0ULL);
+    require(openFile.mg == evaluation.rookActivity.openFileMg && openFile.eg == evaluation.rookActivity.openFileEg,
+            "Open-file rook should receive generated MG/EG bonuses");
+
+    const Eval::TaperTerms semiOpenFile = EvalTerms::rookActivityTermsForSide(Color::White, 1ULL, 0ULL, 1ULL << 48);
+    require(semiOpenFile.mg == evaluation.rookActivity.semiOpenFileMg && semiOpenFile.eg == evaluation.rookActivity.semiOpenFileEg,
+            "Semi-open-file rook should receive generated MG/EG bonuses");
+
+    const Eval::TaperTerms seventhRank = EvalTerms::rookActivityTermsForSide(Color::White, 1ULL << 48, 1ULL, 1ULL << 8);
+    require(seventhRank.mg == evaluation.rookActivity.seventhRankMg && seventhRank.eg == evaluation.rookActivity.seventhRankEg,
+            "Seventh-rank rook should receive generated MG/EG bonuses");
+
+    const Eval::TaperTerms islands = EvalTerms::pawnIslandPenalty((1ULL << 8) | (1ULL << 10));
+    require(islands.mg == evaluation.pawns.islandPenaltyMg && islands.eg == evaluation.pawns.islandPenaltyEg,
+            "Two pawn islands should receive one generated MG/EG island penalty");
+
+    const int doubledIsolated = EvalTerms::pawnStructurePenalty((1ULL << 8) | (1ULL << 16));
+    require(doubledIsolated == evaluation.pawns.doubledPenalty + 2 * evaluation.pawns.isolatedPenalty,
+            "Doubled isolated pawns should preserve penalty signs and multiplicity");
+
+    require(EvalTerms::passedPawnBonus(Color::White, 1ULL << 27, 0ULL)
+                == 16 * evaluation.pawns.passedRankSquareMultiplier,
+            "White passed-pawn rank multiplier should preserve orientation");
+    require(EvalTerms::passedPawnBonus(Color::Black, 1ULL << 35, 0ULL)
+                == 16 * evaluation.pawns.passedRankSquareMultiplier,
+            "Black passed-pawn rank multiplier should preserve orientation");
+
+    require(EvalTerms::trappedRookPenalty(Color::White, 1ULL, 1ULL << 1)
+                == evaluation.piecePlacement.trappedRookPenalty,
+            "Trapped-rook term should use generated penalty");
+    require(EvalTerms::badBishopPenalty(1ULL << 18, 1ULL << 9, Color::White)
+                == evaluation.piecePlacement.badBishopHeavyPenalty,
+            "Bad-bishop term should use generated heavy penalty");
+    require(EvalTerms::earlyQueenPenalty(1ULL << 11, (1ULL << 1) | (1ULL << 6), 0ULL, Color::White)
+                == evaluation.piecePlacement.earlyQueenUndevelopedMinorPenalty,
+            "Early-queen term should use generated penalty");
+    require(EvalTerms::uncastledKingPenalty(1ULL << 4, 0, Color::White)
+                == evaluation.kingSafety.uncastledCenterPenalty + evaluation.kingSafety.uncastledLostRightsPenalty,
+            "Uncastled king should preserve center and lost-rights penalty composition");
+
+    const int minorOnlyScale = EvalTerms::lowMaterialScaleFactor(
+        evaluation.endgame.latePhaseMax,
+        0ULL, 0ULL, 1ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL
+    );
+    require(minorOnlyScale == evaluation.endgame.scaleMinorOnlyNearEqual,
+            "Late minor-only endgame should use generated scale");
+    const int normalScale = EvalTerms::lowMaterialScaleFactor(
+        evaluation.endgame.latePhaseMax + 1,
+        0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL
+    );
+    require(normalScale == evaluation.endgame.taperScale,
+            "Non-late phase should retain generated full taper scale");
+}
+
+void test_phase5a_static_evaluation_baselines() {
+    struct Fixture {
+        const char* fen;
+        int expected;
+    };
+
+    constexpr Fixture fixtures[] = {
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0},
+        {"r3k2r/ppp2ppp/2n1bn2/3pp3/3PP3/2N1BN2/PPP2PPP/R2QK2R w KQkq - 0 8", 948},
+        {"4k3/8/8/8/8/8/4P3/R3K3 w Q - 0 1", 1615},
+        {"4k3/8/8/3P4/2P1P3/8/8/4K3 w - - 0 1", 2253},
+        {"rnb1kbnr/pppp1ppp/8/4p3/4P2q/8/PPPP1PPP/RNBQKBNR w KQkq - 1 3", 80},
+        {"8/8/8/4k3/8/8/4K3/R7 w - - 0 1", 601},
+    };
+
+    for (const Fixture& fixture : fixtures) {
+        Board board;
+        require(board.loadFEN(fixture.fen), "Failed to load Phase 5A static-evaluation fixture");
+        require(board.computeStaticEvaluation() == fixture.expected,
+                "Phase 5A static-evaluation baseline changed for FEN: " + std::string(fixture.fen));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -995,6 +1138,9 @@ int main() {
         {"Tuning defaults match production evaluation values", test_tuning_defaults_match_production_evaluation_values},
         {"Tuning defaults match production search/time/opening values", test_tuning_defaults_match_production_search_time_and_opening_values},
         {"Tuning model does not use old Texel defaults", test_tuning_model_does_not_use_old_texel_defaults},
+        {"Phase 5A legacy scalar bridges match generated values", test_phase5a_legacy_scalar_bridges_match_generated_values},
+        {"Phase 5A scalar term characterization", test_phase5a_scalar_term_characterization},
+        {"Phase 5A static evaluation baselines", test_phase5a_static_evaluation_baselines},
     };
 
     int passed = 0;

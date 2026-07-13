@@ -1,5 +1,6 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -15,6 +16,7 @@ constexpr int KNIGHT_IDX = static_cast<int>(PieceType::Knight);
 constexpr int BISHOP_IDX = static_cast<int>(PieceType::Bishop);
 constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
 constexpr int QUEEN_IDX = static_cast<int>(PieceType::Queen);
+constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
 
 } // namespace
 
@@ -74,11 +76,11 @@ int lowMaterialScaleFactor(
     uint64_t whiteQueens,
     uint64_t blackQueens
 ) {
-    if (phase > EvalWeights::LATE_ENDGAME_PHASE_MAX) {
-        return EvalWeights::TAPER_SCALE;
+    if (phase > EVAL_TUNING.endgame.latePhaseMax) {
+        return EVAL_TUNING.endgame.taperScale;
     }
 
-    int scale = EvalWeights::TAPER_SCALE;
+    int scale = EVAL_TUNING.endgame.taperScale;
 
     const int whitePawnsCount = std::popcount(whitePawns);
     const int blackPawnsCount = std::popcount(blackPawns);
@@ -99,9 +101,9 @@ int lowMaterialScaleFactor(
 
         if (totalPawns == 0) {
             if (minorDiff <= 1) {
-                scale = std::min(scale, EvalWeights::SCALE_MINOR_ONLY_NEAR_EQUAL);
+                scale = std::min(scale, EVAL_TUNING.endgame.scaleMinorOnlyNearEqual);
             } else if (minorDiff == 2) {
-                scale = std::min(scale, EvalWeights::SCALE_MINOR_ONLY_CLEAR_EDGE);
+                scale = std::min(scale, EVAL_TUNING.endgame.scaleMinorOnlyClearEdge);
             }
         }
 
@@ -114,8 +116,8 @@ int lowMaterialScaleFactor(
             scale = std::min(
                 scale,
                 (totalPawns <= 2)
-                    ? EvalWeights::SCALE_OPPOSITE_BISHOPS_MIN_PAWNS
-                    : EvalWeights::SCALE_OPPOSITE_BISHOPS_LOW_PAWNS
+                    ? EVAL_TUNING.endgame.scaleOppositeBishopsMinPawns
+                    : EVAL_TUNING.endgame.scaleOppositeBishopsLowPawns
             );
         }
     }

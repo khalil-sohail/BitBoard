@@ -1,6 +1,7 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_masks.hpp"
 #include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <bit>
 #include <cstddef>
@@ -18,6 +19,7 @@ constexpr uint8_t CASTLE_WK = 0b1000;
 constexpr uint8_t CASTLE_WQ = 0b0100;
 constexpr uint8_t CASTLE_BK = 0b0010;
 constexpr uint8_t CASTLE_BQ = 0b0001;
+constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
 
 } // namespace
 
@@ -182,18 +184,18 @@ Eval::TaperTerms rookActivityTermsForSide(Color color, uint64_t rooks, uint64_t 
         const bool hasEnemyPawn = (enemyPawns & fileMask) != 0ULL;
 
         if (!hasOwnPawn && !hasEnemyPawn) {
-            terms.mg += EvalWeights::ROOK_ACTIVITY_BONUS_MG[EvalWeights::ROOK_ACTIVITY_OPEN_FILE];
-            terms.eg += EvalWeights::ROOK_ACTIVITY_BONUS_EG[EvalWeights::ROOK_ACTIVITY_OPEN_FILE];
+            terms.mg += EVAL_TUNING.rookActivity.openFileMg;
+            terms.eg += EVAL_TUNING.rookActivity.openFileEg;
         } else if (!hasOwnPawn && hasEnemyPawn) {
-            terms.mg += EvalWeights::ROOK_ACTIVITY_BONUS_MG[EvalWeights::ROOK_ACTIVITY_SEMI_OPEN_FILE];
-            terms.eg += EvalWeights::ROOK_ACTIVITY_BONUS_EG[EvalWeights::ROOK_ACTIVITY_SEMI_OPEN_FILE];
+            terms.mg += EVAL_TUNING.rookActivity.semiOpenFileMg;
+            terms.eg += EVAL_TUNING.rookActivity.semiOpenFileEg;
         }
 
         const uint64_t rookSquare = Eval::squareMask(square);
         if ((color == Color::White && (rookSquare & Board::RANK_7) != 0ULL) ||
             (color == Color::Black && (rookSquare & Board::RANK_2) != 0ULL)) {
-            terms.mg += EvalWeights::ROOK_ACTIVITY_BONUS_MG[EvalWeights::ROOK_ACTIVITY_SEVENTH_RANK];
-            terms.eg += EvalWeights::ROOK_ACTIVITY_BONUS_EG[EvalWeights::ROOK_ACTIVITY_SEVENTH_RANK];
+            terms.mg += EVAL_TUNING.rookActivity.seventhRankMg;
+            terms.eg += EVAL_TUNING.rookActivity.seventhRankEg;
         }
     }
 
@@ -208,26 +210,26 @@ int trappedRookPenalty(Color color, uint64_t rooks, uint64_t king) {
     if (color == Color::White) {
         const bool rookInCorner = (rooks & ((1ULL << 0) | (1ULL << 7))) != 0ULL;
         const bool kingTrapsRook = (king & ((1ULL << 1) | (1ULL << 2) | (1ULL << 5) | (1ULL << 6))) != 0ULL;
-        return (rookInCorner && kingTrapsRook) ? EvalWeights::TRAPPED_ROOK_PENALTY : 0;
+        return (rookInCorner && kingTrapsRook) ? EVAL_TUNING.piecePlacement.trappedRookPenalty : 0;
     }
 
     const bool rookInCorner = (rooks & ((1ULL << 56) | (1ULL << 63))) != 0ULL;
     const bool kingTrapsRook = (king & ((1ULL << 57) | (1ULL << 58) | (1ULL << 61) | (1ULL << 62))) != 0ULL;
-    return (rookInCorner && kingTrapsRook) ? EvalWeights::TRAPPED_ROOK_PENALTY : 0;
+    return (rookInCorner && kingTrapsRook) ? EVAL_TUNING.piecePlacement.trappedRookPenalty : 0;
 }
 
 int badBishopPenalty(uint64_t ownPawns, uint64_t ownBishops, Color color) {
     int penalty = 0;
     if (color == Color::White) {
-        if ((ownBishops & 512ULL) && (ownPawns & 262144ULL)) penalty += EvalWeights::BAD_BISHOP_HEAVY_PENALTY;
-        if ((ownBishops & 16384ULL) && (ownPawns & 2097152ULL)) penalty += EvalWeights::BAD_BISHOP_HEAVY_PENALTY;
-        if ((ownBishops & 4ULL) && (ownPawns & 2048ULL)) penalty += EvalWeights::BAD_BISHOP_LIGHT_PENALTY;
-        if ((ownBishops & 32ULL) && (ownPawns & 4096ULL)) penalty += EvalWeights::BAD_BISHOP_LIGHT_PENALTY;
+        if ((ownBishops & 512ULL) && (ownPawns & 262144ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopHeavyPenalty;
+        if ((ownBishops & 16384ULL) && (ownPawns & 2097152ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopHeavyPenalty;
+        if ((ownBishops & 4ULL) && (ownPawns & 2048ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopLightPenalty;
+        if ((ownBishops & 32ULL) && (ownPawns & 4096ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopLightPenalty;
     } else {
-        if ((ownBishops & 562949953421312ULL) && (ownPawns & 4398046511104ULL)) penalty += EvalWeights::BAD_BISHOP_HEAVY_PENALTY;
-        if ((ownBishops & 18014398509481984ULL) && (ownPawns & 35184372088832ULL)) penalty += EvalWeights::BAD_BISHOP_HEAVY_PENALTY;
-        if ((ownBishops & 288230376151711744ULL) && (ownPawns & 2251799813685248ULL)) penalty += EvalWeights::BAD_BISHOP_LIGHT_PENALTY;
-        if ((ownBishops & 2305843009213693952ULL) && (ownPawns & 4503599627370496ULL)) penalty += EvalWeights::BAD_BISHOP_LIGHT_PENALTY;
+        if ((ownBishops & 562949953421312ULL) && (ownPawns & 4398046511104ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopHeavyPenalty;
+        if ((ownBishops & 18014398509481984ULL) && (ownPawns & 35184372088832ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopHeavyPenalty;
+        if ((ownBishops & 288230376151711744ULL) && (ownPawns & 2251799813685248ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopLightPenalty;
+        if ((ownBishops & 2305843009213693952ULL) && (ownPawns & 4503599627370496ULL)) penalty += EVAL_TUNING.piecePlacement.badBishopLightPenalty;
     }
     return penalty;
 }
@@ -241,7 +243,7 @@ int earlyQueenPenalty(uint64_t ownQueen, uint64_t ownKnights, uint64_t ownBishop
     if ((ownQueen & startingRank) == 0ULL) {
         int undevelopedMinors = std::popcount((ownKnights | ownBishops) & startingRank);
         if (undevelopedMinors >= 2) {
-            penalty += EvalWeights::EARLY_QUEEN_UNDEVELOPED_MINOR_PENALTY * (undevelopedMinors - 1);
+            penalty += EVAL_TUNING.piecePlacement.earlyQueenUndevelopedMinorPenalty * (undevelopedMinors - 1);
         }
     }
     return penalty;
@@ -254,12 +256,12 @@ int uncastledKingPenalty(uint64_t king, uint8_t castlingRights, Color color) {
     int file = kingSq % 8;
 
     if (file >= 2 && file <= 5) {
-        penalty += EvalWeights::UNCASTLED_KING_CENTER_PENALTY;
+        penalty += EVAL_TUNING.kingSafety.uncastledCenterPenalty;
 
         if (color == Color::White && !(castlingRights & (CASTLE_WK | CASTLE_WQ))) {
-            penalty += EvalWeights::UNCASTLED_KING_LOST_RIGHTS_PENALTY;
+            penalty += EVAL_TUNING.kingSafety.uncastledLostRightsPenalty;
         } else if (color == Color::Black && !(castlingRights & (CASTLE_BK | CASTLE_BQ))) {
-            penalty += EvalWeights::UNCASTLED_KING_LOST_RIGHTS_PENALTY;
+            penalty += EVAL_TUNING.kingSafety.uncastledLostRightsPenalty;
         }
     }
     return penalty;

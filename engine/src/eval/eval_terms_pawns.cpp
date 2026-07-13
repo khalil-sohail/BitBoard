@@ -1,6 +1,7 @@
 #include "eval/eval_terms.hpp"
 #include "eval/eval_masks.hpp"
 #include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,7 @@ namespace {
 
 constexpr int WHITE_IDX = static_cast<int>(Color::White);
 constexpr int BLACK_IDX = static_cast<int>(Color::Black);
+constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
 
 int connectedPawnsBonusByRank(Color color, uint64_t ownPawns, const std::array<int, 9>& bonusByRank) {
     const uint64_t phalanx = ((ownPawns & ~Board::FILE_A) >> 1) | ((ownPawns & ~Board::FILE_H) << 1);
@@ -221,8 +223,8 @@ Eval::TaperTerms pawnIslandPenalty(uint64_t ownPawns) {
     const int islands = pawnIslands(ownPawns);
     const int extraIslands = std::max(0, islands - 1);
     return {
-        extraIslands * EvalWeights::PAWN_ISLAND_PENALTY_MG,
-        extraIslands * EvalWeights::PAWN_ISLAND_PENALTY_EG
+        extraIslands * EVAL_TUNING.pawns.islandPenaltyMg,
+        extraIslands * EVAL_TUNING.pawns.islandPenaltyEg
     };
 }
 
@@ -237,7 +239,7 @@ int pawnStructurePenalty(uint64_t ownPawns) {
 
         const int count = std::popcount(filePawns);
         if (count > 1) {
-            penalty += (count - 1) * EvalWeights::PAWN_STRUCTURE_DOUBLED_PENALTY;
+            penalty += (count - 1) * EVAL_TUNING.pawns.doubledPenalty;
         }
 
         uint64_t adjMask = 0ULL;
@@ -249,7 +251,7 @@ int pawnStructurePenalty(uint64_t ownPawns) {
         }
 
         if ((ownPawns & adjMask) == 0ULL) {
-            penalty += count * EvalWeights::PAWN_STRUCTURE_ISOLATED_PENALTY;
+            penalty += count * EVAL_TUNING.pawns.isolatedPenalty;
         }
     }
 
@@ -288,12 +290,12 @@ int passedPawnBonus(Color color, uint64_t ownPawns, uint64_t enemyPawns) {
 
         if ((mask & enemyPawns) == 0ULL) {
             const int relativeRank = (color == Color::White) ? (rank + 1) : (8 - rank);
-            int pawnBonus = (relativeRank * relativeRank) * EvalWeights::PASSED_PAWN_RANK_SQUARE_MULTIPLIER;
+            int pawnBonus = (relativeRank * relativeRank) * EVAL_TUNING.pawns.passedRankSquareMultiplier;
             uint64_t forwardSq = (color == Color::White) ? (1ULL << (sq + 8)) : (1ULL << (sq - 8));
             uint64_t oppOcc = enemyPawns;
 
             if (forwardSq & oppOcc) {
-                pawnBonus /= EvalWeights::PASSED_PAWN_BLOCKED_DIVISOR;
+                pawnBonus /= EVAL_TUNING.pawns.passedBlockedDivisor;
             }
             bonus += pawnBonus;
         }

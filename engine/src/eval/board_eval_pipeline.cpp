@@ -1,6 +1,7 @@
 #include "board.hpp"
 #include "eval/eval_terms.hpp"
 #include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -16,6 +17,7 @@ constexpr int BISHOP_IDX = static_cast<int>(PieceType::Bishop);
 constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
 constexpr int QUEEN_IDX = static_cast<int>(PieceType::Queen);
 constexpr int KING_IDX = static_cast<int>(PieceType::King);
+constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
 
 } // namespace
 
@@ -50,12 +52,12 @@ constexpr int KING_IDX = static_cast<int>(PieceType::King);
     const int blackBishopsCount = std::popcount(blackBishops);
 
     if (whiteBishopsCount >= 2) {
-        mg += EvalWeights::BISHOP_PAIR_BONUS_MG;
-        eg += EvalWeights::BISHOP_PAIR_BONUS_EG;
+        mg += EVAL_TUNING.bishopPair.middlegame;
+        eg += EVAL_TUNING.bishopPair.endgame;
     }
     if (blackBishopsCount >= 2) {
-        mg -= EvalWeights::BISHOP_PAIR_BONUS_MG;
-        eg -= EvalWeights::BISHOP_PAIR_BONUS_EG;
+        mg -= EVAL_TUNING.bishopPair.middlegame;
+        eg -= EVAL_TUNING.bishopPair.endgame;
     }
 
     const uint64_t whiteOcc = occupancy(Color::White);
@@ -167,15 +169,15 @@ constexpr int KING_IDX = static_cast<int>(PieceType::King);
 
     const int passedWhite = EvalTerms::passedPawnCount(Color::White, whitePawns, blackPawns);
     const int passedBlack = EvalTerms::passedPawnCount(Color::Black, blackPawns, whitePawns);
-    mg += EvalWeights::PASSED_PAWN_COUNT_BONUS_MG * (passedWhite - passedBlack);
-    eg += EvalWeights::PASSED_PAWN_COUNT_BONUS_EG * (passedWhite - passedBlack);
+    mg += EVAL_TUNING.pawns.passedCountBonusMg * (passedWhite - passedBlack);
+    eg += EVAL_TUNING.pawns.passedCountBonusEg * (passedWhite - passedBlack);
 
     const int whitePassed = EvalTerms::passedPawnBonus(Color::White, whitePawns, blackPawns);
     const int blackPassed = EvalTerms::passedPawnBonus(Color::Black, blackPawns, whitePawns);
     mg += whitePassed;
     mg -= blackPassed;
-    eg += EvalWeights::PASSED_PAWN_EG_MULTIPLIER * whitePassed;
-    eg -= EvalWeights::PASSED_PAWN_EG_MULTIPLIER * blackPassed;
+    eg += EVAL_TUNING.pawns.passedEgMultiplier * whitePassed;
+    eg -= EVAL_TUNING.pawns.passedEgMultiplier * blackPassed;
 
     const int whiteTrapped = EvalTerms::trappedRookPenalty(Color::White, whiteRooks, m_bitboards[WHITE_IDX][KING_IDX]);
     const int blackTrapped = EvalTerms::trappedRookPenalty(Color::Black, blackRooks, m_bitboards[BLACK_IDX][KING_IDX]);
@@ -211,10 +213,10 @@ constexpr int KING_IDX = static_cast<int>(PieceType::King);
     const int blackMaterial = EvalTerms::endgameMaterialValue(blackPawns, blackKnights, blackBishops, blackRooks, blackQueens);
     const int materialAdvantage = whiteMaterial - blackMaterial;
 
-    if (clampedPhase <= EvalWeights::LATE_ENDGAME_PHASE_MAX) {
-        if (eg > EvalWeights::MOP_UP_EG_MARGIN && materialAdvantage >= EvalWeights::MOP_UP_MATERIAL_MARGIN) {
+    if (clampedPhase <= EVAL_TUNING.endgame.latePhaseMax) {
+        if (eg > EVAL_TUNING.endgame.mopUpEgMargin && materialAdvantage >= EVAL_TUNING.endgame.mopUpMaterialMargin) {
             eg += EvalTerms::mopUpEval(whiteKingSquare, blackKingSquare);
-        } else if (eg < -EvalWeights::MOP_UP_EG_MARGIN && materialAdvantage <= -EvalWeights::MOP_UP_MATERIAL_MARGIN) {
+        } else if (eg < -EVAL_TUNING.endgame.mopUpEgMargin && materialAdvantage <= -EVAL_TUNING.endgame.mopUpMaterialMargin) {
             eg -= EvalTerms::mopUpEval(blackKingSquare, whiteKingSquare);
         }
     }
@@ -241,7 +243,7 @@ constexpr int KING_IDX = static_cast<int>(PieceType::King);
         blackQueens
     );
 
-    score = (score * lowMaterialScale) / EvalWeights::TAPER_SCALE;
+    score = (score * lowMaterialScale) / EVAL_TUNING.endgame.taperScale;
 
     return score;
 }

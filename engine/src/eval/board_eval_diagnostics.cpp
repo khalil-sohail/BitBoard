@@ -1,6 +1,7 @@
 #include "board.hpp"
 #include "eval/eval_terms.hpp"
 #include "eval/eval_weights.hpp"
+#include "tuning/generated_tuning_values.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -17,6 +18,7 @@ constexpr int BISHOP_IDX = static_cast<int>(PieceType::Bishop);
 constexpr int ROOK_IDX = static_cast<int>(PieceType::Rook);
 constexpr int QUEEN_IDX = static_cast<int>(PieceType::Queen);
 constexpr int KING_IDX = static_cast<int>(PieceType::King);
+constexpr const auto& EVAL_TUNING = Tuning::Generated::VALUES.evaluation;
 
 } // namespace
 
@@ -68,12 +70,12 @@ void Board::printEvalBreakdown() const {
     int bishopPairMg = 0;
     int bishopPairEg = 0;
     if (whiteBishopsCount >= 2) {
-        bishopPairMg += EvalWeights::BISHOP_PAIR_BONUS_MG;
-        bishopPairEg += EvalWeights::BISHOP_PAIR_BONUS_EG;
+        bishopPairMg += EVAL_TUNING.bishopPair.middlegame;
+        bishopPairEg += EVAL_TUNING.bishopPair.endgame;
     }
     if (blackBishopsCount >= 2) {
-        bishopPairMg -= EvalWeights::BISHOP_PAIR_BONUS_MG;
-        bishopPairEg -= EvalWeights::BISHOP_PAIR_BONUS_EG;
+        bishopPairMg -= EVAL_TUNING.bishopPair.middlegame;
+        bishopPairEg -= EVAL_TUNING.bishopPair.endgame;
     }
     mg += bishopPairMg;
     eg += bishopPairEg;
@@ -203,8 +205,8 @@ void Board::printEvalBreakdown() const {
     const int passedWhite = EvalTerms::passedPawnCount(Color::White, whitePawns, blackPawns);
     const int passedBlack = EvalTerms::passedPawnCount(Color::Black, blackPawns, whitePawns);
     const int passedCountDelta = passedWhite - passedBlack;
-    const int passedCountMg = EvalWeights::PASSED_PAWN_COUNT_BONUS_MG * passedCountDelta;
-    const int passedCountEg = EvalWeights::PASSED_PAWN_COUNT_BONUS_EG * passedCountDelta;
+    const int passedCountMg = EVAL_TUNING.pawns.passedCountBonusMg * passedCountDelta;
+    const int passedCountEg = EVAL_TUNING.pawns.passedCountBonusEg * passedCountDelta;
     mg += passedCountMg;
     eg += passedCountEg;
     printTerm("passed_count", passedCountMg, passedCountEg);
@@ -212,7 +214,7 @@ void Board::printEvalBreakdown() const {
     const int whitePassed = EvalTerms::passedPawnBonus(Color::White, whitePawns, blackPawns);
     const int blackPassed = EvalTerms::passedPawnBonus(Color::Black, blackPawns, whitePawns);
     const int passedPathMg = whitePassed - blackPassed;
-    const int passedPathEg = EvalWeights::PASSED_PAWN_EG_MULTIPLIER * (whitePassed - blackPassed);
+    const int passedPathEg = EVAL_TUNING.pawns.passedEgMultiplier * (whitePassed - blackPassed);
     mg += passedPathMg;
     eg += passedPathEg;
     printTerm("passed_advancement", passedPathMg, passedPathEg);
@@ -244,10 +246,10 @@ void Board::printEvalBreakdown() const {
     const int blackMaterial = EvalTerms::endgameMaterialValue(blackPawns, blackKnights, blackBishops, blackRooks, blackQueens);
     const int materialAdvantage = whiteMaterial - blackMaterial;
 
-    if (clampedPhase <= EvalWeights::LATE_ENDGAME_PHASE_MAX) {
-        if (eg > EvalWeights::MOP_UP_EG_MARGIN && materialAdvantage >= EvalWeights::MOP_UP_MATERIAL_MARGIN) {
+    if (clampedPhase <= EVAL_TUNING.endgame.latePhaseMax) {
+        if (eg > EVAL_TUNING.endgame.mopUpEgMargin && materialAdvantage >= EVAL_TUNING.endgame.mopUpMaterialMargin) {
             mopUpEg = EvalTerms::mopUpEval(whiteKingSquare, blackKingSquare);
-        } else if (eg < -EvalWeights::MOP_UP_EG_MARGIN && materialAdvantage <= -EvalWeights::MOP_UP_MATERIAL_MARGIN) {
+        } else if (eg < -EVAL_TUNING.endgame.mopUpEgMargin && materialAdvantage <= -EVAL_TUNING.endgame.mopUpMaterialMargin) {
             mopUpEg = -EvalTerms::mopUpEval(blackKingSquare, whiteKingSquare);
         }
     }
@@ -279,8 +281,8 @@ void Board::printEvalBreakdown() const {
         blackQueens
     );
 
-    const int finalScore = (noPawnScaled * lowMaterialScale) / EvalWeights::TAPER_SCALE;
-    std::cout << "low_material_scale=" << lowMaterialScale << "/" << EvalWeights::TAPER_SCALE << "\n";
+    const int finalScore = (noPawnScaled * lowMaterialScale) / EVAL_TUNING.endgame.taperScale;
+    std::cout << "low_material_scale=" << lowMaterialScale << "/" << EVAL_TUNING.endgame.taperScale << "\n";
     std::cout << "final_score=" << finalScore << "\n";
 }
 #endif
