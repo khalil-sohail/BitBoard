@@ -1,0 +1,65 @@
+{
+  "allowedSourceProfileKinds": [
+    "candidate"
+  ],
+  "blockDevelopmentOnly": true,
+  "canonicalProfileIdTemplate": "builtin-default-{releaseId}",
+  "humanApproval": {
+    "expectedCandidateHashRequired": true,
+    "expectedStagedHashRequired": true,
+    "explicitApproveFlagRequired": true
+  },
+  "matchValidation": {
+    "allowedAcceptanceDecisions": [
+      "accepted"
+    ],
+    "maximumCrashes": 0,
+    "maximumFlags": 0,
+    "maximumIllegalMoves": 0,
+    "maximumProtocolFailures": 0,
+    "minimumGames": 1000,
+    "requireColorReversal": true,
+    "requireStartingPositionSuiteChecksum": true,
+    "requireTimeControl": true,
+    "schemaVersion": 1
+  },
+  "policyVersion": 1,
+  "regressionSuites": [
+    "engine_tests",
+    "alternate_header_tests",
+    "tuning_header_tests",
+    "uci_identity_tests",
+    "mate_telemetry_tests",
+    "time_policy_safety_tests",
+    "fair_play_integration_tests",
+    "opening_book_integration_tests",
+    "website_server_tests",
+    "website_lint",
+    "website_typecheck",
+    "website_production_build"
+  ],
+  "requireHumanApproval": true,
+  "requirePromotionEligible": true,
+  "requiredGates": [
+    "schema_validation",
+    "artifact_integrity",
+    "ancestry_validation",
+    "deterministic_generation",
+    "isolated_build",
+    "candidate_binary_identity",
+    "evaluation_validation",
+    "search_validation",
+    "time_policy_validation",
+    "protocol_regression",
+    "fair_play_regression",
+    "opening_book_integration",
+    "match_validation"
+  ],
+  "rollback": {
+    "requireBinaryIdentity": true,
+    "requireCanonicalHeaderChecksum": true,
+    "requireCanonicalProfileChecksum": true,
+    "requireSnapshotBeforeReplacement": true
+  },
+  "schemaVersion": 1
+}

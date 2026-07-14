@@ -1,4 +1,4 @@
-.PHONY: verify verify-engine verify-website
+.PHONY: verify verify-engine verify-website tuning-promotion-inspect tuning-promotion-prepare tuning-promotion-verify tuning-promotion-promote tuning-promotion-rollback engine-release
 
 verify: verify-engine verify-website
 
@@ -15,3 +15,35 @@ verify-website:
 	cd website && npm run test:server
 	@printf '\n==> Website production build\n'
 	cd website && npm run build
+
+tuning-promotion-inspect:
+	@test -n "$(CANDIDATE)" || (echo "CANDIDATE is required" >&2; exit 2)
+	.venv/bin/python tools/tuning/profile_promotion.py inspect --candidate "$(CANDIDATE)"
+
+tuning-promotion-prepare:
+	@test -n "$(CANDIDATE)" || (echo "CANDIDATE is required" >&2; exit 2)
+	@test -n "$(RELEASE_ID)" || (echo "RELEASE_ID is required" >&2; exit 2)
+	.venv/bin/python tools/tuning/profile_promotion.py prepare --candidate "$(CANDIDATE)" --release-id "$(RELEASE_ID)"
+
+tuning-promotion-verify:
+	@test -n "$(PROMOTION)" || (echo "PROMOTION is required" >&2; exit 2)
+	.venv/bin/python tools/tuning/profile_promotion.py verify --promotion "$(PROMOTION)"
+
+tuning-promotion-promote:
+	@test -n "$(PROMOTION)" || (echo "PROMOTION is required" >&2; exit 2)
+	@test -n "$(EXPECTED_CANDIDATE_HASH)" || (echo "EXPECTED_CANDIDATE_HASH is required" >&2; exit 2)
+	@test -n "$(EXPECTED_STAGED_HASH)" || (echo "EXPECTED_STAGED_HASH is required" >&2; exit 2)
+	@test "$(APPROVE)" = "1" || (echo "APPROVE=1 is required" >&2; exit 2)
+	.venv/bin/python tools/tuning/profile_promotion.py promote --promotion "$(PROMOTION)" --expected-candidate-hash "$(EXPECTED_CANDIDATE_HASH)" --expected-staged-hash "$(EXPECTED_STAGED_HASH)" --approve
+
+tuning-promotion-rollback:
+	@test -n "$(PROMOTION)" || (echo "PROMOTION is required" >&2; exit 2)
+	@test "$(APPROVE)" = "1" || (echo "APPROVE=1 is required" >&2; exit 2)
+	.venv/bin/python tools/tuning/profile_promotion.py rollback --promotion "$(PROMOTION)" --approve
+
+engine-release:
+	@test -n "$(RELEASE_ID)" || (echo "RELEASE_ID is required" >&2; exit 2)
+	@test -n "$(PROFILE)" || (echo "PROFILE is required" >&2; exit 2)
+	@mkdir -p tuning/promotion/manual-$(RELEASE_ID)/staged
+	.venv/bin/python tools/tuning/generate_tuning_header.py --profile "$(PROFILE)" --registry tuning/parameter-registry.json --output tuning/promotion/manual-$(RELEASE_ID)/staged/generated_tuning_values.hpp
+	$(MAKE) -C engine release-build RELEASE_ID="$(RELEASE_ID)" PROFILE_HEADER="../tuning/promotion/manual-$(RELEASE_ID)/staged/generated_tuning_values.hpp" OUTPUT="../engine/chess-engine-$(RELEASE_ID)"

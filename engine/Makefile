@@ -64,4 +64,14 @@ candidate-build:
 	@mkdir -p "$(dir $(CANDIDATE_OUTPUT))"
 	$(CXX) $(CXXFLAGS) -DBITBOARD_TUNING_HEADER='"$(abspath $(CANDIDATE_HEADER))"' $(SRCS) $(LDLIBS) -o "$(CANDIDATE_OUTPUT)"
 
-.PHONY: all clean fclean re test tuning-header-test print-config candidate-build
+release-build:
+	@test -n "$(RELEASE_ID)" || (echo "RELEASE_ID is required" >&2; exit 2)
+	@test -n "$(PROFILE_HEADER)" || (echo "PROFILE_HEADER is required" >&2; exit 2)
+	@test -n "$(OUTPUT)" || (echo "OUTPUT is required" >&2; exit 2)
+	@printf '%s' "$(RELEASE_ID)" | grep -Eq '^[a-z0-9][a-z0-9.-]*$$' || (echo "invalid RELEASE_ID" >&2; exit 2)
+	@case "$(RELEASE_ID)" in *..*|*.) echo "invalid RELEASE_ID" >&2; exit 2;; esac
+	@case "$(notdir $(OUTPUT))" in *"$(RELEASE_ID)"*) ;; *) echo "OUTPUT executable name must include RELEASE_ID" >&2; exit 2;; esac
+	@mkdir -p "$(dir $(OUTPUT))"
+	$(CXX) $(CXXFLAGS) -DBITBOARD_TUNING_HEADER='"$(abspath $(PROFILE_HEADER))"' $(SRCS) $(LDLIBS) -o "$(OUTPUT)"
+
+.PHONY: all clean fclean re test tuning-header-test print-config candidate-build release-build
