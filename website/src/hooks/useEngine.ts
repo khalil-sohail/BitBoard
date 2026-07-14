@@ -5,7 +5,7 @@ import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-respo
 import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
 import type { SearchLimit } from '../lib/engine-protocol';
 
-type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'disconnected' | 'session_expired' | 'error';
+type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'result_ready' | 'disconnected' | 'session_expired' | 'error';
 
 export interface SendMoveOptions {
   /** Remaining white clock time in ms (0 = no time control). */
@@ -35,7 +35,6 @@ export function useEngine() {
   const [status, setReactStatus] = useState<ConnectionStatus>('disconnected');
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [terminalCompletion, setTerminalCompletion] = useState<EngineTerminalCompletion | null>(null);
-  const [bestMove, setBestMove] = useState<string | null>(null);
   const [bestMoveResult, setBestMoveResult] = useState<EngineBestMoveResult | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const nextRequestIdRef = useRef<EngineRequestId>(1);
@@ -43,7 +42,13 @@ export function useEngine() {
   const activeRootFenRef = useRef<string | null>(null);
   const activePurposeRef = useRef<SearchPurpose | null>(null);
   const activeLimitRef = useRef<SearchLimit | null>(null);
+  const activePositionKeyRef = useRef<string | null>(null);
+  const activeSessionGenerationRef = useRef<number | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const activePositionFenRef = useRef<string | null>(null);
   const [searchStartedRequestId, setSearchStartedRequestId] = useState<EngineRequestId | null>(null);
+  const [searchStartedPositionKey, setSearchStartedPositionKey] = useState<string | null>(null);
+  const [clockStopSignal, setClockStopSignal] = useState(0);
 
   // Track state internally to avoid stale closures in WS message handlers
   const stateRef = useRef({
@@ -70,10 +75,14 @@ export function useEngine() {
     activeRootFenRef.current = null;
     activePurposeRef.current = null;
     activeLimitRef.current = null;
-    setBestMove(null);
     setBestMoveResult(null);
     setTerminalCompletion(null);
     setSearchStartedRequestId(null);
+    activePositionKeyRef.current = null;
+    activeSessionGenerationRef.current = null;
+    activeSessionIdRef.current = null;
+    activePositionFenRef.current = null;
+    setSearchStartedPositionKey(null);
   }, []);
 
   const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose, limit?: SearchLimit) => {
@@ -81,7 +90,6 @@ export function useEngine() {
     activeRootFenRef.current = rootFen;
     activePurposeRef.current = purpose;
     activeLimitRef.current = limit ?? null;
-    setBestMove(null);
     setBestMoveResult(null);
     setEngineInfo(null);
     setTerminalCompletion(null);
@@ -106,7 +114,7 @@ export function useEngine() {
         switch (data.type) {
           case 'ready':
             stateRef.current.isWaitingForNewGameReady = false;
-            if (stateRef.current.status !== 'thinking' && stateRef.current.status !== 'analyzing') {
+            if (stateRef.current.status !== 'thinking' && stateRef.current.status !== 'analyzing' && stateRef.current.status !== 'result_ready') {
               setStatus('idle');
             }
             setQueuePosition(null);
@@ -117,7 +125,12 @@ export function useEngine() {
             break;
           case 'search-started':
             if (shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              activePositionKeyRef.current = data.positionKey ?? null;
+              activeSessionGenerationRef.current = data.sessionGeneration ?? null;
+              activeSessionIdRef.current = data.sessionId ?? null;
+              activePositionFenRef.current = data.positionFen ?? null;
               setSearchStartedRequestId(data.requestId);
+              setSearchStartedPositionKey(data.positionKey ?? null);
             }
             break;
           case 'info':
@@ -139,21 +152,29 @@ export function useEngine() {
             break;
           case 'bestmove':
             if (!stateRef.current.isWaitingForNewGameReady &&
-                shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+                shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId) &&
+                (data.terminal || (activePositionKeyRef.current === data.positionKey &&
+                activeSessionGenerationRef.current === data.sessionGeneration &&
+                activeSessionIdRef.current === data.sessionId &&
+                activePositionFenRef.current === data.positionFen))) {
               const purpose = activePurposeRef.current ?? undefined;
               const rootFen = activeRootFenRef.current ?? undefined;
               const result: EngineBestMoveResult = {
                 requestId: data.requestId,
                 rootFen,
+                positionFen: data.positionFen,
+                positionKey: data.positionKey,
+                sessionId: data.sessionId,
+                sessionGeneration: data.sessionGeneration,
+                positionSequence: data.positionSequence,
+                expectedSide: data.expectedSide,
                 purpose,
                 move: data.move,
                 receivedAt: data.receivedAt,
                 engineDeadlineAt: data.engineDeadlineAt,
               };
               setBestMoveResult(result);
-              if (activePurposeRef.current === 'opponent') {
-                setBestMove(data.move);
-              }
+              setClockStopSignal(value => value + 1);
               if (data.move === null && data.terminal) {
                 setTerminalCompletion({
                   requestId: data.requestId,
@@ -161,10 +182,33 @@ export function useEngine() {
                   purpose,
                   terminal: data.terminal,
                 });
+                activeRequestIdRef.current = null;
+                activeRootFenRef.current = null;
+                activePurposeRef.current = null;
+                activeLimitRef.current = null;
+                setSearchStartedRequestId(null);
+                setStatus('idle');
+              } else {
+                setStatus('result_ready');
               }
-              activeRequestIdRef.current = null;
-              activePurposeRef.current = null;
-              activeLimitRef.current = null;
+            }
+            break;
+          case 'search-retrying':
+            if (shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              activePositionKeyRef.current = null;
+              activeSessionGenerationRef.current = null;
+              activeSessionIdRef.current = null;
+              activePositionFenRef.current = null;
+              setBestMoveResult(null);
+              setSearchStartedRequestId(null);
+              setSearchStartedPositionKey(null);
+              setClockStopSignal(value => value + 1);
+              setStatus('thinking');
+            }
+            break;
+          case 'move-applied':
+            if (shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
+              invalidateActiveRequest();
               setStatus('idle');
             }
             break;
@@ -181,6 +225,7 @@ export function useEngine() {
             if (data.requestId === undefined ||
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               invalidateActiveRequest();
+              setClockStopSignal(value => value + 1);
               setStatus('error');
               addToast(data.message || 'Engine error occurred', 'error');
             }
@@ -217,7 +262,6 @@ export function useEngine() {
    */
   const sendMove = useCallback((
     fen: string,
-    moves: string[],
     options: SendMoveOptions,
   ) => {
     if (ws.current?.readyState === WebSocket.OPEN && stateRef.current.status === 'idle') {
@@ -246,7 +290,9 @@ export function useEngine() {
         requestId,
         purpose: 'opponent',
         fen,
-        moves,
+        // The FEN is the complete authoritative position. Replaying the game
+        // history on top of it was the Fair Play desynchronization bug.
+        moves: [],
         wtime:      options.wtime      ?? 0,
         btime:      options.btime      ?? 0,
         winc:       options.winc       ?? 0,
@@ -347,14 +393,30 @@ export function useEngine() {
     return null;
   }, [activateRequest, allocateRequestId, setStatus]);
 
+  const acknowledgeBestMove = useCallback((params: {
+    requestId: number;
+    positionKey: string;
+    applied: boolean;
+    oldFen: string;
+    newFen?: string;
+    failureReason?: string;
+  }) => {
+    if (!shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, params.requestId)) return false;
+    if (activePositionKeyRef.current !== params.positionKey) return false;
+    if (ws.current?.readyState !== WebSocket.OPEN) return false;
+    ws.current.send(JSON.stringify({ type: 'resultAck', ...params }));
+    return true;
+  }, []);
+
   return {
     status,
     engineInfo,
-    bestMove,
     bestMoveResult,
     terminalCompletion,
     queuePosition,
     searchStartedRequestId,
+    searchStartedPositionKey,
+    clockStopSignal,
     sendMove,
     newGame,
     reconnect,
@@ -363,6 +425,7 @@ export function useEngine() {
     stopEngine,
     startAnalysis,
     releaseSession,
+    acknowledgeBestMove,
     invalidateActiveRequest,
   };
 }

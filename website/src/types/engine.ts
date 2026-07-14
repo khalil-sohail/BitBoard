@@ -39,6 +39,12 @@ export interface EngineTerminalCompletion {
 export interface EngineBestMoveResult {
   requestId: number;
   rootFen?: string;
+  positionFen?: string;
+  positionKey?: string;
+  sessionId?: string;
+  sessionGeneration?: number;
+  positionSequence?: number;
+  expectedSide?: PlayerColor;
   purpose?: SearchPurpose;
   move: string | null;
   receivedAt?: number;

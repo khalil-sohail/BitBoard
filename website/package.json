@@ -23,6 +23,8 @@
     "typecheck": "tsc --noEmit --pretty false",
     "test:queue": "ts-node --project tsconfig.server.json src/lib/engine-session.queue.test.ts",
     "test:protocol": "ts-node --project tsconfig.server.json src/lib/engine-session.protocol.test.ts",
+    "test:fair-play": "ts-node --project tsconfig.server.json src/lib/fair-play-engine.test.ts",
+    "test:fair-play-integration": "ts-node --project tsconfig.server.json src/lib/fair-play-engine.integration.test.ts",
     "test:engine-filter": "ts-node --project tsconfig.server.json src/lib/engine-response-filter.test.ts",
     "test:evaluation": "ts-node --project tsconfig.server.json src/lib/engine-evaluation.test.ts",
     "test:difficulty": "ts-node --project tsconfig.server.json src/lib/engine-difficulty.test.ts",
@@ -35,7 +37,7 @@
     "test:board-arrows": "ts-node --project tsconfig.server.json src/lib/board-arrows.test.ts",
     "test:ownership": "ts-node --project tsconfig.server.json src/components/engine-ownership.test.ts",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:fair-play && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

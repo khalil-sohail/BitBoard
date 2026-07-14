@@ -109,7 +109,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { status, engineInfo, bestMove, bestMoveResult, terminalCompletion, queuePosition, searchStartedRequestId, sendMove, newGame, startAnalysis, stopEngine, releaseSession, setEngineOption } = useEngine();
+  const { status, engineInfo, bestMoveResult, terminalCompletion, queuePosition, searchStartedRequestId, searchStartedPositionKey, clockStopSignal, sendMove, newGame, startAnalysis, stopEngine, releaseSession, acknowledgeBestMove, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -133,7 +133,7 @@ export default function Home() {
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const appliedOwnBookRef = useRef<boolean | null>(null);
-  const lastClockSearchStartRef = useRef<number | null>(null);
+  const lastClockSearchPositionRef = useRef<string | null>(null);
   const appliedBestMoveRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -260,7 +260,7 @@ export default function Home() {
       status === 'error'
     ) {
       clock.stopClock();
-      lastClockSearchStartRef.current = null;
+      lastClockSearchPositionRef.current = null;
     }
   }, [clock, hasTC, status]);
 
@@ -334,7 +334,7 @@ export default function Home() {
         dispatchTraining({ type: 'ENGINE_SEARCH_STARTED' });
       }
       const policy = resolvePolicy('opponent');
-      sendMove(fen, uciHistory, {
+      sendMove(fen, {
         difficulty,
         searchLimit: policy.limit,
         multiPv: policy.multiPv,
@@ -350,6 +350,7 @@ export default function Home() {
   // Queue/reconnect policy: the engine clock is paused until the backend
   // confirms that the matching UCI search actually started.
   useEffect(() => {
+    if (!searchStartedPositionKey || lastClockSearchPositionRef.current === searchStartedPositionKey) return;
     if (!shouldStartEngineClockForSearch({
       hasTimeControl: hasTC,
       gameStatus,
@@ -358,12 +359,19 @@ export default function Home() {
       turn,
       engineColor,
       searchStartedRequestId,
-      lastStartedRequestId: lastClockSearchStartRef.current,
+      // Position identity, rather than requestId, distinguishes a controlled
+      // retry using a fresh engine generation.
+      lastStartedRequestId: null,
     })) return;
 
-    lastClockSearchStartRef.current = searchStartedRequestId;
+    lastClockSearchPositionRef.current = searchStartedPositionKey;
     clock.startClock(engineColor);
-  }, [clock, effectiveGameOver, engineColor, gameStatus, hasTC, searchStartedRequestId, timeoutColor, turn]);
+  }, [clock, effectiveGameOver, engineColor, gameStatus, hasTC, searchStartedPositionKey, searchStartedRequestId, timeoutColor, turn]);
+
+  useEffect(() => {
+    if (clockStopSignal === 0) return;
+    clock.stopClock();
+  }, [clock, clockStopSignal]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -533,8 +541,6 @@ export default function Home() {
   }, [gameMode, trainingState.status]);
 
   useEffect(() => {
-    let isMounted = true;
-
     if (!engineAutoEnabled) return;
     const moveResult = bestMoveResult;
     const backendTimed = moveResult?.receivedAt !== undefined && moveResult.engineDeadlineAt !== undefined;
@@ -543,10 +549,15 @@ export default function Home() {
     if (!isGameActive && !timeoutOnlyCompletion) return;
     if (!shouldAcceptEngineBestMove({ gameStatus, timeoutColor }) && !(timeoutOnlyCompletion && backendTimely)) return;
     if (moveResult?.move && turn === engineColor) {
+      const normalizedCurrentFen = (() => {
+        try { return new Chess(fen).fen(); } catch { return null; }
+      })();
       const rejectionReason =
         appliedBestMoveRequestRef.current === moveResult.requestId ? 'duplicate-request' :
         !backendTimely ? 'flag-fell-before-backend-result' :
-        moveResult.rootFen !== undefined && moveResult.rootFen !== fen ? 'fen-mismatch' :
+        !moveResult.positionKey ? 'missing-position-identity' :
+        moveResult.positionFen !== normalizedCurrentFen ? 'fen-mismatch' :
+        moveResult.expectedSide !== turn ? 'side-to-move-mismatch' :
         null;
 
       if (process.env.NODE_ENV !== 'production') {
@@ -564,12 +575,24 @@ export default function Home() {
         });
       }
 
-      if (rejectionReason !== null) return;
+      if (rejectionReason !== null) {
+        clock.stopClock();
+        if (moveResult.positionKey) {
+          acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey, applied: false, oldFen: fen, failureReason: rejectionReason });
+        }
+        setGameStatus('completed');
+        return;
+      }
       appliedBestMoveRequestRef.current = moveResult.requestId;
       const acceptedMove = moveResult.move;
 
+      // Receipt transfers clock ownership away from the search immediately;
+      // application is then acknowledged separately.
+      clock.stopClock();
+
       if (ignoreStaleBestMoveRef.current) {
         ignoreStaleBestMoveRef.current = false;
+        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'cancelled_request' });
         return;
       }
       if (isWaitingForStop) {
@@ -578,69 +601,77 @@ export default function Home() {
           stopTimeoutRef.current = null;
         }
         queueMicrotask(() => {
-          if (isMounted) {
-            setIsWaitingForStop(false);
-          }
+          setIsWaitingForStop(false);
         });
-        return () => { isMounted = false; };
+        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'search_stopped' });
+        return;
       }
 
-      queueMicrotask(() => {
-        if (!isMounted) return;
-        if (!backendTimely) return;
+      const from      = acceptedMove.substring(0, 2);
+      const to        = acceptedMove.substring(2, 4);
+      const promotion = acceptedMove.length === 5 ? acceptedMove[4] : undefined;
+      let terminalAfterMove = false;
+      let expectedNewFen: string | undefined;
+      try {
+        const preview = new Chess(fen);
+        const applied = preview.move({ from, to, promotion });
+        if (!applied) throw new Error('illegal move');
+        terminalAfterMove = preview.isGameOver();
+        expectedNewFen = preview.fen();
+      } catch {
+        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'illegal_move_for_position' });
+        queueMicrotask(() => setGameStatus('completed'));
+        return;
+      }
+      const success = makeMove({ from, to, promotion });
 
-        const from      = acceptedMove.substring(0, 2);
-        const to        = acceptedMove.substring(2, 4);
-        const promotion = acceptedMove.length === 5 ? acceptedMove[4] : undefined;
-        let terminalAfterMove = false;
-        try {
-          const preview = new Chess(fen);
-          const applied = preview.move({ from, to, promotion });
-          terminalAfterMove = Boolean(applied && preview.isGameOver());
-        } catch {
-          terminalAfterMove = false;
-        }
-        const success   = makeMove({ from, to, promotion });
-
-        if (success) {
-          setTimeoutColor(null);
-          if (timeoutOnlyCompletion) {
-            setGameStatus('active');
-          }
-          if (gameMode === 'training') {
-            dispatchTraining({ type: 'ENGINE_MOVE_RECEIVED' });
-          }
-          const transition = clockTransitionAfterLegalMove({
-            hasTimeControl: hasTC,
-            mover: engineColor,
-            nextSide: orientation,
-            isTerminal: terminalAfterMove,
-          });
-
-          if (transition.stopClock) {
-            clock.stopClock();
-            if (transition.incrementSide) {
-              clock.applyIncrement(transition.incrementSide);
+      if (success && expectedNewFen) {
+          acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: true, oldFen: fen, newFen: expectedNewFen });
+          queueMicrotask(() => {
+            setTimeoutColor(null);
+            if (timeoutOnlyCompletion) {
+              setGameStatus('active');
             }
-          }
+            if (gameMode === 'training') {
+              dispatchTraining({ type: 'ENGINE_MOVE_RECEIVED' });
+            }
+            const transition = clockTransitionAfterLegalMove({
+              hasTimeControl: hasTC,
+              mover: engineColor,
+              nextSide: orientation,
+              isTerminal: terminalAfterMove,
+            });
 
-          if (transition.completeGame) {
-            setGameStatus('completed');
-            return;
-          }
+            if (transition.stopClock) {
+              clock.stopClock();
+              if (transition.incrementSide) {
+                clock.applyIncrement(transition.incrementSide);
+              }
+            }
 
-          if (transition.nextActiveSide) {
-            clock.startClock(transition.nextActiveSide);
-          }
+            if (transition.completeGame) {
+              setGameStatus('completed');
+              return;
+            }
 
-        }
-      });
+            if (transition.nextActiveSide) {
+              clock.startClock(transition.nextActiveSide);
+            }
+          });
+      } else {
+        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'move_application_failed' });
+        queueMicrotask(() => setGameStatus('completed'));
+      }
     }
-
-    return () => { isMounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bestMoveResult, bestMove, turn, makeMove, moveHistory.length, recordPositionEval,
+  }, [bestMoveResult, turn, makeMove, moveHistory.length, recordPositionEval,
       setMoveGrade, engineColor, engineAutoEnabled, isGameActive, gameStatus, gameMode, timeoutColor, fen]);
+
+  useEffect(() => {
+    if (!engineAutoEnabled || turn !== engineColor || status !== 'error') return;
+    clock.stopClock();
+    queueMicrotask(() => setGameStatus('completed'));
+  }, [clock, engineAutoEnabled, engineColor, status, turn]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {

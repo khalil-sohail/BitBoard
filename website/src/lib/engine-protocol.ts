@@ -84,6 +84,16 @@ export interface ReleaseSessionMessage {
   type: 'releaseSession';
 }
 
+export interface ResultAckMessage {
+  type: 'resultAck';
+  requestId: number;
+  positionKey: string;
+  applied: boolean;
+  oldFen: string;
+  newFen?: string;
+  failureReason?: string;
+}
+
 export type EngineOptionName = 'Hash' | 'OwnBook' | 'BookDepth' | 'MultiPV' | 'BookSelection' | 'BookSelectionTopN' | 'BookSeed';
 
 export interface SetOptionMessage {
@@ -99,6 +109,7 @@ export type ClientMessage =
   | StopMessage
   | NewGameMessage
   | ReleaseSessionMessage
+  | ResultAckMessage
   | SetOptionMessage;
 
 export type SearchLimit =
@@ -577,6 +588,34 @@ function validateSetOptionMessage(record: Record<string, unknown>): ParseResult<
   return err('INVALID_OPTION', 'Unsupported engine option.');
 }
 
+function validateResultAckMessage(record: Record<string, unknown>): ParseResult<ResultAckMessage> {
+  const requestId = validateRequestId(record.requestId);
+  if (requestId.ok === false) return requestId;
+  const positionKey = validateString(record.positionKey, 'positionKey');
+  if (positionKey.ok === false || !/^sha256:[0-9a-f]{64}$/.test(positionKey.value)) {
+    return err('INVALID_MESSAGE', 'positionKey is invalid.');
+  }
+  const oldFen = validateFenString(record.oldFen);
+  if (oldFen.ok === false) return oldFen;
+  if (typeof record.applied !== 'boolean') return err('INVALID_MESSAGE', 'applied must be a boolean.');
+  let newFen: string | undefined;
+  if (record.newFen !== undefined) {
+    const parsed = validateFenString(record.newFen);
+    if (parsed.ok === false) return parsed;
+    newFen = parsed.value;
+  }
+  if (record.applied === true && newFen === undefined) {
+    return err('INVALID_MESSAGE', 'newFen is required when applied is true.');
+  }
+  let failureReason: string | undefined;
+  if (record.failureReason !== undefined) {
+    const parsed = validateString(record.failureReason, 'failureReason');
+    if (parsed.ok === false) return parsed;
+    failureReason = parsed.value;
+  }
+  return ok({ type: 'resultAck', requestId: requestId.value, positionKey: positionKey.value, applied: record.applied, oldFen: oldFen.value, ...(newFen ? { newFen } : {}), ...(failureReason ? { failureReason } : {}) });
+}
+
 export function validateClientMessage(value: unknown): ParseResult<ClientMessage> {
   if (!isRecord(value)) {
     return err('INVALID_MESSAGE', 'Message must be a JSON object.');
@@ -603,6 +642,8 @@ export function validateClientMessage(value: unknown): ParseResult<ClientMessage
       return validateEmptyMessage(value, 'newgame');
     case 'releaseSession':
       return validateEmptyMessage(value, 'releaseSession');
+    case 'resultAck':
+      return validateResultAckMessage(value);
     case 'setoption':
       return validateSetOptionMessage(value);
     default:

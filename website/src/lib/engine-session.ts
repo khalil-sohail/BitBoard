@@ -6,6 +6,8 @@ import fs from 'fs';
 import { performance } from 'perf_hooks';
 import { parseUciInfo, parseBestMove } from './uci-parser';
 import { classifyTerminalPosition } from './engine-terminal';
+import { createPositionIdentity, resolveExactPosition, validateEngineMove } from './fair-play-engine';
+import type { PositionIdentity } from './fair-play-engine';
 import {
   ANALYSIS_MULTIPV,
   ClientMessage,
@@ -47,6 +49,7 @@ type PonderState =
       parentRequestId: number;
       expectedPlayerMove: string;
       expectedMoves: string[];
+      expectedPositionFen: string;
       searchContext: PonderSearchContext;
     }
   | {
@@ -54,6 +57,7 @@ type PonderState =
       nextRequestId: number;
       expectedPlayerMove: string;
       expectedMoves: string[];
+      expectedPositionFen: string;
       searchContext: PonderSearchContext;
     }
   | {
@@ -78,6 +82,18 @@ interface ActiveSearch {
   generatedGoCommand?: string;
   startedAt: number;
   deadlineAt?: number;
+  position: PositionIdentity;
+  positionCommand: string;
+  operation: Extract<PendingOperation, { type: 'search' }>;
+}
+
+interface AwaitingMoveApplication {
+  requestId: number;
+  position: PositionIdentity;
+  move: string | null;
+  expectedNewFen: string;
+  receivedAt: number;
+  timer: NodeJS.Timeout;
 }
 
 interface ActiveSearchWatchdog {
@@ -107,6 +123,7 @@ type PendingOperation =
       openingSelection?: OpeningSelectionConfiguration;
       ponderAllowed: boolean;
       ponderContext: PonderSearchContext | null;
+      retryCount?: number;
     }
   | { type: 'newgame' }
   | { type: 'position'; startFen: string; moves: string[] }
@@ -131,6 +148,10 @@ interface EngineSession {
   requestedOwnBook: boolean;
   pendingBookResult: PendingBookResult | null;
   searchGeneration: number;
+  sessionGeneration: number;
+  positionSequence: number;
+  awaitingMoveApplication: AwaitingMoveApplication | null;
+  lastAppliedOpponentFen: string | null;
   lineBuffer: string;
   watchdog: ActiveSearchWatchdog | null;
   suppressExitError: boolean;
@@ -173,6 +194,7 @@ export class EnginePoolManager {
   private stopAckTimeoutMs: number;
   private depthSearchWatchdogMs: number;
   private spawnEngineProcess: (enginePath: string, args: string[], options?: SpawnOptions) => ChildProcess;
+  private sessionGenerations = new Map<string, number>();
 
   public constructor(options: EnginePoolOptions = {}) {
     this.maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
@@ -298,7 +320,14 @@ export class EnginePoolManager {
     return process.env.ENGINE_PATH || path.join(process.cwd(), '../engine/chess-engine');
   }
 
-  private spawnEngine(ws: WebSocket, id: string, attachSocketHandlers = true) {
+  private spawnEngine(
+    ws: WebSocket,
+    id: string,
+    attachSocketHandlers = true,
+    recoverySearch?: Extract<PendingOperation, { type: 'search' }>,
+    requestedOwnBook = true,
+    lastAppliedOpponentFen: string | null = null,
+  ) {
     if (!this.isSocketOpen(ws)) {
       return;
     }
@@ -316,6 +345,8 @@ export class EnginePoolManager {
       cwd: path.dirname(enginePath),
     });
 
+    const sessionGeneration = (this.sessionGenerations.get(id) ?? 0) + 1;
+    this.sessionGenerations.set(id, sessionGeneration);
     const session: EngineSession = {
       id,
       process: engineProcess,
@@ -331,9 +362,13 @@ export class EnginePoolManager {
       ponderState: { status: 'idle' },
       activeSearch: null,
       pendingOperation: null,
-      requestedOwnBook: true,
+      requestedOwnBook,
       pendingBookResult: null,
       searchGeneration: 0,
+      sessionGeneration,
+      positionSequence: 0,
+      awaitingMoveApplication: null,
+      lastAppliedOpponentFen,
       lineBuffer: '',
       watchdog: null,
       suppressExitError: false,
@@ -366,14 +401,18 @@ export class EnginePoolManager {
             // ── Initialisation handshake ─────────────────────────────────
             if (trimmed === 'uciok') {
               writeUciCommand(engineProcess.stdin, buildSetOptionCommand('Hash', HASH_SIZE_MB));
-              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('OwnBook', true));
+              writeUciCommand(engineProcess.stdin, buildSetOptionCommand('OwnBook', requestedOwnBook));
               writeUciCommand(engineProcess.stdin, buildSetOptionCommand('BookDepth', 30));
               writeUciCommand(engineProcess.stdin, buildSetOptionCommand('MultiPV', ANALYSIS_MULTIPV));
               writeUciCommand(engineProcess.stdin, buildSetOptionCommand('BookSelection', 'weighted'));
               writeUciCommand(engineProcess.stdin, 'isready');
             } else if (trimmed === 'readyok') {
               isReady = true;
-              this.sendIfOpen(ws, JSON.stringify({ type: 'ready' }));
+              if (recoverySearch) {
+                this.startSearch(session, recoverySearch);
+              } else {
+                this.sendIfOpen(ws, JSON.stringify({ type: 'ready', sessionId: id, sessionGeneration }));
+              }
             }
           } else {
             // ── Normal message dispatch ──────────────────────────────────
@@ -533,24 +572,64 @@ export class EnginePoolManager {
       const receivedAt = Date.now();
       this.clearWatchdog(session, 'search');
       const { bestMove, ponderMove } = parsed;
+      const validation = validateEngineMove(activeSearch.position.normalizedFen, bestMove);
+      if (validation.ok === false) {
+        this.rejectEngineResult(session, activeSearch, bestMove, validation.reason);
+        return;
+      }
       const terminal = bestMove === '0000'
-        ? classifyTerminalPosition(session.startFen, session.uciMoves)
+        ? classifyTerminalPosition(activeSearch.position.normalizedFen, [])
         : undefined;
-      const move = bestMove === '0000' ? null : bestMove;
+      const move = validation.move;
       const ponderPlan = move && activeSearch.ponderAllowed && activeSearch.ponderContext
-        ? buildValidatedPonderPlan(session.startFen, session.uciMoves, move, ponderMove, activeSearch.ponderContext)
+        ? buildValidatedPonderPlan(activeSearch.position.normalizedFen, [], move, ponderMove, activeSearch.ponderContext)
         : null;
       const bookResult = session.pendingBookResult;
 
       session.activeSearch = null;
       session.pendingBookResult = null;
 
+      if (activeSearch.purpose === 'opponent') {
+        const timer = setTimeout(() => {
+          const current = this.active.get(id);
+          if (current !== session || current.awaitingMoveApplication?.requestId !== activeSearch.requestId) return;
+          current.awaitingMoveApplication = null;
+          this.sendIfOpen(current.ws, JSON.stringify({
+            type: 'error',
+            code: 'MOVE_APPLICATION_TIMEOUT',
+            requestId: activeSearch.requestId,
+            failureReason: 'application_timeout',
+            clockStopped: true,
+            message: 'Engine move was not acknowledged by the game state.',
+          }));
+          this.recoverEngineSession(current);
+        }, this.stopAckTimeoutMs);
+        session.awaitingMoveApplication = {
+          requestId: activeSearch.requestId,
+          position: activeSearch.position,
+          move,
+          expectedNewFen: validation.newFen,
+          receivedAt,
+          timer,
+        };
+      }
+
       // Send best move to the frontend
       session.ws.send(JSON.stringify({
         type: 'bestmove',
         requestId: activeSearch.requestId,
+        sessionId: id,
+        sessionGeneration: activeSearch.position.sessionGeneration,
+        positionSequence: activeSearch.position.positionSequence,
+        positionKey: activeSearch.position.key,
+        positionFen: activeSearch.position.normalizedFen,
+        newFen: validation.newFen,
+        expectedSide: activeSearch.position.expectedSide,
         move,
         receivedAt,
+        resultValidated: true,
+        moveApplied: false,
+        clockStopped: true,
         ...(activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: activeSearch.deadlineAt } : {}),
         ...(bookResult && bookResult.move === bestMove
           ? {
@@ -569,6 +648,11 @@ export class EnginePoolManager {
       console.log(`[Engine ${id}] bestmove=${bestMove} ponder=${ponderPlan?.expectedPlayerMove ?? 'none'}`);
 
       if (ponderPlan && session.process.stdin) {
+        const expectedPositionFen = resolveExactPosition(session.startFen, ponderPlan.expectedMoves)?.fen();
+        if (!expectedPositionFen) {
+          session.ponderState = { status: 'idle' };
+          return;
+        }
         console.log(`[Ponder ${id}] Starting ponder on move: ${ponderPlan.expectedPlayerMove}`);
         writeUciCommand(session.process.stdin, buildPositionCommand(session.startFen, ponderPlan.expectedMoves));
         writeUciCommand(session.process.stdin, buildGoCommand(ponderPlan.searchContext, { ponder: true }));
@@ -577,12 +661,13 @@ export class EnginePoolManager {
           parentRequestId: activeSearch.requestId,
           expectedPlayerMove: ponderPlan.expectedPlayerMove,
           expectedMoves: ponderPlan.expectedMoves,
+          expectedPositionFen,
           searchContext: ponderPlan.searchContext,
         };
       } else {
         session.ponderState = { status: 'idle' };
       }
-      this.runPendingOperation(session);
+      if (activeSearch.purpose !== 'opponent') this.runPendingOperation(session);
       return;
     }
 
@@ -616,6 +701,14 @@ export class EnginePoolManager {
 
     // ── move (time-controlled game) ────────────────────────────────────────
     if (data.type === 'move') {
+      if (session.awaitingMoveApplication) {
+        this.sendIfOpen(session.ws, JSON.stringify({
+          type: 'error', code: 'RESULT_NOT_ACKNOWLEDGED', requestId: data.requestId,
+          failureReason: 'duplicate_position_request', clockStopped: true,
+          message: 'The previous engine result must be applied or rejected before another search.',
+        }));
+        return;
+      }
       const moves = data.moves;
       const opponentProfile = getDifficultyProfile(data.difficulty, 'opponent');
       const searchLimit = data.searchLimit ?? searchLimitFromProfile(opponentProfile);
@@ -624,42 +717,39 @@ export class EnginePoolManager {
       const ponderContext = getPonderSearchContext(searchLimit);
       const ponderAllowed = data.ponder === true && ponderContext !== null;
 
-      // Update position shadow
       const startFen = data.fen;
-      session.startFen = startFen;
-      session.uciMoves = moves;
 
       const ps = session.ponderState;
 
       if (ps.status === 'pondering') {
         // The user has made a move while the engine is pondering.
-        // Determine the last move the user played (last element of data.moves).
-        const userMove = moves.length > 0
-          ? moves[moves.length - 1]
-          : null;
-
-        if (!userMove) {
-          // Can't determine user's move — fall back to stop + resync
-          this.stopPonderAndGo(session, 'miss', {
-            type: 'search',
-            requestId: data.requestId,
-            searchMode: 'tc',
-            purpose: 'opponent',
-            startFen,
-            moves,
-            searchLimit,
-            multiPv: targetMultiPv,
-            openingSelection,
-            ponderAllowed,
-            ponderContext,
-          });
-          return;
-        }
-
-        if (userMove === ps.expectedPlayerMove && sameMoveList(moves, ps.expectedMoves)) {
-          console.log(`[Ponder ${id}] HIT — user played predicted ${userMove}`);
+        // Correlate by the complete requested position. This works both for
+        // authoritative current-FEN requests and base-FEN-plus-moves clients.
+        const requestedPosition = resolveExactPosition(startFen, moves);
+        if (requestedPosition?.fen() === ps.expectedPositionFen) {
+          console.log(`[Ponder ${id}] HIT — request matched predicted position after ${ps.expectedPlayerMove}`);
+          const ponderPosition = requestedPosition;
+          if (!ponderPosition) {
+            this.stopPonderAndGo(session, 'miss', {
+              type: 'search', requestId: data.requestId, searchMode: 'tc', purpose: 'opponent',
+              startFen, moves, searchLimit, multiPv: targetMultiPv, openingSelection,
+              ponderAllowed, ponderContext,
+            });
+            return;
+          }
           session.searchGeneration += 1;
-          session.activeSearch = {
+          session.positionSequence += 1;
+          const operation: Extract<PendingOperation, { type: 'search' }> = {
+            type: 'search', requestId: data.requestId, searchMode: 'tc', purpose: 'opponent',
+            startFen: ponderPosition.fen(), moves: [], searchLimit: ps.searchContext,
+            multiPv: targetMultiPv, openingSelection, ponderAllowed, ponderContext,
+          };
+          const position = createPositionIdentity({
+            requestId: data.requestId, sessionId: session.id,
+            sessionGeneration: session.sessionGeneration, positionSequence: session.positionSequence,
+            fen: ponderPosition.fen(),
+          });
+          const adoptedSearch: ActiveSearch = {
             requestId: data.requestId,
             generation: session.searchGeneration,
             state: 'running',
@@ -670,8 +760,12 @@ export class EnginePoolManager {
             searchLimit: ps.searchContext,
             generatedGoCommand: buildGoCommand(ps.searchContext, { ponder: true }),
             startedAt: Date.now(),
-            deadlineAt: deadlineAtForSearch(session.startFen, ps.expectedMoves, ps.searchContext),
+            deadlineAt: deadlineAtForSearch(ponderPosition.fen(), [], ps.searchContext),
+            position,
+            positionCommand: buildPositionCommand(ponderPosition.fen(), []),
+            operation,
           };
+          session.activeSearch = adoptedSearch;
           session.currentDepth = 0;
           session.pvs = [];
           session.pendingBookResult = null;
@@ -680,18 +774,22 @@ export class EnginePoolManager {
             nextRequestId: data.requestId,
             expectedPlayerMove: ps.expectedPlayerMove,
             expectedMoves: ps.expectedMoves,
+            expectedPositionFen: ps.expectedPositionFen,
             searchContext: ps.searchContext,
           };
           writeUciCommand(session.process.stdin, 'ponderhit');
           this.sendIfOpen(session.ws, JSON.stringify({
             type: 'search-started',
             requestId: data.requestId,
-            startedAt: session.activeSearch.startedAt,
-            ...(session.activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: session.activeSearch.deadlineAt } : {}),
+            sessionId: session.id, sessionGeneration: session.sessionGeneration,
+            positionSequence: position.positionSequence, positionKey: position.key,
+            positionFen: position.normalizedFen, expectedSide: position.expectedSide,
+            startedAt: adoptedSearch.startedAt,
+            ...(adoptedSearch.deadlineAt !== undefined ? { engineDeadlineAt: adoptedSearch.deadlineAt } : {}),
           }));
-          this.armSearchWatchdog(session, data.requestId, ps.searchContext, ps.expectedMoves);
+          this.armSearchWatchdog(session, data.requestId, ps.searchContext, []);
         } else {
-          console.log(`[Ponder ${id}] MISS — expected ${ps.expectedPlayerMove}, got ${userMove}`);
+          console.log(`[Ponder ${id}] MISS — request did not match predicted ${ps.expectedPlayerMove} position`);
           this.stopPonderAndGo(session, 'miss', {
             type: 'search',
             requestId: data.requestId,
@@ -778,6 +876,11 @@ export class EnginePoolManager {
       return;
     }
 
+    if (data.type === 'resultAck') {
+      this.acknowledgeMoveApplication(session, data);
+      return;
+    }
+
     // ── setoption ─────────────────────────────────────────────────────────
     if (data.type === 'setoption') {
       this.enqueueControlOperation(session, {
@@ -789,10 +892,97 @@ export class EnginePoolManager {
     }
   }
 
+  private rejectEngineResult(
+    session: EngineSession,
+    activeSearch: ActiveSearch,
+    bestMove: string,
+    failureReason: string,
+  ) {
+    this.clearWatchdog(session, 'search');
+    session.activeSearch = null;
+    session.pendingBookResult = null;
+    const retryCount = activeSearch.operation.retryCount ?? 0;
+    const retryAllowed = activeSearch.purpose === 'opponent' && retryCount < 1;
+    this.sendIfOpen(session.ws, JSON.stringify({
+      type: retryAllowed ? 'search-retrying' : 'error',
+      code: 'ENGINE_RESULT_REJECTED',
+      requestId: activeSearch.requestId,
+      sessionId: session.id,
+      sessionGeneration: session.sessionGeneration,
+      positionSequence: activeSearch.position.positionSequence,
+      positionKey: activeSearch.position.key,
+      positionFen: activeSearch.position.normalizedFen,
+      expectedSide: activeSearch.position.expectedSide,
+      bestmove: bestMove,
+      moveLegal: false,
+      resultValidated: false,
+      moveApplied: false,
+      failureReason,
+      retryCount: retryCount + 1,
+      retryAllowed,
+      clockStopped: true,
+      message: retryAllowed
+        ? 'Engine returned an invalid move; resetting once before retry.'
+        : 'Engine turn failed after an invalid result.',
+    }));
+    this.recoverEngineSession(
+      session,
+      retryAllowed ? { ...activeSearch.operation, retryCount: retryCount + 1 } : undefined,
+    );
+  }
+
+  private acknowledgeMoveApplication(
+    session: EngineSession,
+    data: Extract<ClientMessage, { type: 'resultAck' }>,
+  ) {
+    const awaiting = session.awaitingMoveApplication;
+    if (!awaiting || awaiting.requestId !== data.requestId || awaiting.position.key !== data.positionKey) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'error', code: 'STALE_APPLICATION_ACK', requestId: data.requestId,
+        failureReason: 'stale_request', clockStopped: true,
+        message: 'Move application acknowledgement did not match the active result.',
+      }));
+      return;
+    }
+    clearTimeout(awaiting.timer);
+    session.awaitingMoveApplication = null;
+    const oldPosition = resolveExactPosition(data.oldFen, []);
+    const newPosition = data.newFen ? resolveExactPosition(data.newFen, []) : null;
+    const oldMatches = oldPosition?.fen() === awaiting.position.normalizedFen;
+    const newMatches = data.applied && newPosition?.fen() === awaiting.expectedNewFen;
+    if (!data.applied || !oldMatches || !newMatches) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'error', code: 'MOVE_APPLICATION_FAILED', requestId: data.requestId,
+        failureReason: !oldMatches ? 'position_mismatch' : data.failureReason ?? 'move_application_failed',
+        resultValidated: true, moveApplied: false, clockStopped: true,
+        message: 'Validated engine move was not applied to the expected position.',
+      }));
+      this.recoverEngineSession(session);
+      return;
+    }
+    this.sendIfOpen(session.ws, JSON.stringify({
+      type: 'move-applied', requestId: data.requestId, positionKey: data.positionKey,
+      resultValidated: true, moveApplied: true, oldFen: oldPosition.fen(), newFen: newPosition.fen(),
+    }));
+    session.lastAppliedOpponentFen = awaiting.position.normalizedFen;
+    session.startFen = newPosition.fen();
+    session.uciMoves = [];
+    this.runPendingOperation(session);
+  }
+
   // ── Ponder helpers ─────────────────────────────────────────────────────────
 
   private enqueueSearch(session: EngineSession, operation: Extract<PendingOperation, { type: 'search' }>) {
     if (!session.process.stdin) return;
+
+    if (session.awaitingMoveApplication) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'error', code: 'RESULT_NOT_ACKNOWLEDGED', requestId: operation.requestId,
+        failureReason: 'duplicate_position_request', clockStopped: true,
+        message: 'The previous engine result must be applied or rejected before another search.',
+      }));
+      return;
+    }
 
     if (session.activeSearch || session.ponderState.status === 'pondering' || session.ponderState.status === 'hit') {
       session.pendingOperation = operation;
@@ -866,6 +1056,7 @@ export class EnginePoolManager {
       writeUciCommand(session.process.stdin, 'isready');
       session.startFen = DEFAULT_START_FEN;
       session.uciMoves = [];
+      session.lastAppliedOpponentFen = null;
       return;
     }
 
@@ -885,18 +1076,40 @@ export class EnginePoolManager {
   private startSearch(session: EngineSession, operation: Extract<PendingOperation, { type: 'search' }>) {
     if (!session.process.stdin) return;
 
-    writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', operation.multiPv));
-    this.applyBookOptions(session, operation.purpose, operation.openingSelection);
+    const resolved = resolveExactPosition(operation.startFen, operation.moves);
+    if (!resolved) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'error', code: 'POSITION_MISMATCH', requestId: operation.requestId,
+        failureReason: 'position_mismatch', clockStopped: true,
+        message: 'FEN and move continuation do not describe one legal position.',
+      }));
+      return;
+    }
+    const exactOperation = { ...operation, startFen: resolved.fen(), moves: [] };
+    if (exactOperation.purpose === 'opponent' && session.lastAppliedOpponentFen === exactOperation.startFen) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'error', code: 'DUPLICATE_POSITION_REQUEST', requestId: operation.requestId,
+        positionFen: exactOperation.startFen, failureReason: 'duplicate_position_request',
+        retryCount: 0, clockStopped: true,
+        message: 'This exact opponent position already produced an applied move.',
+      }));
+      return;
+    }
+    if (resolved.isGameOver()) {
+      this.sendIfOpen(session.ws, JSON.stringify({
+        type: 'bestmove', requestId: operation.requestId, move: null,
+        positionFen: resolved.fen(), expectedSide: resolved.turn(),
+        resultValidated: true, moveApplied: false, clockStopped: true,
+        terminal: classifyTerminalPosition(resolved.fen(), []),
+      }));
+      return;
+    }
+
+    writeUciCommand(session.process.stdin, buildSetOptionCommand('MultiPV', exactOperation.multiPv));
+    this.applyBookOptions(session, exactOperation.purpose, exactOperation.openingSelection);
     this.sendPositionAndGo(
       session,
-      operation.requestId,
-      operation.purpose,
-      operation.searchMode,
-      operation.startFen,
-      operation.moves,
-      operation.searchLimit,
-      operation.ponderAllowed,
-      operation.ponderContext,
+      exactOperation,
     );
   }
 
@@ -939,65 +1152,89 @@ export class EnginePoolManager {
 
   private sendPositionAndGo(
     session: EngineSession,
-    requestId: number,
-    purpose: SearchPurpose,
-    searchMode: 'tc' | 'analysis',
-    startFen: string,
-    moves: string[],
-    searchLimit: SearchLimit,
-    ponderAllowed: boolean = false,
-    ponderContext: PonderSearchContext | null = null,
+    operation: Extract<PendingOperation, { type: 'search' }>,
   ) {
     if (!session.process.stdin) return;
 
-    const positionCommand = buildPositionCommand(startFen, moves);
-    const goCommand = buildGoCommand(searchLimit);
-    writeUciCommand(session.process.stdin, positionCommand);
-    writeUciCommand(session.process.stdin, goCommand);
+    const positionCommand = buildPositionCommand(operation.startFen, []);
+    const goCommand = buildGoCommand(operation.searchLimit);
     const startedAt = Date.now();
     session.searchGeneration += 1;
-    session.activeSearch = {
-      requestId,
+    session.positionSequence += 1;
+    const position = createPositionIdentity({
+      requestId: operation.requestId,
+      sessionId: session.id,
+      sessionGeneration: session.sessionGeneration,
+      positionSequence: session.positionSequence,
+      fen: operation.startFen,
+    });
+    const activeSearch: ActiveSearch = {
+      requestId: operation.requestId,
       generation: session.searchGeneration,
       state: 'running',
-      purpose,
-      searchMode,
-      ponderAllowed,
-      ponderContext,
-      searchLimit,
+      purpose: operation.purpose,
+      searchMode: operation.searchMode,
+      ponderAllowed: operation.ponderAllowed,
+      ponderContext: operation.ponderContext,
+      searchLimit: operation.searchLimit,
       generatedGoCommand: goCommand,
       startedAt,
-      deadlineAt: deadlineAtForSearch(startFen, moves, searchLimit),
+      deadlineAt: deadlineAtForSearch(operation.startFen, [], operation.searchLimit),
+      position,
+      positionCommand,
+      operation,
     };
+    session.activeSearch = activeSearch;
     session.currentDepth = 0;
     session.pvs = [];
     session.pendingBookResult = null;
     session.ponderState = { status: 'idle' };
-    session.startFen = startFen;
-    session.uciMoves = moves;
+    session.startFen = operation.startFen;
+    session.uciMoves = [];
+    // The active identity is installed before `go`, so even an immediate book
+    // result is correlated with this exact request.
+    writeUciCommand(session.process.stdin, positionCommand);
     this.sendIfOpen(session.ws, JSON.stringify({
       type: 'search-started',
-      requestId,
+      requestId: operation.requestId,
+      sessionId: session.id,
+      sessionGeneration: session.sessionGeneration,
+      positionSequence: session.positionSequence,
+      positionKey: position.key,
+      positionFen: position.normalizedFen,
+      expectedSide: position.expectedSide,
+      positionCommandSent: positionCommand,
+      goCommandSent: goCommand,
       startedAt,
-      requestedLimit: searchLimit,
+      requestedLimit: operation.searchLimit,
       generatedGoCommand: goCommand,
-      ...(session.activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: session.activeSearch.deadlineAt } : {}),
+      ...(activeSearch.deadlineAt !== undefined ? { engineDeadlineAt: activeSearch.deadlineAt } : {}),
     }));
+    this.armSearchWatchdog(session, operation.requestId, operation.searchLimit, []);
+    writeUciCommand(session.process.stdin, goCommand);
     if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development') {
       console.log('[engine-search-diagnostic]', {
-        requestId,
-        purpose,
-        mode: searchMode,
-        fen: startFen,
-        requestedLimit: searchLimit,
-        resolvedLimit: searchLimit,
+        requestId: operation.requestId,
+        sessionId: session.id,
+        sessionGeneration: session.sessionGeneration,
+        positionSequence: session.positionSequence,
+        positionKey: position.key,
+        expectedSide: position.expectedSide,
+        purpose: operation.purpose,
+        mode: operation.searchMode,
+        fen: position.normalizedFen,
+        positionCommandSent: positionCommand,
+        goCommandSent: goCommand,
+        requestedLimit: operation.searchLimit,
+        resolvedLimit: operation.searchLimit,
         generatedGoCommand: goCommand,
         snapshotType: 'live',
         ponderState: session.ponderState.status,
-        accepted: true,
+        requestAccepted: true,
+        resultValidated: false,
+        moveApplied: false,
       });
     }
-    this.armSearchWatchdog(session, requestId, searchLimit, moves);
   }
 
   private armSearchWatchdog(session: EngineSession, requestId: number, limit: SearchLimit, moves: readonly string[]) {
@@ -1022,6 +1259,10 @@ export class EnginePoolManager {
     params: { requestId?: number; timeoutMs: number; phase: WatchdogPhase },
   ) {
     this.clearWatchdog(session);
+    if (session.awaitingMoveApplication) {
+      clearTimeout(session.awaitingMoveApplication.timer);
+      session.awaitingMoveApplication = null;
+    }
     const startedAt = performance.now();
     const timer = setTimeout(() => {
       this.handleWatchdogTimeout(session.id, params.phase, params.requestId, startedAt);
@@ -1082,7 +1323,10 @@ export class EnginePoolManager {
     this.recoverEngineSession(session);
   }
 
-  private recoverEngineSession(session: EngineSession) {
+  private recoverEngineSession(
+    session: EngineSession,
+    recoverySearch?: Extract<PendingOperation, { type: 'search' }>,
+  ) {
     const { id, ws } = session;
     this.clearWatchdog(session);
     clearTimeout(session.idleTimer);
@@ -1091,6 +1335,10 @@ export class EnginePoolManager {
     session.activeSearch = null;
     session.pendingOperation = null;
     session.pendingBookResult = null;
+    if (session.awaitingMoveApplication) {
+      clearTimeout(session.awaitingMoveApplication.timer);
+      session.awaitingMoveApplication = null;
+    }
     session.ponderState = { status: 'idle' };
     this.active.delete(id);
 
@@ -1109,7 +1357,7 @@ export class EnginePoolManager {
     }, 1000);
 
     if (this.isSocketOpen(ws)) {
-      this.spawnEngine(ws, id, false);
+      this.spawnEngine(ws, id, false, recoverySearch, session.requestedOwnBook, session.lastAppliedOpponentFen);
     } else {
       this.dequeueNext();
     }
@@ -1326,10 +1574,6 @@ function buildValidatedPonderPlan(
     expectedMoves: [...priorMoves, bestMove, ponderMove],
     searchContext,
   };
-}
-
-function sameMoveList(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((move, index) => move === b[index]);
 }
 
 export const enginePool = new EnginePoolManager();

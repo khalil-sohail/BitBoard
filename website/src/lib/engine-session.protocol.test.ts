@@ -37,7 +37,29 @@ interface ServerMessage {
   selectiveDepth?: number | null;
   requestedLimit?: unknown;
   generatedGoCommand?: string;
+  positionKey?: string;
+  positionFen?: string;
+  newFen?: string;
+  sessionGeneration?: number;
+  failureReason?: string;
+  retryCount?: number;
+  clockStopped?: boolean;
   pvs?: unknown[];
+}
+
+function acknowledgeAppliedMove(socket: MockSocket, message: ServerMessage): void {
+  assert.equal(typeof message.requestId, 'number');
+  assert.equal(typeof message.positionKey, 'string');
+  assert.equal(typeof message.positionFen, 'string');
+  assert.equal(typeof message.newFen, 'string');
+  socket.emitRawMessage(JSON.stringify({
+    type: 'resultAck',
+    requestId: message.requestId,
+    positionKey: message.positionKey,
+    applied: true,
+    oldFen: message.positionFen,
+    newFen: message.newFen,
+  }));
 }
 
 class MockSocket extends EventEmitter {
@@ -79,6 +101,7 @@ class RecordingEngineProcess extends EventEmitter {
   public exitCode: number | null = null;
   public signalCode: NodeJS.Signals | null = null;
   private lineBuffer = '';
+  private sideToMove: 'w' | 'b' = 'w';
 
   public constructor() {
     super();
@@ -123,8 +146,19 @@ class RecordingEngineProcess extends EventEmitter {
       return;
     }
 
+    if (line.startsWith('position ')) {
+      const parts = line.split(/\s+/);
+      if (parts[1] === 'fen') this.sideToMove = parts[3] === 'b' ? 'b' : 'w';
+      else {
+        const movesIndex = parts.indexOf('moves');
+        const moveCount = movesIndex < 0 ? 0 : parts.length - movesIndex - 1;
+        this.sideToMove = moveCount % 2 === 0 ? 'w' : 'b';
+      }
+      return;
+    }
+
     if (line.startsWith('go')) {
-      this.stdout.write('bestmove e2e4\n');
+      this.stdout.write(`bestmove ${this.sideToMove === 'w' ? 'e2e4' : 'e7e5'}\n`);
       return;
     }
 
@@ -374,6 +408,15 @@ function testRequestIdValidation(): void {
   assertInvalid(opponentSearch({ requestId: Number.MAX_SAFE_INTEGER + 1 }), 'INVALID_MESSAGE');
 }
 
+function testResultAcknowledgementValidation(): void {
+  const key = `sha256:${'0'.repeat(64)}`;
+  assertValid({ type: 'resultAck', requestId: 7, positionKey: key, applied: true, oldFen: DEFAULT_START_FEN, newFen: DEFAULT_START_FEN });
+  assertValid({ type: 'resultAck', requestId: 7, positionKey: key, applied: false, oldFen: DEFAULT_START_FEN, failureReason: 'move_application_failed' });
+  assertInvalid({ type: 'resultAck', requestId: 7, positionKey: '', applied: true, oldFen: DEFAULT_START_FEN }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'resultAck', requestId: 7, positionKey: key, applied: 'yes', oldFen: DEFAULT_START_FEN }, 'INVALID_MESSAGE');
+  assertInvalid({ type: 'resultAck', requestId: 7, positionKey: key, applied: true, oldFen: DEFAULT_START_FEN }, 'INVALID_MESSAGE');
+}
+
 function testNumericValidation(): void {
   assertValid({
     ...opponentSearch({ moves: ['e2e4'] }),
@@ -501,7 +544,7 @@ async function testInvalidInputDoesNotWriteToEngine(): Promise<void> {
     'setoption name MultiPV value 1',
     'setoption name OwnBook value true',
     'setoption name BookSelection value best',
-    'position startpos moves e2e4',
+    'position fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
     'go depth 8',
   ]);
 
@@ -920,7 +963,7 @@ async function testReviewAndAnalysisProfilesGenerateStableCommands(): Promise<vo
     'setoption name MultiPV value 3',
     'setoption name OwnBook value false',
     'setoption name BookSelection value best',
-    'position startpos moves e2e4',
+    'position fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
     'go depth 11',
   ]);
 
@@ -1052,6 +1095,8 @@ async function testPonderHitUsesPonderhitAndRequestOwnership(): Promise<void> {
   await flushEvents();
   engine.emitBestMove('bestmove d2d4 ponder g8f6');
   await flushEvents();
+  acknowledgeAppliedMove(socket, messagesOfType(socket, 'bestmove')[0]);
+  await flushEvents();
 
   engine.writes.length = 0;
   socket.sent.length = 0;
@@ -1102,6 +1147,8 @@ async function testPonderMissStopsSwallowsAndStartsFreshWithoutDuplication(): Pr
   await flushEvents();
   engine.emitBestMove('bestmove d2d4 ponder g8f6');
   await flushEvents();
+  acknowledgeAppliedMove(socket, messagesOfType(socket, 'bestmove')[0]);
+  await flushEvents();
 
   engine.writes.length = 0;
   socket.sent.length = 0;
@@ -1123,8 +1170,7 @@ async function testPonderMissStopsSwallowsAndStartsFreshWithoutDuplication(): Pr
   await flushEvents();
 
   assert.equal(messagesOfType(socket, 'bestmove').length, 0);
-  assert.ok(engine.writes.includes('position startpos moves d2d4 e7e6'));
-  assert.equal(engine.writes.includes('position startpos moves d2d4 e7e6 e7e6'), false);
+  assert.ok(engine.writes.includes('position fen rnbqkbnr/pppp1ppp/4p3/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2'));
   assert.equal(engine.writes.filter(line => line.startsWith('go ')).length, 1);
 
   engine.emitBestMove('bestmove c1f4 ponder g8f6');
@@ -1246,6 +1292,8 @@ async function testPonderSpecialMoveValidationAndMatching(): Promise<void> {
   promotion.engine.emitBestMove('bestmove e8d7 ponder g7g8n');
   await flushEvents();
   assert.ok(promotion.engine.writes.includes('position fen 4k3/6P1/8/8/8/8/8/4K3 b - - 0 1 moves e8d7 g7g8n'));
+  acknowledgeAppliedMove(promotion.socket, messagesOfType(promotion.socket, 'bestmove')[0]);
+  await flushEvents();
   promotion.engine.writes.length = 0;
   promotion.socket.emitRawMessage(JSON.stringify(fairPonderSearch({
     requestId: 115,
@@ -1346,6 +1394,8 @@ async function testSearchResultJustBeforeWatchdogClearsTimer(): Promise<void> {
   await waitForMessage(socket, 'search-started');
   engines[0].emitBestMove('bestmove e2e4');
   await flushEvents();
+  acknowledgeAppliedMove(socket, messagesOfType(socket, 'bestmove')[0]);
+  await flushEvents();
   await new Promise(resolve => setTimeout(resolve, 90));
   assert.equal(messagesOfType(socket, 'bestmove')[0].requestId, 202);
   assert.equal(messagesOfType(socket, 'error').length, 0);
@@ -1435,6 +1485,8 @@ async function testPonderMissStopWatchdogRecovers(): Promise<void> {
   await waitForMessage(socket, 'search-started');
   engines[0].emitBestMove('bestmove d2d4 ponder g8f6');
   await flushEvents();
+  acknowledgeAppliedMove(socket, messagesOfType(socket, 'bestmove')[0]);
+  await flushEvents();
   socket.sent.length = 0;
 
   socket.emitRawMessage(JSON.stringify(fairPonderSearch({
@@ -1457,11 +1509,113 @@ async function testPonderMissStopWatchdogRecovers(): Promise<void> {
   socket.close();
 }
 
+async function testReportedFairPlayDesynchronizationIsRejectedAndRetriedOnce(): Promise<void> {
+  const reportedFen = 'r2r2k1/p1R2pp1/bp2p3/6N1/3P4/P3P3/1n3PPP/5RK1 w - - 2 20';
+  const { engines, socket } = await createManualSessionFactory({ stopAckTimeoutMs: 500 });
+  socket.emitRawMessage(JSON.stringify(opponentSearch({
+    requestId: 54,
+    fen: reportedFen,
+    moves: [],
+    searchLimit: { mode: 'depth', depth: 4 },
+    ponder: false,
+  })));
+  await flushEvents();
+  assert.deepEqual(engines[0].writes.slice(-2), [`position fen ${reportedFen}`, 'go depth 4']);
+
+  engines[0].emitBestMove('bestmove b6c5');
+  const retrying = await waitForMessage(socket, 'search-retrying');
+  assert.equal(retrying.requestId, 54);
+  assert.equal(retrying.failureReason, 'wrong_side_piece');
+  assert.equal(retrying.retryCount, 1);
+  assert.equal(retrying.clockStopped, true);
+
+  for (let attempt = 0; attempt < 20 && engines.length < 2; attempt += 1) await flushEvents();
+  assert.equal(engines.length, 2);
+  for (let attempt = 0; attempt < 20 && !engines[1].writes.includes('go depth 4'); attempt += 1) await flushEvents();
+  assert.deepEqual(engines[1].writes.slice(-2), [`position fen ${reportedFen}`, 'go depth 4']);
+
+  // Output from the terminated generation cannot be attributed to the retry.
+  engines[0].emitBestMove('bestmove b6c5');
+  engines[1].emitBestMove('bestmove c7f7');
+  await flushEvents();
+  const results = messagesOfType(socket, 'bestmove');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].move, 'c7f7');
+  assert.equal(results[0].positionFen, reportedFen);
+  assert.equal(results[0].sessionGeneration, 2);
+
+  acknowledgeAppliedMove(socket, results[0]);
+  const applied = await waitForMessage(socket, 'move-applied');
+  assert.equal(applied.requestId, 54);
+
+  const writesBeforeDuplicate = engines[1].writes.length;
+  socket.sent.length = 0;
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 55, fen: reportedFen, moves: [], searchLimit: { mode: 'depth', depth: 4 }, ponder: false })));
+  const duplicate = await waitForMessage(socket, 'error');
+  assert.equal(duplicate.code, 'DUPLICATE_POSITION_REQUEST');
+  assert.equal(duplicate.clockStopped, true);
+  assert.equal(engines[1].writes.length, writesBeforeDuplicate);
+  socket.close();
+}
+
+async function testSecondIllegalResultEndsTurnWithoutAnotherRetry(): Promise<void> {
+  const reportedFen = 'r2r2k1/p1R2pp1/bp2p3/6N1/3P4/P3P3/1n3PPP/5RK1 w - - 2 20';
+  const { engines, socket } = await createManualSessionFactory({ stopAckTimeoutMs: 500 });
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 70, fen: reportedFen, moves: [], searchLimit: { mode: 'depth', depth: 4 }, ponder: false })));
+  await flushEvents();
+  engines[0].emitBestMove('bestmove b6c5');
+  await waitForMessage(socket, 'search-retrying');
+  for (let attempt = 0; attempt < 20 && engines.length < 2; attempt += 1) await flushEvents();
+  for (let attempt = 0; attempt < 20 && !engines[1].writes.some(line => line.startsWith('go ')); attempt += 1) await flushEvents();
+  socket.sent.length = 0;
+  engines[1].emitBestMove('bestmove b6c5');
+  const failure = await waitForMessage(socket, 'error');
+  assert.equal(failure.code, 'ENGINE_RESULT_REJECTED');
+  assert.equal(failure.retryCount, 2);
+  assert.equal(failure.clockStopped, true);
+  assert.equal(messagesOfType(socket, 'search-retrying').length, 0);
+  socket.close();
+}
+
+async function testApplicationTimeoutStopsTurnAndResetsSession(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({ stopAckTimeoutMs: 20 });
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 80, movetime: 100, ponder: false })));
+  await flushEvents();
+  engines[0].emitBestMove('bestmove e2e4');
+  const result = await waitForMessage(socket, 'bestmove');
+  assert.equal(result.move, 'e2e4');
+  const failure = await waitForMessage(socket, 'error');
+  assert.equal(failure.code, 'MOVE_APPLICATION_TIMEOUT');
+  assert.equal(failure.clockStopped, true);
+  for (let attempt = 0; attempt < 20 && engines.length < 2; attempt += 1) await flushEvents();
+  assert.equal(engines.length, 2);
+  socket.close();
+}
+
+async function testOldFenMismatchRejectsApplication(): Promise<void> {
+  const { engines, socket } = await createManualSessionFactory({ stopAckTimeoutMs: 500 });
+  socket.emitRawMessage(JSON.stringify(opponentSearch({ requestId: 81, movetime: 100, ponder: false })));
+  await flushEvents();
+  engines[0].emitBestMove('bestmove e2e4');
+  const result = await waitForMessage(socket, 'bestmove');
+  socket.emitRawMessage(JSON.stringify({
+    type: 'resultAck', requestId: 81, positionKey: result.positionKey,
+    applied: true, oldFen: 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1',
+    newFen: result.newFen,
+  }));
+  const failure = await waitForMessage(socket, 'error');
+  assert.equal(failure.code, 'MOVE_APPLICATION_FAILED');
+  assert.equal(failure.failureReason, 'position_mismatch');
+  assert.equal(failure.clockStopped, true);
+  socket.close();
+}
+
 async function run(): Promise<void> {
   testJsonBoundary();
   testFenValidation();
   testMoveValidation();
   testRequestIdValidation();
+  testResultAcknowledgementValidation();
   testNumericValidation();
   testDifficultyAndPurposeValidation();
   testOptionValidation();
@@ -1500,6 +1654,10 @@ async function run(): Promise<void> {
   await testClockSearchLifecycleCarriesBackendTiming();
   await testStopAckWatchdogRecoversUnresponsiveEngine();
   await testPonderMissStopWatchdogRecovers();
+  await testReportedFairPlayDesynchronizationIsRejectedAndRetriedOnce();
+  await testSecondIllegalResultEndsTurnWithoutAnotherRetry();
+  await testApplicationTimeoutStopsTurnAndResetsSession();
+  await testOldFenMismatchRejectsApplication();
 
   console.log('engine-session protocol tests passed');
 }
