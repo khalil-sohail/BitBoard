@@ -151,8 +151,11 @@ def build_variant(root: Path, item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def prepare(args: argparse.Namespace) -> None:
+    global BASE_ID, BASE_HASH
     root=Path(args.output_dir);base=read_json(Path(args.base_profile));validate_profile(base)
-    if (base["profileId"],base["canonicalHash"])!=(BASE_ID,BASE_HASH):raise SearchTuningError("Evaluation baseline identity mismatch")
+    identity=validation.engine_identity(Path(args.base_engine))
+    if (base["profileId"],base["canonicalHash"])!=(identity["profileId"],identity["profileHash"]):raise SearchTuningError("Evaluation baseline identity mismatch")
+    BASE_ID, BASE_HASH = base["profileId"], base["canonicalHash"]
     entries=registry_entries(Path(args.registry));variants=generate_variants(base,entries)
     if len(variants)>6 or len(variants)==0:raise SearchTuningError("Unexpected variant count")
     suite,development,holdout=select_suite(read_jsonl(Path(args.selection)))
@@ -233,7 +236,8 @@ def canonical_metric(value: Mapping[str,Any]) -> dict[str,Any]:
 
 
 def run_suite(args: argparse.Namespace) -> None:
-    root=Path(args.output_dir);variants=read_json(root/"variants.json")["variants"];records=read_jsonl(root/"development.jsonl");annotations={x["positionId"]:x for x in read_jsonl(Path(args.annotations))}
+    global BASE_ID, BASE_HASH
+    root=Path(args.output_dir);variant_document=read_json(root/"variants.json");variants=variant_document["variants"];BASE_ID=variant_document["baselineProfileId"];BASE_HASH=variant_document["baselineProfileHash"];records=read_jsonl(root/"development.jsonl");annotations={x["positionId"]:x for x in read_jsonl(Path(args.annotations))}
     specifications=[("evaluation-baseline",Path(args.base_engine),BASE_ID,BASE_HASH)]+[(x["variantId"],Path(x["binaryPath"]),x["variantId"],x["profileHash"]) for x in variants]
     executed=[];experiments=root/"experiments"
     for identifier,engine,profile_id,profile_hash_value in specifications:
@@ -262,7 +266,8 @@ def ranking_key(item: Mapping[str,Any]) -> tuple[Any,...]:
 
 
 def rank(args: argparse.Namespace) -> None:
-    root=Path(args.output_dir);results=read_jsonl(root/"variant-results.jsonl");variants={x["variantId"]:x for x in read_json(root/"variants.json")["variants"]};baseline=results[0]["metrics"]
+    global BASE_ID, BASE_HASH, FINAL_ID
+    root=Path(args.output_dir);results=read_jsonl(root/"variant-results.jsonl");variant_document=read_json(root/"variants.json");variants={x["variantId"]:x for x in variant_document["variants"]};BASE_ID=variant_document["baselineProfileId"];BASE_HASH=variant_document["baselineProfileHash"];FINAL_ID=args.candidate_id;baseline=results[0]["metrics"]
     ranked=[]
     for result in results[1:]:
         ok=eligible(result["metrics"],result["failures"],result["tacticalFailures"],baseline);ranked.append({"variantId":result["variantId"],"eligible":ok,"metrics":result["metrics"],"rejectionReasons":[] if ok else ["hard_or_development_guardrail"]})
@@ -325,7 +330,7 @@ def inspect(args: argparse.Namespace) -> None:
 
 def parser() -> argparse.ArgumentParser:
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest="command",required=True)
-    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS))
+    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS));c.add_argument("--candidate-id",default=FINAL_ID)
     c=sub.add_parser("prepare");common(c);c.add_argument("--registry",default=str(DEFAULT_REGISTRY));c.add_argument("--selection",default=str(DEFAULT_SELECTION));c.add_argument("--force",action="store_true");c.set_defaults(function=prepare)
     c=sub.add_parser("run-suite");common(c);c.add_argument("--depth",type=int,default=6);c.set_defaults(function=run_suite)
     c=sub.add_parser("rank");common(c);c.add_argument("--depth",type=int,default=6);c.set_defaults(function=rank)

@@ -155,8 +155,11 @@ def fixed_signature(engine:Path,records:Sequence[dict[str,Any]])->list[tuple[Any
     return result
 
 def prepare(args:argparse.Namespace)->None:
+    global BASE_ID, BASE_HASH
     root=Path(args.output_dir);base=read_json(Path(args.base_profile));validate_profile(base)
-    if (base["profileId"],base["canonicalHash"])!=(BASE_ID,BASE_HASH):raise TimeTuningError("Search baseline identity mismatch")
+    identity=validation.engine_identity(Path(args.base_engine))
+    if (base["profileId"],base["canonicalHash"])!=(identity["profileId"],identity["profileHash"]):raise TimeTuningError("Search baseline identity mismatch")
+    BASE_ID,BASE_HASH=base["profileId"],base["canonicalHash"]
     entries=registry_entries(Path(args.registry));variants=generate_variants(base,entries);suite,development,holdout=select_suite(read_jsonl(Path(args.selection)))
     if root.exists():
         if not args.force:raise TimeTuningError(f"Output exists; use --force: {root}")
@@ -219,6 +222,8 @@ def rank_key(item:Mapping[str,Any])->tuple[Any,...]:
     p,t=item["policyMetrics"],item["timedMetrics"];return (p["maximumAbsoluteHardJumpMs"],p["maximumAbsoluteRatioJump"],p["meanCriticalHardRatio"],t["emergencyStops"],-t["averageDepth"],-t["stockfishAgreement"],item["variantId"])
 
 def rank(args:argparse.Namespace)->None:
+    global BASE_ID, BASE_HASH, FINAL_ID
+    base=read_json(Path(args.base_profile));BASE_ID,BASE_HASH=base["profileId"],base["canonicalHash"];FINAL_ID=args.candidate_id
     root=Path(args.output_dir);policies={x["variantId"]:x for x in read_jsonl(root/"scenarios"/"policy-results.jsonl")};timed={x["variantId"]:x for x in read_json(root/"timed-search"/"performance.json")};determinism=read_json(root/"timed-search"/"determinism.json");variants={x["variantId"]:x for x in read_json(root/"variants.json")["variants"]};basep=policies["time-baseline"]["metrics"];ranking=[]
     for identifier,variant in variants.items():
         p=policies[identifier]["metrics"];t=timed[identifier]["metrics"];nondeterministic=determinism.get("variants",{}).get(identifier,{}).get("totalMismatches",0);hard=t["flags"] or t["failures"] or t["repeatedHardLimitOverruns"] or p["invariantViolations"] or variant["isolation"]["fixedDepthSearchMismatches"] or nondeterministic
@@ -299,6 +304,8 @@ def remediation_engine(root:Path)->Path:
     return binary
 
 def verify_safety(args:argparse.Namespace)->None:
+    global BASE_ID, BASE_HASH
+    base_profile=read_json(Path(args.base_profile));BASE_ID,BASE_HASH=base_profile["profileId"],base_profile["canonicalHash"]
     root=Path(args.output_dir);old_engine=phase18_base_engine(root,Path(args.base_engine));engine=remediation_engine(root)
     sweep_requests=[request(x) for x in range(0,151)]+[request(60,10),request(60,0,1),request(2**62,2**60,1)]
     rows=decorate(query_policy(engine,sweep_requests),sweep_requests);continuous=continuity(rows[1:151])
@@ -319,7 +326,7 @@ def verify_safety(args:argparse.Namespace)->None:
 
 def parser()->argparse.ArgumentParser:
     p=argparse.ArgumentParser(description=__doc__);subs=p.add_subparsers(dest="command",required=True)
-    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--policy-engine",default="engine/chess-engine");c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS))
+    def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--policy-engine",default="engine/chess-engine");c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS));c.add_argument("--candidate-id",default=FINAL_ID)
     c=subs.add_parser("characterize");common(c);c.set_defaults(function=characterize)
     c=subs.add_parser("prepare");common(c);c.add_argument("--registry",default=str(DEFAULT_REGISTRY));c.add_argument("--selection",default=str(DEFAULT_SELECTION));c.add_argument("--force",action="store_true");c.set_defaults(function=prepare)
     c=subs.add_parser("run-scenarios");common(c);c.set_defaults(function=run_scenarios)

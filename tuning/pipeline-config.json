@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "pipelineVersion": "21.1",
+  "dataset": {
+    "minPly": 12,
+    "sampleEvery": 1,
+    "splitSeed": "bitboard-pipeline-split-v1",
+    "trainRatio": 80,
+    "validationRatio": 10,
+    "testRatio": 10
+  },
+  "modes": {
+    "prototype": {
+      "minimumAcceptedGames": 20,
+      "minimumFinalPositions": 200,
+      "selection": {"train": 700, "validation": 150, "test": 150, "maxPerGame": 2},
+      "auditPositions": 60,
+      "stockfishNodes": 1000,
+      "searchDepth": 3,
+      "smokeMaximumPlies": 40
+    },
+    "full": {
+      "minimumAcceptedGames": 1000,
+      "minimumFinalPositions": 50000,
+      "selection": {"train": 700, "validation": 150, "test": 150, "maxPerGame": 2},
+      "auditPositions": 300,
+      "stockfishNodes": 100000,
+      "searchDepth": 6,
+      "smokeMaximumPlies": 160
+    }
+  },
+  "annotation": {
+    "threads": 1,
+    "hashMb": 256,
+    "multiPv": 1,
+    "checkpointEvery": 10,
+    "minimumCpCoveragePercent": 90
+  },
+  "evaluationFitting": {
+    "allowlistPolicy": "phase15-tracked-allowlist",
+    "cpClip": 1500,
+    "maxParameterDelta": 20,
+    "seed": "bitboard-eval-prototype-selection-v1",
+    "disconnectedFeatures": ["evaluation.pawns.passedBlockedDivisor"]
+  },
+  "evaluationValidation": {"searchDepth": 4, "smokeDepth": 3},
+  "searchTuning": {
+    "oneAtATime": true,
+    "parameters": ["search.aspiration.windowCp", "search.nullMove.reduction", "search.quiescence.deltaPruningMarginCp"]
+  },
+  "time": {"tuneByDefault": false, "formulaRemediation": false},
+  "opening": {"book": "engine/openings/performance.bin"},
+  "regressions": {"fullWebsiteVerification": false},
+  "match": {
+    "runByDefault": false,
+    "minimumGames": 1000,
+    "depth": 2,
+    "timeControl": "depth 2",
+    "colorReversal": true
+  },
+  "promotion": {"prepareWhenEligible": true, "automaticPromotion": false},
+  "clean": {"requireConfirmation": true}
+}

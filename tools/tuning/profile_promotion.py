@@ -162,6 +162,7 @@ def _candidate_profile_paths(root: Path) -> Iterable[Path]:
     patterns = (
         "tuning/candidates/*/profile.json", "tuning/builds/*/profile.json",
         "tuning/search/**/profile.json", "tuning/time/**/profile.json",
+        "tuning/runs/**/profile.json",
     )
     seen: set[Path] = set()
     for pattern in patterns:
@@ -257,6 +258,13 @@ def discover_candidate(candidate: str | Path, root: Path | None = None) -> Candi
             except OSError:
                 continue
             if any(isinstance(needle, str) and needle in text for needle in needles):
+                related.append(path)
+    runs_root = root / "tuning/runs"
+    with contextlib.suppress(ValueError):
+        relative_profile = profile.relative_to(runs_root)
+        run_directory = runs_root / relative_profile.parts[0]
+        for path in run_directory.rglob("*.json"):
+            if path not in {profile, metadata, manifest}:
                 related.append(path)
     return CandidateArtifacts(profile, metadata.resolve(), header.resolve(), binary.resolve(), manifest.resolve() if manifest else None, tuple(sorted(set(related))))
 
@@ -476,6 +484,8 @@ def evaluate_match_gate(artifacts: CandidateArtifacts, profile: dict[str, Any], 
     candidates = [root / "tuning/validation" / profile["profileId"] / "match-validation.json"]
     match_path = next((path for path in candidates if path.is_file()), None)
     if match_path is None:
+        match_path = _first_related(artifacts, lambda p, v: p.name == "match-validation.json" and _json_has_identity(v, profile["profileId"], profile["canonicalHash"]))
+    if match_path is None:
         smoke = _first_related(artifacts, lambda p, v: "smoke-match" in p.name or "smokeMatch" in v)
         return gate("match_validation", "missing", smoke, "no strength-validation artifact; smoke matches are insufficient", root)
     value = read_json(match_path)
@@ -538,17 +548,20 @@ def inspect_candidate(candidate: str | Path, root: Path | None = None) -> dict[s
     if eval_chain:
         expected_id, expected_hash = eval_chain["profileId"], eval_chain["profileHash"]
         path = root / "tuning/validation" / expected_id / "manifest.json"
-        if path.is_file():
+        candidates = [path] if path.is_file() else []
+        candidates.extend(item for item in artifacts.related if item.name == "manifest.json")
+        for path in candidates:
             value = read_json(path)
             valid_checksums, _ = _verify_declared_artifacts(path, ("artifacts", "gameArtifacts"))
             baseline = value.get("baselineIdentity", {})
-            if (value.get("schemaVersion") == 1 and value.get("validationStatus") in {"validated", "validated_with_warnings"}
+            if (value.get("schemaVersion") == 1 and value.get("validationStatus") in {"validated", "validated_with_warnings", "validated_for_experimental_use"}
                     and _json_has_identity(value, expected_id, expected_hash) and valid_checksums
                     and baseline.get("profileId") == ancestry["currentProduction"]["profileId"]
                     and baseline.get("profileHash") == ancestry["currentProduction"]["profileHash"]):
                 eval_validation = path
+                break
     gates["evaluation_validation"] = gate("evaluation_validation", "passed" if eval_validation else "missing", eval_validation, "exact evaluation ancestor, baseline, schema, suite, and artifact checksums independently validated" if eval_validation else "exact fresh evaluation validation artifact missing", root)
-    search_validation = _first_related(artifacts, lambda p, v: p.name == "summary.json" and _json_has_identity(v, profile["profileId"], profile["canonicalHash"]))
+    search_validation = _first_related(artifacts, lambda p, v: p.name in {"summary.json", "promotion-summary.json"} and _json_has_identity(v, profile["profileId"], profile["canonicalHash"]))
     search_status, search_reason = "missing", "exact fresh search validation artifact missing"
     if search_validation:
         valid_checksums, checksum_reason = _verify_declared_artifacts(search_validation)

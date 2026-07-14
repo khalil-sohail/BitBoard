@@ -1,0 +1,29 @@
+[Event "Pipeline fixture 1"]
+[Site "Local"]
+[Date "2026.01.01"]
+[Round "1"]
+[White "White One"]
+[Black "Black One"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3 1-0
+
+[Event "Pipeline fixture 2"]
+[Site "Local"]
+[Date "2026.01.02"]
+[Round "2"]
+[White "White Two"]
+[Black "Black Two"]
+[Result "0-1"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 6. Nf3 h6 7. Bh4 b6 8. cxd5 exd5 9. Bd3 0-1
+
+[Event "Pipeline fixture 3"]
+[Site "Local"]
+[Date "2026.01.03"]
+[Round "3"]
+[White "White Three"]
+[Black "Black Three"]
+[Result "1/2-1/2"]
+
+1. c4 e5 2. Nc3 Nf6 3. Nf3 Nc6 4. g3 Bb4 5. Bg2 O-O 6. O-O Re8 7. d3 d6 8. Bg5 Bxc3 9. bxc3 1/2-1/2

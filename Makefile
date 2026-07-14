@@ -1,4 +1,42 @@
-.PHONY: verify verify-engine verify-website tuning-promotion-inspect tuning-promotion-prepare tuning-promotion-verify tuning-promotion-promote tuning-promotion-rollback engine-release
+.PHONY: verify verify-engine verify-website tune tune-resume tune-inspect tune-verify tune-clean tune-match tune-promote-prepare tuning-promotion-inspect tuning-promotion-prepare tuning-promotion-verify tuning-promotion-promote tuning-promotion-rollback engine-release
+
+TUNE_ARGS = --release-id "$(RELEASE_ID)" $(if $(TUNE_MODE),--mode "$(TUNE_MODE)",) \
+	$(if $(STOCKFISH),--stockfish "$(STOCKFISH)",) \
+	$(if $(STOCKFISH_NODES),--stockfish-nodes "$(STOCKFISH_NODES)",) \
+	$(if $(filter 1,$(TUNE_TIME)),--tune-time,) \
+	$(if $(filter 1,$(RUN_MATCH)),--run-match,)
+
+define require_release_id
+	@test -n "$(RELEASE_ID)" || (echo "RELEASE_ID is required (example: make $(1) RELEASE_ID=v2)" >&2; exit 2)
+endef
+
+tune:
+	$(call require_release_id,tune)
+	.venv/bin/python tools/tuning/tuning_pipeline.py run $(TUNE_ARGS)
+
+tune-resume:
+	$(call require_release_id,tune-resume)
+	.venv/bin/python tools/tuning/tuning_pipeline.py resume $(TUNE_ARGS)
+
+tune-inspect:
+	$(call require_release_id,tune-inspect)
+	.venv/bin/python tools/tuning/tuning_pipeline.py inspect $(TUNE_ARGS)
+
+tune-verify:
+	$(call require_release_id,tune-verify)
+	.venv/bin/python tools/tuning/tuning_pipeline.py verify $(TUNE_ARGS)
+
+tune-match:
+	$(call require_release_id,tune-match)
+	.venv/bin/python tools/tuning/tuning_pipeline.py resume $(TUNE_ARGS) --run-match
+
+tune-promote-prepare:
+	$(call require_release_id,tune-promote-prepare)
+	.venv/bin/python tools/tuning/tuning_pipeline.py promote-prepare $(TUNE_ARGS)
+
+tune-clean:
+	$(call require_release_id,tune-clean)
+	.venv/bin/python tools/tuning/tuning_pipeline.py clean --release-id "$(RELEASE_ID)" $(if $(filter 1,$(CONFIRM)),--confirm,)
 
 verify: verify-engine verify-website
 

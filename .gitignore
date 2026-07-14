@@ -69,6 +69,7 @@ website/out/
 TUNING_AUDIT.md
 TUNING_PARAMETERS.md
 /docs/TUNING_*.md
+!docs/TUNING_PIPELINE.md
 tuning/pgn/
 tuning/datasets/
 tuning/engines/
@@ -81,3 +82,4 @@ tuning/validation/
 tuning/search/
 tuning/time/
 tuning/promotion/
+tuning/runs/

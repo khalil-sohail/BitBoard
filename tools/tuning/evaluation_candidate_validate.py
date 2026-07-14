@@ -187,15 +187,17 @@ def verify_frozen(candidate_dir: Path = DEFAULT_CANDIDATE,
                   candidate_header: Path = DEFAULT_CANDIDATE_HEADER,
                   candidate_engine: Path = DEFAULT_CANDIDATE_ENGINE,
                   baseline_engine: Path = DEFAULT_BASELINE_ENGINE) -> dict[str, Any]:
+    global EXPECTED_CANDIDATE_ID, EXPECTED_CANDIDATE_HASH, EXPECTED_CANDIDATE_BINARY_SHA
+    global EXPECTED_BASELINE_ID, EXPECTED_BASELINE_HASH
     required = [candidate_dir/name for name in ("profile.json", "metadata.json", "manifest.json")]
     required += [candidate_header, candidate_engine, baseline_engine]
     missing = [str(path) for path in required if not path.is_file()]
     if missing: raise ValidationError(f"Frozen artifact(s) missing: {missing}")
     profile, metadata, manifest = (read_json(candidate_dir/name) for name in ("profile.json", "metadata.json", "manifest.json"))
     validate_profile(profile)
-    if profile.get("profileId") != EXPECTED_CANDIDATE_ID or profile.get("canonicalHash") != EXPECTED_CANDIDATE_HASH:
-        raise ValidationError("Frozen candidate profile identity mismatch")
-    if metadata.get("candidateProfileHash") != EXPECTED_CANDIDATE_HASH or metadata.get("developmentOnly") is not True or metadata.get("promotionEligible") is not False:
+    candidate_id = profile.get("profileId")
+    candidate_hash = profile.get("canonicalHash")
+    if metadata.get("candidateProfileId") != candidate_id or metadata.get("candidateProfileHash") != candidate_hash or metadata.get("developmentOnly") is not True or metadata.get("promotionEligible") is not False:
         raise ValidationError("Frozen candidate metadata/status mismatch")
     for name, artifact in manifest.get("artifacts", {}).items():
         if sha256_file(candidate_dir/name) != artifact.get("sha256"):
@@ -204,12 +206,14 @@ def verify_frozen(candidate_dir: Path = DEFAULT_CANDIDATE,
     if candidate_header.read_bytes() != expected_header:
         raise ValidationError("Candidate header does not match the frozen profile")
     baseline, candidate = engine_identity(baseline_engine), engine_identity(candidate_engine)
-    if (baseline["profileId"], baseline["profileHash"]) != (EXPECTED_BASELINE_ID, EXPECTED_BASELINE_HASH):
+    baseline_profile = read_json(Path("tuning/profiles/builtin-default-v1.json"))
+    if (baseline["profileId"], baseline["profileHash"]) != (baseline_profile["profileId"], baseline_profile["canonicalHash"]):
         raise ValidationError("Baseline engine identity mismatch")
-    if (candidate["profileId"], candidate["profileHash"]) != (EXPECTED_CANDIDATE_ID, EXPECTED_CANDIDATE_HASH):
+    if (candidate["profileId"], candidate["profileHash"]) != (candidate_id, candidate_hash):
         raise ValidationError("Candidate engine identity mismatch")
-    if candidate["binarySha256"] != EXPECTED_CANDIDATE_BINARY_SHA:
-        raise ValidationError("Frozen candidate binary checksum mismatch")
+    EXPECTED_CANDIDATE_ID, EXPECTED_CANDIDATE_HASH = str(candidate_id), str(candidate_hash)
+    EXPECTED_CANDIDATE_BINARY_SHA = candidate["binarySha256"]
+    EXPECTED_BASELINE_ID, EXPECTED_BASELINE_HASH = baseline["profileId"], baseline["profileHash"]
     return {"profile": profile, "metadata": metadata, "manifest": manifest,
             "candidateHeaderSha256": sha256_file(candidate_header), "baseline": baseline, "candidate": candidate}
 
