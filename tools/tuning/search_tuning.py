@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 17 deterministic, development-only search tuning harness."""
+"""Deterministic, mode-scalable development-only search tuning harness."""
 
 from __future__ import annotations
 
@@ -117,12 +117,12 @@ def stable_rank(record: Mapping[str, Any], seed: str) -> str:
     return hashlib.sha256((seed+"\0"+record["positionId"]).encode()).hexdigest()
 
 
-def select_suite(records: Sequence[dict[str, Any]], count: int=48, seed: str=SEED) -> tuple[list[dict[str, Any]],list[dict[str, Any]],list[dict[str, Any]]]:
-    if count!=48:raise SearchTuningError("Phase 17 suite must contain exactly 48 positions")
-    suite,_=evaluation_tuning.select_split(list(records),48,1,seed)
-    development,_=evaluation_tuning.select_split(list(suite),32,1,seed+"-development")
+def select_suite(records: Sequence[dict[str, Any]], development_count: int=32, holdout_count: int=16, seed: str=SEED) -> tuple[list[dict[str, Any]],list[dict[str, Any]],list[dict[str, Any]]]:
+    count=development_count+holdout_count
+    suite,_=evaluation_tuning.select_split(list(records),count,1,seed)
+    development,_=evaluation_tuning.select_split(list(suite),development_count,1,seed+"-development")
     ids={x["positionId"] for x in development};holdout=[x for x in suite if x["positionId"] not in ids]
-    if len(suite)!=48 or len(development)!=32 or len(holdout)!=16:raise SearchTuningError("Suite partition count mismatch")
+    if len(suite)!=count or len(development)!=development_count or len(holdout)!=holdout_count:raise SearchTuningError("Suite partition count mismatch")
     return suite,development,holdout
 
 
@@ -158,7 +158,7 @@ def prepare(args: argparse.Namespace) -> None:
     BASE_ID, BASE_HASH = base["profileId"], base["canonicalHash"]
     entries=registry_entries(Path(args.registry));variants=generate_variants(base,entries)
     if len(variants)>6 or len(variants)==0:raise SearchTuningError("Unexpected variant count")
-    suite,development,holdout=select_suite(read_jsonl(Path(args.selection)))
+    suite,development,holdout=select_suite(read_jsonl(Path(args.selection)),args.development_count,args.holdout_count)
     if root.exists():
         if not args.force:raise SearchTuningError(f"Output exists; use --force: {root}")
         shutil.rmtree(root)
@@ -175,8 +175,8 @@ def prepare(args: argparse.Namespace) -> None:
     for entry in entries:
         inventory.append({"registryName":entry["name"],"generatedFieldPath":entry["source"]["symbol"],"type":entry["type"],"currentValue":base["parameters"][entry["name"]],"minimum":entry["minimum"],"maximum":entry["maximum"],"step":entry["step"],"productionConsumer":entry["consumer"],"searchStage":entry["category"],"scalar":not isinstance(base["parameters"][entry["name"]],list),"safeForIsolatedPerturbation":entry["name"] in SELECTED})
     write(root/"variants.json",pretty({"schemaVersion":1,"baselineProfileId":BASE_ID,"baselineProfileHash":BASE_HASH,"selectedParameters":list(SELECTED),"inventory":inventory,"variants":built}))
-    manifest={"schemaVersion":1,"toolVersion":TOOL_VERSION,"suiteSeed":SEED,"suiteCount":48,"developmentCount":32,"holdoutCount":16,"sourceSelectionSha256":sha(Path(args.selection)),"suiteSha256":sha(root/"suite.jsonl"),"developmentSha256":sha(root/"development.jsonl"),"holdoutSha256":sha(root/"holdout.jsonl"),"developmentOnly":True,"promotionEligible":False}
-    write(root/"manifest.json",pretty(manifest));print(f"Prepared {len(built)} variants and 48 positions")
+    manifest={"schemaVersion":1,"toolVersion":TOOL_VERSION,"suiteSeed":SEED,"suiteCount":len(suite),"developmentCount":len(development),"holdoutCount":len(holdout),"sourceSelectionSha256":sha(Path(args.selection)),"suiteSha256":sha(root/"suite.jsonl"),"developmentSha256":sha(root/"development.jsonl"),"holdoutSha256":sha(root/"holdout.jsonl"),"developmentOnly":True,"promotionEligible":False}
+    write(root/"manifest.json",pretty(manifest));print(f"Prepared {len(built)} variants and {len(suite)} positions")
 
 
 def validate_pv(fen: str, moves: Sequence[str]) -> bool:
@@ -324,14 +324,14 @@ def inspect(args: argparse.Namespace) -> None:
     write(root/"failures.jsonl",jsonl(failures))
     artifact_paths=(root/"manifest.json",root/"suite.jsonl",root/"development.jsonl",root/"holdout.jsonl",root/"variants.json",root/"variant-results.jsonl",root/"ranking.json",root/"failures.jsonl",root/"smoke-match.json")
     artifacts={path.name:sha(path) for path in artifact_paths if path.exists()}
-    summary={"schemaVersion":1,"searchEntriesInventoried":14,"parametersSelected":list(SELECTED),"variantsGenerated":len(read_json(root/"variants.json")["variants"]),"variantsRejected":sum(not x["eligible"] for x in ranking["ranking"]),"suitePositions":48,"developmentPositions":32,"holdoutPositions":16,"candidateSelectionOutcome":ranking["outcome"],"selectedCandidate":ranking.get("selected"),"smokeMatch":smoke_result,"developmentOnly":True,"promotionEligible":False,"productionBehaviorChanges":0,"artifacts":artifacts}
+    manifest=read_json(root/"manifest.json");summary={"schemaVersion":1,"searchEntriesInventoried":14,"parametersSelected":list(SELECTED),"variantsGenerated":len(read_json(root/"variants.json")["variants"]),"variantsRejected":sum(not x["eligible"] for x in ranking["ranking"]),"suitePositions":manifest["suiteCount"],"developmentPositions":manifest["developmentCount"],"holdoutPositions":manifest["holdoutCount"],"candidateSelectionOutcome":ranking["outcome"],"selectedCandidate":ranking.get("selected"),"smokeMatch":smoke_result,"developmentOnly":True,"promotionEligible":False,"productionBehaviorChanges":0,"artifacts":artifacts}
     write(root/"summary.json",pretty(summary));print(f"Phase 17 outcome: {ranking['outcome']}")
 
 
 def parser() -> argparse.ArgumentParser:
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest="command",required=True)
     def common(c):c.add_argument("--output-dir",default=str(DEFAULT_ROOT));c.add_argument("--base-profile",default=str(DEFAULT_PROFILE));c.add_argument("--base-engine",default=str(DEFAULT_ENGINE));c.add_argument("--annotations",default=str(DEFAULT_ANNOTATIONS));c.add_argument("--candidate-id",default=FINAL_ID)
-    c=sub.add_parser("prepare");common(c);c.add_argument("--registry",default=str(DEFAULT_REGISTRY));c.add_argument("--selection",default=str(DEFAULT_SELECTION));c.add_argument("--force",action="store_true");c.set_defaults(function=prepare)
+    c=sub.add_parser("prepare");common(c);c.add_argument("--registry",default=str(DEFAULT_REGISTRY));c.add_argument("--selection",default=str(DEFAULT_SELECTION));c.add_argument("--development-count",type=int,default=32);c.add_argument("--holdout-count",type=int,default=16);c.add_argument("--force",action="store_true");c.set_defaults(function=prepare)
     c=sub.add_parser("run-suite");common(c);c.add_argument("--depth",type=int,default=6);c.set_defaults(function=run_suite)
     c=sub.add_parser("rank");common(c);c.add_argument("--depth",type=int,default=6);c.set_defaults(function=rank)
     c=sub.add_parser("smoke-match");common(c);c.add_argument("--depth",type=int,default=4);c.add_argument("--max-plies",type=int,default=160);c.set_defaults(function=smoke)

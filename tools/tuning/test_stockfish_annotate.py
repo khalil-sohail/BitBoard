@@ -155,6 +155,9 @@ def build_source(root: Path) -> Path:
         sample_every=1,
         include_terminal=True,
         minimum_split_games=1,
+        maximum_retained_positions=1000,
+        maximum_positions_per_game=30,
+        phase_quotas={"opening": 10, "middlegame": 10, "endgame": 10},
     ))
     return output
 

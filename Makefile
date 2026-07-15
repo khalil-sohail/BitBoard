@@ -1,4 +1,6 @@
-.PHONY: verify verify-engine verify-website tune tune-resume tune-inspect tune-verify tune-clean tune-match tune-promote-prepare tuning-promotion-inspect tuning-promotion-prepare tuning-promotion-verify tuning-promotion-promote tuning-promotion-rollback engine-release
+.PHONY: verify verify-engine verify-website tune tune-estimate tune-resume tune-inspect tune-verify tune-clean tuning-clean-all tune-match tune-promote-prepare tuning-promotion-inspect tuning-promotion-prepare tuning-promotion-verify tuning-promotion-promote tuning-promotion-rollback engine-release
+
+override TUNING_GENERATED_DIRS := tuning/annotations tuning/builds tuning/candidates tuning/datasets tuning/features tuning/promotion tuning/runs tuning/search tuning/selections tuning/time tuning/validation
 
 TUNE_ARGS = --release-id "$(RELEASE_ID)" $(if $(TUNE_MODE),--mode "$(TUNE_MODE)",) \
 	$(if $(STOCKFISH),--stockfish "$(STOCKFISH)",) \
@@ -13,6 +15,10 @@ endef
 tune:
 	$(call require_release_id,tune)
 	.venv/bin/python tools/tuning/tuning_pipeline.py run $(TUNE_ARGS)
+
+tune-estimate:
+	$(call require_release_id,tune-estimate)
+	.venv/bin/python tools/tuning/tuning_pipeline.py estimate $(TUNE_ARGS)
 
 tune-resume:
 	$(call require_release_id,tune-resume)
@@ -37,6 +43,25 @@ tune-promote-prepare:
 tune-clean:
 	$(call require_release_id,tune-clean)
 	.venv/bin/python tools/tuning/tuning_pipeline.py clean --release-id "$(RELEASE_ID)" $(if $(filter 1,$(CONFIRM)),--confirm,)
+
+tuning-clean-all:
+	@test "$(CONFIRM)" = "1" || (echo "CONFIRM=1 is required (this removes all generated tuning artifacts)" >&2; exit 2)
+	@tracked="$$(git ls-files -- $(TUNING_GENERATED_DIRS))"; \
+	if test -n "$$tracked"; then \
+		echo "Refusing cleanup: tracked files exist under generated tuning directories:" >&2; \
+		printf '%s\n' "$$tracked" >&2; \
+		exit 2; \
+	fi; \
+	removed=0; \
+	for directory in $(TUNING_GENERATED_DIRS); do \
+		if test -d "$$directory"; then \
+			count="$$(find "$$directory" -mindepth 1 -print | wc -l)"; \
+			removed="$$((removed + count))"; \
+			find "$$directory" -mindepth 1 -delete; \
+		fi; \
+	done; \
+	echo "Removed $$removed generated entries from: $(TUNING_GENERATED_DIRS)"; \
+	echo "Preserved: tuning/pgn tuning/engines tuning/profiles tuning/schema tuning/parameter-registry.json tuning/pipeline-config.json tuning/promotion-policy.json"
 
 verify: verify-engine verify-website
 

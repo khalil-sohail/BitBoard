@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -131,6 +132,9 @@ def config(pgn_dir: Path, output: Path, **overrides: Any) -> dataset.BuildConfig
         "min_ply": 0,
         "sample_every": 1,
         "minimum_split_games": 1,
+        "maximum_retained_positions": 10000,
+        "maximum_positions_per_game": 999,
+        "phase_quotas": {"opening": 333, "middlegame": 333, "endgame": 333},
     }
     values.update(overrides)
     return dataset.BuildConfig(**values)
@@ -145,7 +149,8 @@ def build_fixture(root: Path, pgn_text: str = LEGAL, **overrides: Any) -> Path:
 
 
 def load_positions(output: Path) -> list[dict[str, Any]]:
-    return dataset.read_jsonl(output / "positions.jsonl")
+    return sorted(dataset.read_jsonl(output / "positions.jsonl"),
+                  key=lambda row: (row["sourceFile"], row["sourceGameIndex"], row["ply"]))
 
 
 def parse_one(text: str) -> Any:
@@ -356,8 +361,8 @@ def main() -> int:
             json.loads((legal_output / "manifest.json").read_text())["parser"] == {
                 "distribution": "python-chess", "distributionVersion": "1.999", "libraryVersion": chess.__version__
             }, "parser metadata mismatch"))
-        runner.check("marks the current corpus provisional", lambda: require(
-            json.loads((legal_output / "summary.json").read_text())["corpusStatus"] == "provisional", "corpus status mismatch"))
+        runner.check("marks the current corpus as a bounded sample", lambda: require(
+            json.loads((legal_output / "summary.json").read_text())["corpusStatus"] == "bounded-deterministic-sample", "corpus status mismatch"))
 
         def refuse_overwrite() -> None:
             try:
@@ -381,8 +386,8 @@ def main() -> int:
             try:
                 dataset.build_dataset(config(pgn_dir, output))
             except dataset.DatasetError:
-                require(not output.exists(), "partial final output left behind")
-                require(not list(output.parent.glob(".out.tmp-*")), "temporary output left behind")
+                require(not (output / "manifest.json").exists(), "partial final manifest left behind")
+                require((output / "work/dataset.sqlite").is_file(), "resumable database missing")
                 return
             raise AssertionError("invalid corpus built")
         runner.check("leaves no partial dataset on failure", no_partial_output)
@@ -407,8 +412,6 @@ def main() -> int:
             other_split = "test" if original_split != "test" else "train"
             records[1]["split"] = other_split
             rewrite_artifact(output, "positions.jsonl", records)
-            for split in ("train", "validation", "test"):
-                rewrite_artifact(output, f"{split}.jsonl", [r for r in records if r["split"] == split])
             try:
                 dataset.validate_dataset(output)
             except dataset.DatasetError as error:
@@ -470,13 +473,16 @@ def main() -> int:
             "production tuning artifact changed"))
 
     real_pgn_dir = ROOT / "tuning/pgn"
-    if real_pgn_dir.is_dir() and any(real_pgn_dir.glob("*.pgn")):
+    if os.environ.get("BITBOARD_RUN_PRIVATE_TUNING_TESTS") == "1" and real_pgn_dir.is_dir() and any(real_pgn_dir.glob("*.pgn")):
         def real_integration() -> None:
             with tempfile.TemporaryDirectory() as temporary:
                 output = Path(temporary) / "real-dataset"
                 validation = dataset.build_dataset(dataset.BuildConfig(
                     pgn_dir=real_pgn_dir,
                     output_dir=output,
+                    maximum_accepted_games=100,
+                    scan_all_input_games=False,
+                    maximum_retained_positions=1000,
                 ))
                 require(validation["positions"] > 0, "real corpus produced no positions")
         runner.check("real local PGN corpus integration", real_integration)

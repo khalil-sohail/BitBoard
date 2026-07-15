@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 21 deterministic, resumable end-to-end tuning orchestration."""
+"""Phase 21.1 bounded, deterministic, resumable tuning orchestration."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
 SCHEMA_VERSION = 1
-TOOL_VERSION = "21.1"
+TOOL_VERSION = "21.2"
 STATUSES = {"pending", "running", "completed", "failed", "blocked", "skipped", "stale"}
 RELEASE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")
 HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
@@ -276,6 +276,7 @@ class Pipeline:
             "searchTuning": self.config["searchTuning"], "time": {**self.config["time"], "enabled": self.tune_time},
             "opening": self.config["opening"], "regressions": self.config["regressions"],
             "match": {**self.config["match"], "enabled": self.run_match}, "promotion": self.config["promotion"],
+            "resources": self.config["resources"],
         }
 
     def initial_state(self) -> dict[str, Any]:
@@ -310,7 +311,8 @@ class Pipeline:
             value = {"value": value}
         result = value | {"releaseId": self.release_id, "mode": self.mode}
         if stage.stage_id == "dataset":
-            result |= {"selection": self.mode_config["selection"], "selectionSeed": self.config["evaluationFitting"]["seed"],
+            result |= {"datasetPolicy": self.mode_config["dataset"],
+                       "selection": self.mode_config["selection"], "selectionSeed": self.config["evaluationFitting"]["seed"],
                        "minimumAcceptedGames": self.mode_config["minimumAcceptedGames"], "minimumFinalPositions": self.mode_config["minimumFinalPositions"]}
         elif stage.stage_id == "evaluation_validation":
             result |= {"auditPositions": self.mode_config["auditPositions"], "smokeMaximumPlies": self.mode_config["smokeMaximumPlies"]}
@@ -350,6 +352,18 @@ class Pipeline:
         for relative, expected in record.get("outputChecksums", {}).items():
             path = ROOT / relative
             if not path.is_file() or sha256_file(path) != expected:
+                return False
+        if stage.stage_id == "dataset":
+            database = self.run_dir / "dataset/work/dataset.sqlite"; manifest = self.run_dir / "dataset/manifest.json"
+            if not database.is_file() or not manifest.is_file(): return False
+            try:
+                import sqlite3
+                sys.path.insert(0, str(ROOT / "tools/tuning")); import pgn_dataset
+                connection = sqlite3.connect(database)
+                logical = pgn_dataset.database_logical_checksum(connection); integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+                connection.close()
+                if integrity != "ok" or logical != read_json(manifest)["storage"]["databaseLogicalSha256"]: return False
+            except Exception:
                 return False
         return True
 
@@ -421,6 +435,31 @@ class Pipeline:
         stockfish = self.run_command("preflight", self._tool("stockfish_annotate.py", "verify-engine", "--engine", str(self.stockfish)))
         engine = self.run_command("preflight", [str(ROOT / "engine/chess-engine"), "--mode=gui"], input_text="uci\nquit\n")
         disk = shutil.disk_usage(self.run_dir.parent if self.run_dir.parent.exists() else ROOT / "tuning")
+        resources = self.config["resources"]; dataset_policy = self.mode_config["dataset"]
+        cap = int(dataset_policy["maximumRetainedPositions"])
+        estimated_sqlite = cap * int(resources["averageSqliteBytesPerRecord"])
+        estimated_export = cap * int(resources["averageExportBytesPerRecord"])
+        minimum_disk = int(resources["minimumFreeDiskGb"]) * 1024 ** 3
+        required_disk = estimated_sqlite + estimated_export * 2 + minimum_disk
+        memory_available_kb = 0
+        with contextlib.suppress(OSError):
+            for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+                if line.startswith("MemAvailable:"): memory_available_kb = int(line.split()[1]); break
+        if memory_available_kb and memory_available_kb < int(resources["minimumFreeMemoryMb"]) * 1024:
+            raise PipelineError(f"preflight available memory is below {resources['minimumFreeMemoryMb']} MiB")
+        if disk.free < required_disk:
+            raise PipelineError(f"preflight disk deficit: available={disk.free} required={required_disk}")
+        selected_policy = self.mode_config["selection"]
+        required_positions = sum(int(selected_policy[key]) for key in ("train", "validation", "test")) + int(self.mode_config["auditPositions"])
+        if required_positions > cap:
+            raise PipelineError(f"dataset retained-position cap {cap} cannot satisfy selection and audit requirement {required_positions}")
+        split_capacity = cap // 3
+        split_requirements = {"train": int(selected_policy["train"]),
+                              "validation": int(selected_policy["validation"]),
+                              "test": int(selected_policy["test"]) + int(self.mode_config["auditPositions"])}
+        deficits = {split: required for split, required in split_requirements.items() if required > split_capacity}
+        if deficits:
+            raise PipelineError(f"dataset retained-position cap provides about {split_capacity} records per balanced split, below requirements {deficits}")
         git = self.run_command("preflight", ["git", "rev-parse", "HEAD"], allow_failure=True).stdout.strip()
         status = self.run_command("preflight", ["git", "status", "--porcelain"], allow_failure=True).stdout.splitlines()
         report = {
@@ -429,6 +468,10 @@ class Pipeline:
                          "openingBook": self.config["opening"]["book"], "make": "make", "compiler": "g++", "node": "node", "npm": "npm"},
             "identities": {"stockfishOutput": stockfish.stdout.strip().splitlines()[-1:] or [], "engineUci": [line for line in engine.stdout.splitlines() if line.startswith("id ") or "tuning profile=" in line]},
             "checksums": {"stockfish": sha256_file(self.stockfish), "productionEngine": sha256_file(ROOT / "engine/chess-engine"), "openingBook": sha256_file(ROOT / self.config["opening"]["book"])},
+            "resources": {"availableMemoryMb": memory_available_kb // 1024 if memory_available_kb else None,
+                          "maximumDatasetRssMb": resources["maximumDatasetRssMb"], "availableDiskBytes": disk.free,
+                          "estimatedSqliteBytes": estimated_sqlite, "estimatedExportBytes": estimated_export,
+                          "estimatedTemporaryBytes": estimated_export, "requiredWorkingBytesWithSafetyMargin": required_disk},
         }
         write_json(self.run_dir / "logs/preflight-operational.json", {"diskFreeBytes": disk.free, "gitCommit": git or None,
                    "dirtyWarning": bool(status), "statusEntries": len(status), "recordedAt": int(time.time())})
@@ -442,18 +485,27 @@ class Pipeline:
     def action_dataset(self) -> list[Path]:
         dataset = self.run_dir / "dataset"; selection = self.run_dir / "features/selection"
         dataset_id = f"pgn-derived-{self.release_id}"
-        settings = self.config["dataset"]
-        self.run_command("dataset", self._tool("pgn_dataset.py", "build", "--pgn-dir", str(ROOT / "tuning/pgn"), "--output-dir", str(dataset),
-                                                       "--dataset-version", dataset_id, "--min-ply", str(settings["minPly"]), "--sample-every", str(settings["sampleEvery"]),
-                                                       "--train-ratio", str(settings["trainRatio"]), "--validation-ratio", str(settings["validationRatio"]),
-                                                       "--test-ratio", str(settings["testRatio"]), "--split-seed", settings["splitSeed"], "--minimum-split-games", "1", "--force"))
+        settings = self.config["dataset"]; policy = self.mode_config["dataset"]; resources = self.config["resources"]
+        arguments = self._tool("pgn_dataset.py", "build", "--pgn-dir", str(ROOT / "tuning/pgn"), "--output-dir", str(dataset),
+            "--dataset-version", dataset_id, "--min-ply", str(settings["minPly"]), "--sample-every", str(settings["sampleEvery"]),
+            "--train-ratio", str(settings["trainRatio"]), "--validation-ratio", str(settings["validationRatio"]),
+            "--test-ratio", str(settings["testRatio"]), "--split-seed", settings["splitSeed"], "--minimum-split-games", "1",
+            "--maximum-retained-positions", str(policy["maximumRetainedPositions"]), "--maximum-positions-per-game", str(policy["maximumPositionsPerGame"]),
+            "--opening-quota", str(policy["phaseQuotas"]["opening"]), "--middlegame-quota", str(policy["phaseQuotas"]["middlegame"]),
+            "--endgame-quota", str(policy["phaseQuotas"]["endgame"]), "--sampling-seed", self.config["evaluationFitting"]["seed"],
+            "--maximum-rss-mb", str(resources["maximumDatasetRssMb"]), "--warning-rss-mb", str(resources["warningDatasetRssMb"]),
+            "--scan-all-input-games" if policy["scanAllInputGames"] else "--no-scan-all-input-games")
+        if policy["maximumAcceptedGames"] is not None: arguments += ["--maximum-accepted-games", str(policy["maximumAcceptedGames"])]
+        if (dataset / "work/dataset.sqlite").is_file() and not (dataset / "manifest.json").is_file(): arguments += ["--resume", "--force"]
+        elif dataset.exists(): arguments.append("--force")
+        self.run_command("dataset", arguments)
         summary = read_json(dataset / "summary.json")
         games = int(summary.get("games", {}).get("accepted", 0)); positions = int(summary.get("positions", {}).get("final", 0))
         if games < self.mode_config["minimumAcceptedGames"] or positions < self.mode_config["minimumFinalPositions"]:
             raise PipelineError(f"{self.mode} dataset policy deficit: accepted games {games}/{self.mode_config['minimumAcceptedGames']}, positions {positions}/{self.mode_config['minimumFinalPositions']}")
-        position_rows = (dataset / "positions.jsonl").read_text(encoding="utf-8").splitlines()
-        sides = {json.loads(line)["sideToMove"] for line in position_rows if line.strip()}
-        phases = {json.loads(line)["gamePhase"] for line in position_rows if line.strip()}
+        sys.path.insert(0, str(ROOT / "tools/tuning")); import pgn_dataset
+        validation = pgn_dataset.validate_dataset(dataset)
+        sides = set(validation["sideCounts"]); phases = set(validation["phaseCounts"])
         if sides != {"white", "black"}:
             raise PipelineError("dataset side-to-move parity guard failed; both white and black are required")
         if phases != {"opening", "middlegame", "endgame"}:
@@ -464,7 +516,8 @@ class Pipeline:
                                                        "--test-count", str(selected["test"]), "--max-per-game", str(selected["maxPerGame"]),
                                                        "--seed", self.config["evaluationFitting"]["seed"], "--force"))
         metadata = self._write_stage_metadata(dataset, "dataset", {"datasetId": dataset_id, "inputManifest": "inputs/pgn-manifest.json", "selectionManifest": "features/selection/manifest.json"})
-        return [dataset, selection, metadata]
+        return [dataset / "manifest.json", dataset / "positions.jsonl", dataset / "skipped-games.jsonl",
+                dataset / "summary.json", selection, metadata]
 
     def _annotate(self, stage_id: str, selection_manifest: Path, output: Path) -> None:
         annotation = self.config["annotation"]
@@ -541,7 +594,7 @@ class Pipeline:
         self._export_features("evaluation_validation", annotations, candidate_features, candidate / "chess-engine", selection / "manifest.json", profile["profileId"], profile["canonicalHash"])
         self.run_command("evaluation_validation", self._tool("evaluation_candidate_validate.py", "static-audit", *common, "--baseline-features", str(baseline_features), "--candidate-features", str(candidate_features), "--output-dir", str(validation)))
         self.run_command("evaluation_validation", self._tool("evaluation_candidate_validate.py", "search-audit", *common, "--selection-dir", str(selection), "--annotation-dir", str(annotations),
-                                                                  "--baseline-features", str(baseline_features), "--output-dir", str(validation), "--count", "48", "--depth", str(self.config["evaluationValidation"]["searchDepth"])))
+                                                                  "--baseline-features", str(baseline_features), "--output-dir", str(validation), "--count", str(self.mode_config["evaluationSearchPositions"]), "--depth", str(self.config["evaluationValidation"]["searchDepth"])))
         self.run_command("evaluation_validation", self._tool("evaluation_candidate_validate.py", "smoke-match", *common, "--output-dir", str(validation),
                                                                   "--depth", str(self.config["evaluationValidation"]["smokeDepth"]), "--max-plies", str(self.mode_config["smokeMaximumPlies"])))
         self.run_command("evaluation_validation", self._tool("evaluation_candidate_validate.py", "inspect", *common, "--selection-dir", str(selection), "--annotation-dir", str(annotations), "--output-dir", str(validation)))
@@ -555,7 +608,9 @@ class Pipeline:
         common = ["--output-dir", repo_path(root), "--base-profile", repo_path(candidate / "profile.json"), "--base-engine", repo_path(candidate / "chess-engine"),
                   "--annotations", repo_path(annotations), "--candidate-id", f"candidate-search-{self.release_id}-0001"]
         self.run_command("search_tuning", self._tool("search_tuning.py", "prepare", *common, "--registry", "tuning/parameter-registry.json",
-                                                   "--selection", repo_path(self.run_dir / "evaluation-validation/selection/selection.jsonl"), "--force"))
+                                                   "--selection", repo_path(self.run_dir / "evaluation-validation/selection/selection.jsonl"),
+                                                   "--development-count", str(self.mode_config["searchDevelopment"]),
+                                                   "--holdout-count", str(self.mode_config["searchHoldout"]), "--force"))
         self.run_command("search_tuning", self._tool("search_tuning.py", "run-suite", *common, "--depth", str(self.mode_config["searchDepth"])))
         self.run_command("search_tuning", self._tool("search_tuning.py", "rank", *common, "--depth", str(self.mode_config["searchDepth"])))
         self.run_command("search_tuning", self._tool("search_tuning.py", "smoke-match", *common, "--depth", "3", "--max-plies", str(self.mode_config["smokeMaximumPlies"])))
@@ -858,6 +913,34 @@ class Pipeline:
                  f"Promotion blockers: {', '.join(summary['promotionBlockers']) or 'none'}", f"Release executable: {summary['releaseExecutable']}"]
         print("\n".join(lines))
 
+    def estimate(self) -> int:
+        """Run a bounded stratified corpus estimate without creating a run."""
+        sys.path.insert(0, str(ROOT / "tools/tuning")); import pgn_dataset
+        policy = self.mode_config["dataset"]; settings = self.config["dataset"]; resources = self.config["resources"]
+        config = pgn_dataset.BuildConfig(
+            pgn_dir=ROOT / "tuning/pgn", output_dir=Path("/tmp/bitboard-estimate-unused"),
+            dataset_version=f"pgn-derived-{self.release_id}", min_ply=settings["minPly"], sample_every=settings["sampleEvery"],
+            train_ratio=settings["trainRatio"], validation_ratio=settings["validationRatio"], test_ratio=settings["testRatio"],
+            split_seed=settings["splitSeed"], maximum_accepted_games=policy["maximumAcceptedGames"],
+            scan_all_input_games=policy["scanAllInputGames"], maximum_retained_positions=policy["maximumRetainedPositions"],
+            maximum_positions_per_game=policy["maximumPositionsPerGame"], phase_quotas=policy["phaseQuotas"],
+            sampling_seed=self.config["evaluationFitting"]["seed"], maximum_rss_mb=resources["maximumDatasetRssMb"],
+            warning_rss_mb=resources["warningDatasetRssMb"])
+        report = pgn_dataset.estimate_corpus(config)
+        disk = shutil.disk_usage(ROOT / "tuning"); memory_mb = None
+        with contextlib.suppress(OSError):
+            memory_mb = next(int(line.split()[1]) // 1024 for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:"))
+        selection_count = sum(int(self.mode_config["selection"][key]) for key in ("train", "validation", "test"))
+        annotation_count = selection_count + int(self.mode_config["auditPositions"])
+        report.update({"releaseId": self.release_id, "mode": self.mode,
+                       "annotation": {"positions": annotation_count, "stockfishNodes": self.stockfish_nodes,
+                                      "roughSeconds": annotation_count * self.stockfish_nodes * 0.0000009},
+                       "resources": {"configuredMemoryCeilingMb": resources["maximumDatasetRssMb"],
+                                     "availableMemoryMb": memory_mb, "availableDiskBytes": disk.free,
+                                     "minimumFreeDiskGb": resources["minimumFreeDiskGb"]},
+                       "labels": {"measured": "bounded stratified parser sample", "estimated": "linear planning estimate"}})
+        print(json.dumps(report, indent=2, sort_keys=True)); return 0
+
     def inspect(self) -> int:
         if not self.state_path.is_file(): raise PipelineError(f"run does not exist: {self.release_id}")
         state = self.load_state(); current_pgns = discover_pgns(ROOT / "tuning/pgn"); recorded = read_json(self.run_dir / "inputs/pgn-manifest.json").get("files", []) if (self.run_dir / "inputs/pgn-manifest.json").is_file() else []
@@ -916,7 +999,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--release-id", required=True); command.add_argument("--mode", choices=("prototype", "full"))
         command.add_argument("--stockfish"); command.add_argument("--stockfish-nodes", type=int); command.add_argument("--tune-time", action="store_true", default=None); command.add_argument("--run-match", action="store_true", default=None)
         command.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    for name in ("run", "resume", "inspect", "verify", "promote-prepare"):
+    for name in ("run", "resume", "inspect", "verify", "promote-prepare", "estimate"):
         command = commands.add_parser(name); common(command)
     clean = commands.add_parser("clean"); clean.add_argument("--release-id", required=True); clean.add_argument("--confirm", action="store_true")
     return result
@@ -929,6 +1012,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pipeline = Pipeline(args.release_id, args.mode, args.stockfish, args.stockfish_nodes, args.tune_time, args.run_match, args.config)
         if args.command in {"run", "resume", "promote-prepare"}: return pipeline.run()
         if args.command == "inspect": return pipeline.inspect()
+        if args.command == "estimate": return pipeline.estimate()
         if args.command == "verify": return pipeline.verify()
         raise PipelineError(f"unsupported command: {args.command}")
     except PipelineError as error:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 15 deterministic development-only evaluation tuning prototype."""
+"""Deterministic evaluation fitting and bounded corpus selection."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ SCHEMA_VERSION = 1
 TOOL_VERSION = "1"
 ALGORITHM_VERSION = "deterministic-stratified-sha256-v1"
 FIT_METHOD = "baseline-centered-ridge-regression-v1"
-DEFAULT_SEED = "bitboard-eval-prototype-selection-v1"
+DEFAULT_SEED = "bitboard-eval-selection-v2"
 DEFAULT_LAMBDAS = (0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)
 SPLITS = ("train", "validation", "test")
 PHASES = ("opening", "middlegame", "endgame")
@@ -206,8 +206,7 @@ def select_command(args: argparse.Namespace) -> None:
     dataset, output = Path(args.dataset_dir), Path(args.output_dir)
     validation = pgn_dataset.validate_dataset(dataset)
     manifest = validation["manifest"]
-    positions = pgn_dataset.read_jsonl(dataset / "positions.jsonl")
-    if not any(record["sideToMove"] == "white" for record in positions) or not any(record["sideToMove"] == "black" for record in positions):
+    if set(validation.get("sideCounts", {})) != {"white", "black"}:
         raise TuningError("Source dataset is one-sided; build a separate --sample-every 1 development dataset")
     if output.exists() and not args.force:
         raise TuningError(f"Output exists; use --force: {output}")
@@ -215,9 +214,12 @@ def select_command(args: argparse.Namespace) -> None:
     warnings: list[str] = []
     requested = {"train": args.train_count, "validation": args.validation_count, "test": args.test_count}
     for split in SPLITS:
-        records = [record for record in positions if record["split"] == split]
-        split_selected, split_warnings = select_split(records, requested[split], args.max_per_game, args.seed + "\0" + split)
-        selected.extend(split_selected); warnings.extend(f"{split}: {warning}" for warning in split_warnings)
+        try:
+            split_selected = pgn_dataset.select_balanced_positions(
+                dataset, split, requested[split], args.max_per_game, args.seed + "\0" + split)
+        except pgn_dataset.DatasetError as error:
+            raise TuningError(str(error)) from error
+        selected.extend(split_selected)
     selection = []
     for index, record in enumerate(selected, 1):
         rc = result_class(float(record["resultFromSideToMove"]))
@@ -304,7 +306,7 @@ def quantize(continuous_delta: float, baseline: int, registry: Mapping[str, Any]
     candidate = min(max(quantized, baseline - cap), baseline + cap)
     # Ensure the cap/bounds result is still on the registry lattice.
     candidate = minimum + int(Decimal(str((candidate - minimum) / step)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)) * step
-    return candidate, {"baselineValue": baseline, "continuousValue": continuous, "quantizedValue": quantized, "candidateValue": candidate, "absoluteDelta": abs(candidate-baseline), "registryBounds": {"minimum": minimum, "maximum": maximum}, "registryStep": step, "prototypeCap": cap, "clamped": candidate != raw_quantized}
+    return candidate, {"baselineValue": baseline, "continuousValue": continuous, "quantizedValue": quantized, "candidateValue": candidate, "absoluteDelta": abs(candidate-baseline), "registryBounds": {"minimum": minimum, "maximum": maximum}, "registryStep": step, "deltaCap": cap, "clamped": candidate != raw_quantized}
 
 
 def correlation(xs: Sequence[float], ys: Sequence[float]) -> float | None:
@@ -365,8 +367,8 @@ def fit_command(args: argparse.Namespace) -> None:
         candidates.append({"lambda":regularization,"values":values,"details":details,"deltas":deltas,"validation":validation_metrics,"changed":sum(value!=0 for value in deltas.values()),"totalAbsoluteDelta":sum(abs(value) for value in deltas.values())})
     candidates.sort(key=lambda item:(item["validation"]["candidate"]["mae"],item["validation"]["candidate"]["rmse"],item["changed"],item["totalAbsoluteDelta"],-item["lambda"]))
     selected=candidates[0]
-    if selected["changed"] == 0: raise TuningError("Prototype produced no quantized parameter changes")
-    candidate_profile=copy.deepcopy(baseline); candidate_profile.update({"profileId":args.candidate_id,"parentProfileId":baseline["profileId"],"sourceBaseline":baseline["profileId"],"description":"Development-only Phase 15 evaluation tuning prototype."})
+    if selected["changed"] == 0: raise TuningError("Fitting produced no quantized parameter changes")
+    candidate_profile=copy.deepcopy(baseline); candidate_profile.update({"profileId":args.candidate_id,"parentProfileId":baseline["profileId"],"sourceBaseline":baseline["profileId"],"description":"Development-only deterministic evaluation tuning candidate."})
     for name,value in selected["values"].items(): candidate_profile["parameters"][name]=value
     unexpected=[name for name,value in candidate_profile["parameters"].items() if value!=baseline["parameters"][name] and name not in ALLOWLIST]
     if unexpected: raise TuningError(f"Unexpected changed parameters: {unexpected}")
@@ -376,9 +378,9 @@ def fit_command(args: argparse.Namespace) -> None:
     temp=Path(tempfile.mkdtemp(prefix=output.name+".tmp-",dir=output.parent if output.parent.exists() else Path.cwd()))
     try:
         write(temp/"profile.json",pretty_json(candidate_profile).encode())
-        metadata={"schemaVersion":1,"basedOnProfileId":baseline["profileId"],"basedOnProfileHash":baseline["canonicalHash"],"candidateProfileId":args.candidate_id,"candidateProfileHash":candidate_profile["canonicalHash"],"developmentOnly":True,"promotionEligible":False,"prototypeOutcome":"prototype_metric_improvement" if metrics["splits"]["validation"]["candidate"]["mae"] < metrics["splits"]["validation"]["baseline"]["mae"] else "prototype_no_validation_gain","selectionManifestChecksum":feature_manifest.get("selection",{}).get("explicitSelection",{}).get("manifestSha256"),"annotationManifestChecksum":feature_manifest["sourceAnnotations"]["manifestSha256"],"featureManifestChecksum":sha256_file(feature_dir/"manifest.json"),"featureDirectory":os.path.relpath(feature_dir.resolve(),Path.cwd().resolve()),"fittingMethod":FIT_METHOD,"regularization":selected["lambda"],"cpClippingLimit":args.cp_clip,"selectedParameters":list(ALLOWLIST),"changedParameters":[item["registryName"] for item in changed],"excludedParameters":[{"registryName":DISCONNECTED,"excludedReason":"disconnected_production_feature"}]}
+        metadata={"schemaVersion":1,"basedOnProfileId":baseline["profileId"],"basedOnProfileHash":baseline["canonicalHash"],"candidateProfileId":args.candidate_id,"candidateProfileHash":candidate_profile["canonicalHash"],"developmentOnly":True,"promotionEligible":False,"fitOutcome":"validation_metric_improvement" if metrics["splits"]["validation"]["candidate"]["mae"] < metrics["splits"]["validation"]["baseline"]["mae"] else "no_validation_gain","selectionManifestChecksum":feature_manifest.get("selection",{}).get("explicitSelection",{}).get("manifestSha256"),"annotationManifestChecksum":feature_manifest["sourceAnnotations"]["manifestSha256"],"featureManifestChecksum":sha256_file(feature_dir/"manifest.json"),"featureDirectory":os.path.relpath(feature_dir.resolve(),Path.cwd().resolve()),"fittingMethod":FIT_METHOD,"regularization":selected["lambda"],"cpClippingLimit":args.cp_clip,"selectedParameters":list(ALLOWLIST),"changedParameters":[item["registryName"] for item in changed],"excludedParameters":[{"registryName":DISCONNECTED,"excludedReason":"disconnected_production_feature"}]}
         write(temp/"metadata.json",pretty_json(metadata).encode()); write(temp/"changed-parameters.json",pretty_json({"schemaVersion":1,"parameters":changed}).encode())
-        fit_report={"schemaVersion":1,"method":FIT_METHOD,"lambdaGrid":list(DEFAULT_LAMBDAS),"selectedLambda":selected["lambda"],"cpClip":args.cp_clip,"prototypeDeltaCap":args.max_parameter_delta,"records":{"train":len(by_split["train"]),"validation":len(by_split["validation"]),"test":len(by_split["test"])},"clipping":{"recordsClipped":sum(clipped.values()),"positiveClips":clipped["positive"],"negativeClips":clipped["negative"]},"lambdaResults":[{"lambda":item["lambda"],"changedParameters":item["changed"],"totalAbsoluteDelta":item["totalAbsoluteDelta"],"validationMAE":item["validation"]["candidate"]["mae"],"validationRMSE":item["validation"]["candidate"]["rmse"]} for item in sorted(candidates,key=lambda x:x["lambda"])],"parameterDetails":selected["details"]}
+        fit_report={"schemaVersion":1,"method":FIT_METHOD,"lambdaGrid":list(DEFAULT_LAMBDAS),"selectedLambda":selected["lambda"],"cpClip":args.cp_clip,"parameterDeltaCap":args.max_parameter_delta,"records":{"train":len(by_split["train"]),"validation":len(by_split["validation"]),"test":len(by_split["test"])},"clipping":{"recordsClipped":sum(clipped.values()),"positiveClips":clipped["positive"],"negativeClips":clipped["negative"]},"lambdaResults":[{"lambda":item["lambda"],"changedParameters":item["changed"],"totalAbsoluteDelta":item["totalAbsoluteDelta"],"validationMAE":item["validation"]["candidate"]["mae"],"validationRMSE":item["validation"]["candidate"]["rmse"]} for item in sorted(candidates,key=lambda x:x["lambda"])],"parameterDetails":selected["details"]}
         write(temp/"fit-report.json",pretty_json(fit_report).encode()); write(temp/"metrics.json",pretty_json(metrics).encode())
         names=("profile.json","metadata.json","fit-report.json","metrics.json","changed-parameters.json")
         manifest={"schemaVersion":1,"candidateProfileId":args.candidate_id,"candidateProfileHash":candidate_profile["canonicalHash"],"developmentOnly":True,"promotionEligible":False,"artifacts":artifact_info(temp,names),"tool":{"name":"evaluation_tuning.py","version":TOOL_VERSION}}

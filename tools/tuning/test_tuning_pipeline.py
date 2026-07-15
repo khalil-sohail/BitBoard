@@ -152,6 +152,15 @@ class CandidateAndPolicyTests(unittest.TestCase):
         self.assertFalse(config["promotion"]["automaticPromotion"])
         self.assertEqual(config["match"]["minimumGames"], 1000)
 
+    def test_bounded_modes_and_full_scale_are_distinct(self) -> None:
+        config = pipeline.read_json(pipeline.DEFAULT_CONFIG); prototype = config["modes"]["prototype"]; full = config["modes"]["full"]
+        self.assertEqual(prototype["dataset"]["maximumAcceptedGames"], 10000)
+        self.assertFalse(prototype["dataset"]["scanAllInputGames"]); self.assertTrue(full["dataset"]["scanAllInputGames"])
+        self.assertLess(prototype["dataset"]["maximumRetainedPositions"], full["dataset"]["maximumRetainedPositions"])
+        self.assertLess(prototype["selection"]["train"], full["selection"]["train"])
+        self.assertLess(prototype["searchDevelopment"], full["searchDevelopment"])
+        self.assertEqual(config["resources"]["maximumDatasetRssMb"], 8192)
+
     def test_stage_status_vocabulary(self) -> None:
         self.assertEqual(pipeline.STATUSES, {"pending", "running", "completed", "failed", "blocked", "skipped", "stale"})
 
@@ -167,7 +176,7 @@ class InterfaceAndDocumentationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2); self.assertIn("RELEASE_ID is required", result.stderr)
 
     def test_make_targets_exist_and_invoke_pipeline(self) -> None:
-        for target in ("tune", "tune-resume", "tune-inspect", "tune-verify", "tune-clean", "tune-match", "tune-promote-prepare"):
+        for target in ("tune", "tune-estimate", "tune-resume", "tune-inspect", "tune-verify", "tune-clean", "tune-match", "tune-promote-prepare"):
             with self.subTest(target=target): self.assertIn(f"{target}:", self.makefile)
         self.assertIn("tuning_pipeline.py run", self.makefile); self.assertIn("tuning_pipeline.py resume", self.makefile)
         self.assertNotIn("tuning_pipeline.py promote --", self.makefile)

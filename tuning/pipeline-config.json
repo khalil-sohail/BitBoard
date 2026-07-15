@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pipelineVersion": "21.1",
+  "pipelineVersion": "21.2",
   "dataset": {
     "minPly": 12,
     "sampleEvery": 1,
@@ -13,18 +13,38 @@
     "prototype": {
       "minimumAcceptedGames": 20,
       "minimumFinalPositions": 200,
+      "dataset": {
+        "maximumAcceptedGames": 10000,
+        "scanAllInputGames": false,
+        "maximumRetainedPositions": 100000,
+        "maximumPositionsPerGame": 6,
+        "phaseQuotas": {"opening": 2, "middlegame": 3, "endgame": 1}
+      },
       "selection": {"train": 700, "validation": 150, "test": 150, "maxPerGame": 2},
       "auditPositions": 60,
       "stockfishNodes": 1000,
+      "evaluationSearchPositions": 48,
+      "searchDevelopment": 32,
+      "searchHoldout": 16,
       "searchDepth": 3,
       "smokeMaximumPlies": 40
     },
     "full": {
       "minimumAcceptedGames": 1000,
       "minimumFinalPositions": 50000,
-      "selection": {"train": 700, "validation": 150, "test": 150, "maxPerGame": 2},
-      "auditPositions": 300,
+      "dataset": {
+        "maximumAcceptedGames": null,
+        "scanAllInputGames": true,
+        "maximumRetainedPositions": 1000000,
+        "maximumPositionsPerGame": 8,
+        "phaseQuotas": {"opening": 2, "middlegame": 4, "endgame": 2}
+      },
+      "selection": {"train": 50000, "validation": 5000, "test": 5000, "maxPerGame": 2},
+      "auditPositions": 2000,
       "stockfishNodes": 100000,
+      "evaluationSearchPositions": 300,
+      "searchDevelopment": 300,
+      "searchHoldout": 150,
       "searchDepth": 6,
       "smokeMaximumPlies": 160
     }
@@ -40,7 +60,7 @@
     "allowlistPolicy": "phase15-tracked-allowlist",
     "cpClip": 1500,
     "maxParameterDelta": 20,
-    "seed": "bitboard-eval-prototype-selection-v1",
+    "seed": "bitboard-eval-selection-v2",
     "disconnectedFeatures": ["evaluation.pawns.passedBlockedDivisor"]
   },
   "evaluationValidation": {"searchDepth": 4, "smokeDepth": 3},
@@ -59,5 +79,13 @@
     "colorReversal": true
   },
   "promotion": {"prepareWhenEligible": true, "automaticPromotion": false},
+  "resources": {
+    "maximumDatasetRssMb": 8192,
+    "warningDatasetRssMb": 6144,
+    "minimumFreeMemoryMb": 4096,
+    "minimumFreeDiskGb": 20,
+    "averageExportBytesPerRecord": 900,
+    "averageSqliteBytesPerRecord": 2500
+  },
   "clean": {"requireConfirmation": true}
 }

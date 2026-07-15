@@ -11,6 +11,7 @@ import os
 import re
 import select
 import shutil
+import sqlite3
 import statistics
 import subprocess
 import sys
@@ -224,15 +225,17 @@ def audit_select_command(args: argparse.Namespace) -> None:
     dataset_manifest = read_json(dataset/"manifest.json"); phase15_manifest = read_json(phase15)
     phase15_records = read_jsonl(phase15.parent/"selection.jsonl")
     excluded_positions = {record["positionId"] for record in phase15_records}; excluded_games = {record["gameId"] for record in phase15_records}
-    eligible = []
-    with (dataset/"positions.jsonl").open("r", encoding="utf-8") as handle:
-        for line in handle:
-            record=json.loads(line)
-            if record["split"] == "test" and record["positionId"] not in excluded_positions and record["gameId"] not in excluded_games:
-                eligible.append(record)
-    eligible_games=len({record["gameId"] for record in eligible})
+    database=dataset/"work/dataset.sqlite"
+    connection=sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TEMP TABLE excluded_games(game_id TEXT PRIMARY KEY)")
+        connection.executemany("INSERT OR IGNORE INTO excluded_games VALUES(?)",((item,) for item in excluded_games))
+        eligible_games=connection.execute("SELECT COUNT(DISTINCT game_id) FROM positions WHERE split='test' AND game_id NOT IN (SELECT game_id FROM excluded_games)").fetchone()[0]
+    finally: connection.close()
     actual_target=min(args.count,eligible_games)
-    selected, deficits = evaluation_tuning.select_split(eligible,actual_target,1,args.seed)
+    try: selected=pgn_dataset.select_balanced_positions(dataset,"test",actual_target,1,args.seed,excluded_games)
+    except pgn_dataset.DatasetError as error: raise ValidationError(str(error)) from error
+    deficits=[]
     if actual_target < args.count:
         deficits.append(f"positions target={args.count} actual={actual_target} deficit={args.count-actual_target}; only {eligible_games} eligible test-split games remain after Phase 15 exclusion")
     records=[]
@@ -407,7 +410,7 @@ def search_audit_command(args:argparse.Namespace)->None:
     baseline_nodes=[item["baselineNodes"] for item in first if item["baselineNodes"] is not None];candidate_nodes=[item["candidateNodes"] for item in first if item["candidateNodes"] is not None]
     perf={"schemaVersion":1,"nonCanonicalTiming":True,"positions":len(performance),"completedDepth":{"baseline":sum(item["baselineDepth"]==args.depth for item in first),"candidate":sum(item["candidateDepth"]==args.depth for item in first)},"validForcedMovePositions":sum(item["terminationStatus"]=="forced_legal_move" for item in first),"baselineMedianNodes":statistics.median(baseline_nodes),"candidateMedianNodes":statistics.median(candidate_nodes),"medianNodeRatio":statistics.median(node_ratios),"p90NodeRatio":p90(node_ratios),"baselineMedianElapsedSeconds":statistics.median(x["baselineElapsedSeconds"] for x in performance),"candidateMedianElapsedSeconds":statistics.median(x["candidateElapsedSeconds"] for x in performance),"medianElapsedRatio":statistics.median(ratios),"p90ElapsedRatio":p90(ratios),"medianNpsRatio":statistics.median(nps_ratios),"p90NpsRatio":p90(nps_ratios),"severeSlowdownWarning":statistics.median(ratios)>1.25,"records":performance}
     output=Path(args.output_dir);output.mkdir(parents=True,exist_ok=True);write(output/"search-audit.jsonl",jsonl(first));write(output/"move-changes.jsonl",jsonl(changed));write(output/"performance.json",pretty_json(perf).encode())
-    summary={"positions":len(first),"sameBestMoves":len(first)-len(changed),"differentBestMoves":len(changed),"baselineStockfishAgreement":base_agree,"candidateStockfishAgreement":cand_agree,"bothAgree":sum(i["baselineBestMove"]==i["candidateBestMove"]==i["stockfishBestMove"] for i in first),"neitherAgree":sum(i["baselineBestMove"]!=i["stockfishBestMove"] and i["candidateBestMove"]!=i["stockfishBestMove"] for i in first),"illegalMoves":0,"crashes":0,"protocolFailures":0,"malformedInfoLines":sum(i["malformedInfoLines"] for i in first),"deterministicRerun":True}
+    summary={"positions":len(first),"requestedDepth":args.depth,"sameBestMoves":len(first)-len(changed),"differentBestMoves":len(changed),"baselineStockfishAgreement":base_agree,"candidateStockfishAgreement":cand_agree,"bothAgree":sum(i["baselineBestMove"]==i["candidateBestMove"]==i["stockfishBestMove"] for i in first),"neitherAgree":sum(i["baselineBestMove"]!=i["stockfishBestMove"] and i["candidateBestMove"]!=i["stockfishBestMove"] for i in first),"illegalMoves":0,"crashes":0,"protocolFailures":0,"malformedInfoLines":sum(i["malformedInfoLines"] for i in first),"deterministicRerun":True}
     write(output/"search-summary.json",pretty_json(summary).encode());print(f"Search audit: {len(first)} positions, {len(changed)} changed best moves")
 
 
@@ -476,7 +479,8 @@ def inspect_command(args:argparse.Namespace)->None:
     artifacts={name:{"sha256":sha256_file(output/name),**({"records":len(read_jsonl(output/name))} if name.endswith(".jsonl") else {})} for name in names}
     selection=Path(args.selection_dir);annotations=Path(args.annotation_dir)
     game_artifacts={path.name:{"sha256":sha256_file(path)} for path in sorted((output/"games").glob("game-*.pgn"))}
-    manifest={"schemaVersion":1,"candidateIdentity":frozen["candidate"],"candidateHeaderSha256":frozen["candidateHeaderSha256"],"baselineIdentity":frozen["baseline"],"phase15CandidateManifestSha256":sha256_file(Path(args.candidate_dir)/"manifest.json"),"auditSelectionSha256":sha256_file(selection/"selection.jsonl"),"stockfish":{"manifestSha256":sha256_file(annotations/"manifest.json"),"engineName":read_json(annotations/"manifest.json")["engine"]["engineName"],"binarySha256":read_json(annotations/"manifest.json")["engine"]["engineBinarySha256"]},"searchDepth":6,"gameConfiguration":{"games":20,"depth":4,"maximumPlies":160,"colorReversal":True},"validationStatus":status,"warnings":warnings,"developmentOnly":True,"promotionEligible":False,"artifacts":artifacts,"gameArtifacts":game_artifacts}
+    smoke=read_json(output/"smoke-match.json")
+    manifest={"schemaVersion":1,"candidateIdentity":frozen["candidate"],"candidateHeaderSha256":frozen["candidateHeaderSha256"],"baselineIdentity":frozen["baseline"],"phase15CandidateManifestSha256":sha256_file(Path(args.candidate_dir)/"manifest.json"),"auditSelectionSha256":sha256_file(selection/"selection.jsonl"),"stockfish":{"manifestSha256":sha256_file(annotations/"manifest.json"),"engineName":read_json(annotations/"manifest.json")["engine"]["engineName"],"binarySha256":read_json(annotations/"manifest.json")["engine"]["engineBinarySha256"]},"searchDepth":search.get("requestedDepth"),"gameConfiguration":smoke.get("configuration"),"validationStatus":status,"warnings":warnings,"developmentOnly":True,"promotionEligible":False,"artifacts":artifacts,"gameArtifacts":game_artifacts}
     write(output/"manifest.json",pretty_json(manifest).encode());summary={"schemaVersion":1,"validationStatus":status,"staticAudit":static["guardrailClassification"],"searchPositions":search["positions"],"changedBestMoves":search["differentBestMoves"],"smokeGames":smoke["games"],"engineFailures":search["crashes"]+search["protocolFailures"]+smoke["crashes"]+smoke["protocolFailures"],"warnings":warnings,"developmentOnly":True,"promotionEligible":False};write(output/"summary.json",pretty_json(summary).encode())
     print(f"Validation status: {status}")
 

@@ -71,6 +71,7 @@ TUNING_PARAMETERS.md
 /docs/TUNING_*.md
 !docs/TUNING_PIPELINE.md
 tuning/pgn/
+tuning/pgn-raw/
 tuning/datasets/
 tuning/engines/
 tuning/annotations/

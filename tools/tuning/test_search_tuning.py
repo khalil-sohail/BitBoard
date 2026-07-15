@@ -17,11 +17,11 @@ def require(value: bool, message: str) -> None:
     if not value:raise AssertionError(message)
 
 
-def fake_records() -> list[dict]:
+def fake_records(per_stratum: int = 20) -> list[dict]:
     rows=[]
     for phase in tuning.PHASES:
         for side in ("white","black"):
-            for index in range(20):
+            for index in range(per_stratum):
                 rows.append({"positionId":f"{phase}-{side}-{index}","gameId":f"g-{phase}-{side}-{index}","fen":chess.STARTING_FEN,"gamePhase":phase,"sideToMove":side,"resultClass":("win","draw","loss")[index%3],"resultFromSideToMove":(1,.5,0)[index%3],"split":"test"})
     return rows
 
@@ -33,7 +33,7 @@ def metric(agreement:int,median:int,p90:int,changed:int=1)->dict:
 def main() -> int:
     entries=tuning.registry_entries();require(len(entries)==14,"registry search count")
     chosen=tuning.selected_entries(entries);require(len(chosen)==3 and all(x["type"]=="integer" for x in chosen),"three safe scalars")
-    base=tuning.read_json(tuning.DEFAULT_PROFILE);variants=tuning.generate_variants(base,entries)
+    base=tuning.read_json(Path("tuning/profiles/builtin-default-v1.json"));variants=tuning.generate_variants(base,entries)
     require(len(variants)==6,"six one-step variants")
     hashes=[]
     for item in variants:
@@ -51,6 +51,8 @@ def main() -> int:
     require((len(suite),len(development),len(holdout))==(48,32,16),"suite partitions")
     require(not ({x["positionId"] for x in development}&{x["positionId"] for x in holdout}),"partition overlap")
     require([x["positionId"] for x in suite]==[x["positionId"] for x in tuning.select_suite(fake_records())[0]],"selection determinism")
+    full_suite,full_development,full_holdout=tuning.select_suite(fake_records(100),300,150)
+    require((len(full_suite),len(full_development),len(full_holdout))==(450,300,150),"full-mode suite partitions")
 
     board=chess.Board();first=sorted(board.legal_moves,key=lambda x:x.uci())[0];require(tuning.validate_pv(board.fen(),[first.uci()]),"legal PV")
     require(not tuning.validate_pv(board.fen(),["e2e5"]),"illegal PV rejection")

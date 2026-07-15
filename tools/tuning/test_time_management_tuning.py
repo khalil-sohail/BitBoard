@@ -18,7 +18,7 @@ def require(value:bool,message:str)->None:
 def main()->int:
     entries=tuning.registry_entries();require(len(entries)==13,"time registry count")
     chosen=tuning.selected_entries(entries);require(len(chosen)==3 and all(x["type"]=="integer" for x in chosen),"three safe time scalars")
-    base=tuning.read_json(tuning.DEFAULT_PROFILE);variants=tuning.generate_variants(base,entries);require(len(variants)==6,"six one-step variants")
+    base=tuning.read_json(Path("tuning/profiles/builtin-default-v1.json"));variants=tuning.generate_variants(base,entries);require(len(variants)==6,"six one-step variants")
     for item in variants:
         changed=[x for x in base["parameters"] if base["parameters"][x]!=item["profile"]["parameters"][x]]
         require(changed==[item["parameter"]],"one parameter per variant")

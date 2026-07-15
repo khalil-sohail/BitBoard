@@ -1,12 +1,14 @@
 # Unified tuning pipeline
 
-The Phase 21 pipeline runs Bitboard's existing PGN derivation, Stockfish annotation, evaluation fitting and validation, search tuning, time-safety checks, opening-book checks, regressions, promotion inspection, and a versioned candidate build as one resumable workflow. It uses deterministic checksums rather than file existence to decide whether a stage may be reused.
+The Phase 21.1 pipeline runs Bitboard's PGN derivation, Stockfish annotation, evaluation fitting and validation, search tuning, time-safety checks, opening-book checks, regressions, promotion inspection, and a versioned candidate build as one resumable workflow. Corpus derivation is bounded and disk-backed: PGNs are scanned sequentially, each game contributes only a deterministic phase-aware sample, and SQLite provides deduplication, top-k retention, and durable checkpoints.
 
 Tuning never promotes automatically. Match validation is also explicit because the promotion policy requires at least 1,000 games. A normal run can finish with a validated private executable while promotion remains blocked.
 
 ## Prerequisites
 
 Create `.venv` and install `tools/tuning/requirements.txt`. The pipeline expects an executable Stockfish at `tuning/engines/stockfish`, an existing production engine at `engine/chess-engine`, the tracked opening book, Make and a C++ compiler, plus Node/npm for protocol and Fair Play checks.
+
+The tracked laptop policy targets 32 GB RAM. Dataset RSS is warned at 6,144 MiB and aborted at 8,192 MiB; preflight also requires at least 4,096 MiB available memory and 20 GiB free disk after estimated SQLite/export working space. The pipeline does not rely on swap. Stockfish remains one process with one thread and a 256 MiB hash by default.
 
 Local inputs and outputs use this layout:
 
@@ -24,6 +26,16 @@ tuning/
 
 ## Run and resume
 
+Estimate the bounded work before starting it:
+
+```bash
+make tune-estimate \
+  RELEASE_ID=modern-otb-v1 \
+  TUNE_MODE=full
+```
+
+The estimator samples complete games at deterministic offsets and reports measured parser throughput separately from estimates for games, retained positions, SQLite, export space, duration, annotations, RAM, and disk. It does not build a dataset or candidate.
+
 The standard full-corpus run needs only a release identifier:
 
 ```bash
@@ -38,6 +50,10 @@ Use the lower-cost policy for a trial:
 make tune RELEASE_ID=test-v1 TUNE_MODE=prototype
 ```
 
+Prototype mode stops after at most 10,000 accepted games, retains at most 100,000 positions, samples at most six per game (opening 2, middlegame 3, endgame 1), and selects 700/150/150 fitting records plus a 60-position audit. It does not scan the remaining million-game corpus.
+
+Full mode scans all PGNs but retains at most 1,000,000 balanced positions, with at most eight per game (opening 2, middlegame 4, endgame 2). It annotates only the explicit 50,000/5,000/5,000 fitting selection plus the 2,000-position audit. Its search suite is 300 development plus 150 holdout positions. The 36-position time suite intentionally remains a structural safety check, not strength evidence.
+
 Resume an interrupted or failed run with the same effective options:
 
 ```bash
@@ -45,6 +61,8 @@ make tune-resume RELEASE_ID=v2
 ```
 
 Completed stages are reused only when their input, configuration, tool, dependency, and output checksums still match. A changed PGN invalidates dataset derivation and downstream work; a changed Stockfish binary invalidates annotation and downstream work.
+
+Dataset construction also resumes internally. Its private `dataset/work/dataset.sqlite` records source checksums, safe byte offsets, game indexes, counters, and committed transactions. Ctrl+C, SIGTERM, parser failure, disk failure, or an RSS guard failure rolls back only the active batch; resume continues from the last committed game boundary. Changed inputs or sampling configuration are rejected rather than mixed into an existing database.
 
 Inspect without mutation:
 
@@ -94,6 +112,8 @@ The run lives under `tuning/runs/<release-id>/`. Important files are:
 - `summary.json`: current candidate, gate results, and promotion blockers.
 - `release/chess-engine-<release-id>`: private versioned executable for an ineligible run.
 
+Dataset progress reports current file, bytes, games, accepted/rejected/duplicate counts, considered and retained positions, RSS, SQLite size, elapsed time, and ETA. “Games scanned” is corpus coverage; “positions retained” is the bounded balanced pool. The dataset publishes one canonical `dataset/positions.jsonl`; it does not duplicate every record into split JSONLs.
+
 For example, `v2` produces `tuning/runs/v2/release/chess-engine-v2`. The production `engine/chess-engine`, canonical profile, canonical header, and `.bin` opening book remain unchanged.
 
 Inspect and request preparation after required gates pass:
@@ -130,3 +150,27 @@ It never removes PGNs, engines, canonical profiles, another release, or the prod
 To add data, copy more `.pgn` files into `tuning/pgn/` and resume the same release to invalidate affected stages, or choose a new release ID for an independent run.
 
 Canonical manifests exclude timestamps, absolute paths, elapsed time, and machine-specific temporary paths. Operational state and logs may include wall-clock fields. Compiled bytes can vary by toolchain, but the embedded profile ID/hash and behavior are verified.
+
+## Recommended real-corpus workflow
+
+First review the estimate:
+
+```bash
+make tune-estimate \
+  RELEASE_ID=modern-otb-v1 \
+  TUNE_MODE=full
+```
+
+Then, when the machine can remain awake, run:
+
+```bash
+systemd-inhibit \
+  --what=sleep:idle \
+  --why="Bitboard full tuning run" \
+  make tune \
+    RELEASE_ID=modern-otb-v1 \
+    TUNE_MODE=full \
+    STOCKFISH_NODES=50000
+```
+
+The GPU does not accelerate this CPU-bound workflow. Final promotion remains the separate, explicitly approved, hash-locked Phase 20 operation.

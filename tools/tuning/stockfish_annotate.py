@@ -1103,13 +1103,16 @@ def validate_annotation_corpus(annotation_dir: Path) -> dict[str, Any]:
         explicit_selection = manifest.get("compatibility", {}).get("selection", {}).get("explicitSelection")
         if not explicit_selection:
             pgn_dataset.validate_dataset(source_dir)
-        source_positions = pgn_dataset.read_jsonl(source_dir / "positions.jsonl")
         explicit = manifest.get("compatibility", {}).get("selection", {}).get("explicitSelection")
         ordered_ids = explicit.get("selectedPositionIds") if isinstance(explicit, dict) else None
-        source_order = ({identifier: index for index, identifier in enumerate(ordered_ids)}
-                        if isinstance(ordered_ids, list)
-                        else {record["positionId"]: index for index, record in enumerate(source_positions)})
-        source_by_id = {record["positionId"]: record for record in source_positions}
+        wanted = set(ordered_ids) if isinstance(ordered_ids, list) else None
+        source_positions = (record for record in pgn_dataset.iter_positions(source_dir)
+                            if wanted is None or record["positionId"] in wanted)
+        source_order = ({identifier: index for index, identifier in enumerate(ordered_ids)} if isinstance(ordered_ids, list) else {})
+        source_by_id = {}
+        for record in source_positions:
+            if wanted is None: source_order[record["positionId"]] = len(source_order)
+            source_by_id[record["positionId"]] = record
     else:
         raise AnnotationError(f"Source dataset directory is unavailable for joined validation: {source_dir}")
 

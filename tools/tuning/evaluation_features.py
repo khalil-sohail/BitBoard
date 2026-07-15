@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+import pgn_dataset
+
 SCHEMA_VERSION = 1
 FEATURE_MODEL_VERSION = "bitboard-eval-features-v1"
 EXPECTED_PROFILE_ID = "builtin-default-v1"
@@ -306,9 +308,16 @@ def run_engine(engine: Path, positions: Sequence[dict[str, Any]], registry: Mapp
 
 
 def select_positions(dataset_dir: Path, split: str, maximum: int | None) -> list[dict[str, Any]]:
-    source = dataset_dir / ("positions.jsonl" if split == "all" else f"{split}.jsonl")
-    positions = read_jsonl(source)
-    return positions[:maximum] if maximum is not None else positions
+    if maximum is None:
+        raise FeatureError("bounded datasets require --max-positions or --selection-manifest")
+    positions = []
+    try:
+        for record in pgn_dataset.iter_positions(dataset_dir, split):
+            positions.append(record)
+            if len(positions) >= maximum: break
+    except pgn_dataset.DatasetError as error:
+        raise FeatureError(str(error)) from error
+    return positions
 
 
 def select_explicit_positions(dataset_dir: Path, manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, str]]:
