@@ -5,18 +5,17 @@ import { ChessBoardComponent } from '@/components/board/ChessBoard';
 import { EvalBar } from '@/components/board/EvalBar';
 import { EnginePanel } from '@/components/panels/EnginePanel';
 import { MoveHistory } from '@/components/panels/MoveHistory';
-import { EngineToggle } from '@/components/panels/EngineToggle';
-import { PositionSetup } from '@/components/panels/PositionSetup';
+import { AnalysisSearchControls } from '@/components/panels/AnalysisSearchControls';
 import { EvalGraph } from '@/components/panels/EvalGraph';
 import { ClockDisplay } from '@/components/panels/ClockDisplay';
 import { TrainingHintPanel } from '@/components/panels/TrainingHintPanel';
 import { GameControls } from '@/components/controls/GameControls';
-import { NewGameModal } from '@/components/ui/NewGameModal';
+import { SessionSetupHost } from '@/components/setup/SessionSetupHost';
 import { useSessionController } from './useSessionController';
 
 export function SessionControllerView() {
   const session = useSessionController();
-  const { mode, lifecycle, board, engine, clocks, setup, training, analysis, history, actions } = session;
+  const { mode, lifecycle, board, engine, clocks, setup, training, history, actions } = session;
 
   return (
     <>
@@ -56,26 +55,19 @@ export function SessionControllerView() {
             )}
 
             {lifecycle.status === 'idle' && (
-              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-md gap-4">
-                <div className="text-center">
-                  <h2 className="text-2xl font-bold text-foreground mb-1">Ready to Play?</h2>
-                  <p className="text-sm text-muted">Start the engine when you are ready.</p>
-                </div>
-                {mode.isAnalysis ? (
-                  <button
-                    onClick={analysis.start}
-                    className="px-8 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-base shadow-lg shadow-primary/30 transition-all duration-150 active:scale-[0.97]"
-                  >
-                    Start Analysis →
-                  </button>
-                ) : (
+              <div className="absolute inset-x-3 bottom-3 z-40 rounded-xl border border-white/10 bg-surface/95 p-3 shadow-xl backdrop-blur-md sm:inset-x-auto sm:bottom-5 sm:left-1/2 sm:w-80 sm:-translate-x-1/2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-foreground">{mode.isAnalysis ? 'Analysis' : mode.isTraining ? 'Training' : 'Fair Play'}</h2>
+                    <p className="truncate text-xs text-muted">Configure the session when you are ready.</p>
+                  </div>
                   <button
                     onClick={setup.open}
-                    className="px-8 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-base shadow-lg shadow-primary/30 transition-all duration-150 active:scale-[0.97]"
+                    className="shrink-0 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-lg shadow-primary/20"
                   >
-                    Setup Match →
+                    Set up
                   </button>
-                )}
+                </div>
               </div>
             )}
 
@@ -93,7 +85,7 @@ export function SessionControllerView() {
             )}
           </>
         )}
-        sidebar={(
+        sidebar={lifecycle.status === 'idle' ? null : (
           <>
             {clocks.show && (
               <ClockDisplay
@@ -109,31 +101,12 @@ export function SessionControllerView() {
             )}
 
             {mode.isAnalysis && (
-              <PositionSetup
-                currentFen={board.fen}
-                onLoadFen={analysis.loadFen}
-                onReset={analysis.resetFen}
-                exportPgn={analysis.exportPgn}
-                loadPgn={analysis.loadPgn}
-                onImportSuccess={analysis.importSucceeded}
-              />
-            )}
-
-            {engine.showConfiguration && (
-              <EngineToggle
-                currentVersion="Texel-Tuned HCE"
-                maxDepth={setup.maxDepth}
-                onDepthChange={setup.changeMaxDepth}
-                difficulty={setup.difficulty}
-                onDifficultyChange={setup.changeDifficulty}
+              <AnalysisSearchControls
+                depth={setup.maxDepth}
                 multiPv={setup.multiPv}
+                disabled={engine.optionsUnavailable}
+                onDepthChange={setup.changeMaxDepth}
                 onMultiPvChange={setup.changeMultiPv}
-                gameMode={mode.value}
-                ownBook={setup.ownBook}
-                optionsDisabled={engine.optionsUnavailable}
-                onOwnBookChange={setup.changeOwnBook}
-                trainingPonderEnabled={setup.trainingPonderEnabled}
-                onTrainingPonderChange={setup.changeTrainingPonder}
               />
             )}
 
@@ -169,16 +142,7 @@ export function SessionControllerView() {
         )}
       />
 
-      <NewGameModal
-        isOpen={setup.isOpen}
-        gameMode={mode.value}
-        defaultDifficulty={setup.difficulty}
-        defaultPlayerColor={board.orientation}
-        defaultTimeControl={setup.timeControl}
-        defaultMaxDepth={setup.maxDepth}
-        onStart={setup.start}
-        onCancel={setup.close}
-      />
+      <SessionSetupHost />
     </>
   );
 }

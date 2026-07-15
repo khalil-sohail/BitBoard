@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { Chess } from "chess.js";
-import type { NewGameConfig } from "@/components/ui/NewGameModal";
+import type { NewGameConfig } from "@/components/setup/session-setup.types";
 import { useEngine } from "@/hooks/useEngine";
 import { useChessGame } from "@/hooks/useChessGame";
 import { useChessClock } from "@/hooks/useChessClock";
@@ -64,7 +64,7 @@ export function useSessionControllerValue() {
   const [gameStatus, setGameStatus]     = useState<SessionLifecycleStatus>('idle');
   const [resignedBy, setResignedBy]     = useState<PlayerColor | null>(null);
   // Default to false so the user can explore the UI before starting a game.
-  const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
+  const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [maxDepth, setMaxDepth] = useState(10);
   const [multiPv, setMultiPv] = useState(3);
   const [ownBook, setOwnBook] = useState(true);
@@ -74,6 +74,7 @@ export function useSessionControllerValue() {
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
   const [analysisDisplay, dispatchAnalysisDisplay] = useReducer(analysisDisplayReducer, { live: null, finalized: null });
   const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
+  const setupTriggerRef = useRef<HTMLElement | null>(null);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const appliedOwnBookRef = useRef<boolean | null>(null);
@@ -760,19 +761,12 @@ export function useSessionControllerValue() {
 
   // ── New game ─────────────────────────────────────────────────────────────
   const handleNewGame = () => {
-    if (isAnalysis) {
-      setPromotionResetKey(value => value + 1);
-      analysisFenRef.current = null;
-      resetGame();
-      resetGrades();
-      pendingMoveReviewRef.current = null;
-    } else {
-      setIsNewGameModalOpen(true);
-    }
+    setupTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIsSetupOpen(true);
   };
 
   const handleStartNewGame = (config: NewGameConfig) => {
-    setIsNewGameModalOpen(false);
+    setIsSetupOpen(false);
 
     const resolvedColor: PlayerColor =
       config.playerColor === 'random'
@@ -816,6 +810,7 @@ export function useSessionControllerValue() {
 
   // ── Mode change ──────────────────────────────────────────────────────────
   const handleModeChange = (newMode: GameMode) => {
+    setIsSetupOpen(false);
     stopEngine();
     if (gameMode === 'training') {
       dispatchTraining({ type: 'RESET_REQUESTED', reason: 'mode-switch', playerColor: orientation });
@@ -830,7 +825,8 @@ export function useSessionControllerValue() {
     setGameStatus('idle');
     clock.stopClock();
     if (gameMode === 'analysis' && newMode !== 'analysis') {
-      handleNewGame();
+      analysisFenRef.current = null;
+      resetGame();
     }
   };
 
@@ -869,8 +865,18 @@ export function useSessionControllerValue() {
     return 'Game Over';
   })();
 
-  const openSetup = useCallback(() => setIsNewGameModalOpen(true), []);
-  const closeSetup = useCallback(() => setIsNewGameModalOpen(false), []);
+  const openSetup = useCallback(() => {
+    setupTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIsSetupOpen(true);
+  }, []);
+  const closeSetup = useCallback(() => {
+    const trigger = setupTriggerRef.current;
+    setIsSetupOpen(false);
+    // Restore after the dialog cleanup removes `inert` from the application shell.
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus();
+    });
+  }, []);
   const startAnalysisSession = useCallback(() => setGameStatus('active'), []);
   const flipBoard = useCallback(() => setOrientation(value => value === 'w' ? 'b' : 'w'), []);
   const handleAnalysisImportSuccess = useCallback((finalFen: string) => {
@@ -881,6 +887,41 @@ export function useSessionControllerValue() {
       startResolvedAnalysis(finalFen, [], 'analysis');
     }
   }, [gameMode, resetGrades, startResolvedAnalysis]);
+
+  const startAnalysisFromDefault = () => {
+    analysisFenRef.current = null;
+    setPromotionResetKey(value => value + 1);
+    resetGame();
+    resetGrades();
+    pendingMoveReviewRef.current = null;
+    newGame();
+    setGameStatus('active');
+    setIsSetupOpen(false);
+    return true;
+  };
+
+  const startAnalysisFromFen = (sourceFen: string) => {
+    if (!loadFen(sourceFen)) return false;
+    analysisFenRef.current = sourceFen;
+    setPromotionResetKey(value => value + 1);
+    resetGrades();
+    pendingMoveReviewRef.current = null;
+    setGameStatus('active');
+    setIsSetupOpen(false);
+    return true;
+  };
+
+  const startAnalysisFromPgn = (sourcePgn: string) => {
+    const finalFen = loadPgn(sourcePgn);
+    if (finalFen === false) return false;
+    analysisFenRef.current = finalFen;
+    setPromotionResetKey(value => value + 1);
+    resetGrades();
+    pendingMoveReviewRef.current = null;
+    setGameStatus('active');
+    setIsSetupOpen(false);
+    return true;
+  };
 
   return {
     mode: {
@@ -926,7 +967,7 @@ export function useSessionControllerValue() {
       timeControl,
     },
     setup: {
-      isOpen: isNewGameModalOpen,
+      isOpen: isSetupOpen,
       difficulty,
       timeControl,
       maxDepth,
@@ -959,6 +1000,9 @@ export function useSessionControllerValue() {
       loadPgn,
       importSucceeded: handleAnalysisImportSuccess,
       start: startAnalysisSession,
+      startFromDefault: startAnalysisFromDefault,
+      startFromFen: startAnalysisFromFen,
+      startFromPgn: startAnalysisFromPgn,
     },
     history: {
       moves: moveHistory,

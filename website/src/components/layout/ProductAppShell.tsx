@@ -29,6 +29,7 @@ export function ProductAppShell(props: ProductAppShellProps) {
   return (
     <div
       className={`${styles.shell} bg-zinc-950 text-zinc-100`}
+      data-product-app-shell
       data-fullscreen={isFullscreen}
       data-session-active={props.sessionActive}
     >

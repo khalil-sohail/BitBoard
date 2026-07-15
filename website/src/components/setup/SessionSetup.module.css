@@ -1,0 +1,76 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.dialog {
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 1rem;
+  background: hsl(var(--surface-elevated));
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.55);
+}
+
+.header,
+.footer {
+  flex: none;
+  padding-inline: clamp(1rem, 3vw, 1.75rem);
+  background: hsl(var(--surface-elevated));
+}
+
+.header {
+  padding-block: 1.25rem 1rem;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.25rem clamp(1rem, 3vw, 1.75rem);
+  scrollbar-width: thin;
+}
+
+.footer {
+  padding-block: 1rem max(1rem, env(safe-area-inset-bottom));
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.section {
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 0.75rem;
+  background: hsl(var(--surface));
+}
+
+@media (max-width: 74.999rem) {
+  .backdrop {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  .dialog {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-inline: 0;
+    border-bottom: 0;
+    border-radius: 0;
+  }
+
+  .header {
+    padding-top: max(1rem, env(safe-area-inset-top));
+  }
+}
