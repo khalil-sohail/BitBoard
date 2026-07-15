@@ -68,6 +68,7 @@ website/out/
 
 TUNING_AUDIT.md
 TUNING_PARAMETERS.md
+frontend-product-ux-investigation.md
 /docs/TUNING_*.md
 !docs/TUNING_PIPELINE.md
 tuning/pgn/

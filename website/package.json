@@ -36,8 +36,9 @@
     "test:training-machine": "ts-node --project tsconfig.server.json src/lib/training-machine.test.ts",
     "test:board-arrows": "ts-node --project tsconfig.server.json src/lib/board-arrows.test.ts",
     "test:ownership": "ts-node --project tsconfig.server.json src/components/engine-ownership.test.ts",
+    "test:layout": "ts-node --project tsconfig.server.json src/components/layout/responsive-layout.test.ts",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:fair-play && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:fair-play && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership && npm run test:layout"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

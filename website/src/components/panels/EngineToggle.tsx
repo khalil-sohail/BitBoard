@@ -62,11 +62,11 @@ export function EngineToggle({
   const depthLabel = gameMode === 'training' ? 'Review Depth' : 'Analysis Depth';
 
   return (
-    <div className="grid grid-cols-[5fr_3fr] gap-6 bg-surface-elevated border border-white/10 rounded-xl p-5 shadow-md relative">
+    <div className="grid grid-cols-1 gap-5 bg-surface-elevated border border-white/10 rounded-xl p-5 shadow-md relative">
       
       {/* Vertical Divider using border on the first column */}
       {/* ── ENGINE CONFIGURATION ─────────────────────────────────────────── */}
-      <div className="flex flex-col gap-5 border-r border-white/5 pr-6">
+      <div className="flex min-w-0 flex-col gap-5 border-b border-white/5 pb-5">
         <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
           Engine Configuration
         </h3>
@@ -109,7 +109,7 @@ export function EngineToggle({
       </div>
 
       {/* ── SECOND COLUMN ────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-5">
+      <div className="flex min-w-0 flex-col gap-5">
         
         {/* Book Settings */}
         <div className="flex flex-col gap-3">

@@ -2,14 +2,12 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { Chess } from "chess.js";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
+import { ProductAppShell } from "@/components/layout/ProductAppShell";
 import { ChessBoardComponent } from "@/components/board/ChessBoard";
 import { EvalBar } from "@/components/board/EvalBar";
 import { EnginePanel } from "@/components/panels/EnginePanel";
 import { MoveHistory } from "@/components/panels/MoveHistory";
 import { EngineToggle } from "@/components/panels/EngineToggle";
-import { ModeSelector } from "@/components/panels/ModeSelector";
 import { PositionSetup } from "@/components/panels/PositionSetup";
 import { EvalGraph } from "@/components/panels/EvalGraph";
 import { ClockDisplay } from "@/components/panels/ClockDisplay";
@@ -926,23 +924,19 @@ export default function Home() {
   })();
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-zinc-950 text-zinc-100">
-      <Header />
-
-      <main className="flex-1 min-h-0 overflow-hidden">
-        <div className="h-full max-w-[1500px] w-full mx-auto px-4 md:px-6 py-4 grid grid-cols-1 lg:grid-cols-[1fr_540px] gap-6">
-
-          {/* ── Left Column — Board ─────────────────────────────────── */}
-          <div className="flex gap-4 items-center min-h-0 justify-center">
-
-            {showEvalBar && (
-              <EvalBar
-                evaluation={displayEngineInfo?.pvs?.[0]?.evaluation ?? null}
-                orientation={orientation}
-              />
-            )}
-
-            <div className="h-full aspect-square max-h-[calc(100vh-12rem)] relative flex-shrink-0">
+    <>
+      <ProductAppShell
+        mode={gameMode}
+        onModeChange={handleModeChange}
+        sessionActive={isGameActive}
+        evaluationBar={showEvalBar ? (
+          <EvalBar
+            evaluation={displayEngineInfo?.pvs?.[0]?.evaluation ?? null}
+            orientation={orientation}
+          />
+        ) : undefined}
+        board={(
+          <>
               <ChessBoardComponent
                 key={promotionResetKey}
                 fen={fen}
@@ -1007,13 +1001,11 @@ export default function Home() {
                   </button>
                 </div>
               )}
-            </div>
-          </div>
+          </>
+        )}
 
-          {/* ── Right Column — Sidebar ──────────────────────────────── */}
-          <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto scrollbar-thin overflow-auto pr-2">
-
-            <ModeSelector mode={gameMode} onModeChange={handleModeChange} />
+        sidebar={(
+          <>
 
             {/* Clock */}
             {showClock && (
@@ -1096,12 +1088,9 @@ export default function Home() {
                 canResign={isGameActive && !effectiveGameOver && !isAnalysis}
               />
             </div>
-          </div>
-
-        </div>
-      </main>
-
-      <Footer />
+          </>
+        )}
+      />
 
       <NewGameModal
         isOpen={isNewGameModalOpen}
@@ -1113,7 +1102,7 @@ export default function Home() {
         onStart={handleStartNewGame}
         onCancel={() => setIsNewGameModalOpen(false)}
       />
-    </div>
+    </>
   );
 }
 

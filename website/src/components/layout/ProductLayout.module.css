@@ -1,0 +1,204 @@
+.shell {
+  --app-header-height: 4.25rem;
+  --workspace-max-width: 112.5rem;
+  --workspace-gap: clamp(1rem, 1.6vw, 1.75rem);
+  --sidebar-width: clamp(22.5rem, 28vw, 28.75rem);
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+
+.header {
+  flex: none;
+  min-height: var(--app-header-height);
+}
+
+.headerInner,
+.workspace {
+  width: min(100%, var(--workspace-max-width));
+  margin-inline: auto;
+}
+
+.main {
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--workspace-gap);
+  padding: 1rem;
+}
+
+.boardRegion {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  container-type: inline-size;
+}
+
+.boardCluster {
+  --eval-reserve: 0px;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+}
+
+.boardClusterWithEvaluation {
+  --eval-reserve: 2.25rem;
+  gap: 1rem;
+}
+
+.evaluation {
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
+}
+
+.boardSurface {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(100cqw - var(--eval-reserve));
+  height: calc(100cqw - var(--eval-reserve));
+  max-width: 100%;
+  aspect-ratio: 1;
+}
+
+.sideRail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modeNavigation {
+  flex: none;
+}
+
+.sidebar {
+  min-width: 0;
+  width: auto;
+}
+
+.footer {
+  flex: none;
+}
+
+@media (min-width: 75rem) {
+  .shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .main {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace {
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+    display: grid;
+    align-items: stretch;
+    padding: 1rem 1.5rem;
+  }
+
+  .boardRegion {
+    min-height: 0;
+    container-type: size;
+  }
+
+  .boardCluster {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .boardSurface {
+    width: min(calc(100cqw - var(--eval-reserve)), 100cqh);
+    height: min(calc(100cqw - var(--eval-reserve)), 100cqh);
+  }
+
+  .sideRail {
+    min-height: 0;
+    width: var(--sidebar-width);
+  }
+
+  .sidebar {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 0.35rem;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+    overscroll-behavior: contain;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    width: 0.45rem;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: hsl(var(--border));
+  }
+
+  .shell[data-session-active="true"] .footer {
+    display: none;
+  }
+}
+
+.shell[data-fullscreen="true"] {
+  --app-header-height: 2.75rem;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.shell[data-fullscreen="true"] .header {
+  display: none;
+}
+
+.shell[data-fullscreen="true"] .footer {
+  display: none;
+}
+
+.shell[data-fullscreen="true"] .workspace {
+  padding-block: 0.75rem;
+}
+
+@media (max-width: 74.999rem) {
+  .main,
+  .workspace,
+  .sideRail,
+  .sidebar {
+    overflow: visible;
+  }
+
+  .sidebar {
+    width: auto;
+  }
+
+  .shell[data-fullscreen="true"] {
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 40rem) {
+  .workspace {
+    padding: 0.75rem;
+  }
+
+  .headerInner {
+    align-items: flex-start;
+  }
+}
