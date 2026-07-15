@@ -6,9 +6,12 @@ function readSource(path: string): string {
 }
 
 function testPageOwnsSingleEngineHook(): void {
-  const source = readSource('src/app/page.tsx');
-  const matches = source.match(/useEngine\(/g) ?? [];
+  const page = readSource('src/app/page.tsx');
+  const source = readSource('src/session/useSessionControllerValue.tsx');
+  const matches = source.match(/useEngine\(\)/g) ?? [];
   assert.equal(matches.length, 1);
+  assert.equal(page.includes('useEngine('), false);
+  assert.ok(page.includes('SessionControllerProvider'));
 }
 
 function testEngineToggleDoesNotCreateSession(): void {

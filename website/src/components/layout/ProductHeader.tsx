@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import styles from './ProductLayout.module.css';
 
-export function ProductHeader() {
+export const ProductHeader = memo(function ProductHeader() {
   const [isArchOpen, setIsArchOpen] = useState(false);
 
   return (
@@ -66,4 +66,4 @@ export function ProductHeader() {
       )}
     </>
   );
-}
+});

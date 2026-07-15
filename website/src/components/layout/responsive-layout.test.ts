@@ -13,6 +13,8 @@ const sidebar = read('src/components/layout/SidebarRegion.tsx');
 const navigation = read('src/components/layout/ModeNavigation.tsx');
 const styles = read('src/components/layout/ProductLayout.module.css');
 const globals = read('src/app/globals.css');
+const controllerView = read('src/session/SessionControllerView.tsx');
+const controller = read('src/session/useSessionControllerValue.tsx');
 
 // Structural components and landmarks remain explicit.
 assert.match(shell, /export function ProductAppShell/);
@@ -26,13 +28,14 @@ assert.match(sidebar, /<aside/);
 assert.match(navigation, /<nav/);
 assert.match(board, /aria-label="Chessboard"/);
 
-// The three existing modes and the original cleanup callback stay page-owned.
+// The three modes remain present and mode cleanup stays controller-owned.
 for (const mode of ['fair', 'training', 'analysis']) assert.match(navigation, new RegExp(`id: '${mode}'`));
-assert.match(page, /onModeChange=\{handleModeChange\}/);
-assert.match(page, /isAnalysis/);
-assert.match(page, /isTraining/);
-assert.match(page, /showClock/);
-assert.equal((page.match(/useEngine\(/g) ?? []).length, 1);
+assert.match(controllerView, /onModeChange=\{mode\.change\}/);
+assert.match(controller, /const isAnalysis/);
+assert.match(controller, /const isTraining/);
+assert.match(controller, /const showClock/);
+assert.equal((controller.match(/useEngine\(\)/g) ?? []).length, 1);
+assert.match(page, /SessionControllerProvider/);
 assert.doesNotMatch(shell + workspace + board + sidebar + navigation, /useEngine\(|useChessGame\(|useChessClock\(/);
 
 // Responsive/fullscreen presentation changes do not key or remount session content.
