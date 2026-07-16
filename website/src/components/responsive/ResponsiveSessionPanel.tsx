@@ -44,14 +44,15 @@ export function ResponsiveSessionPanel({ mode, onModeChange, status, sessionEnga
   useEffect(() => {
     if (expanded || !restoreFocusRef.current) return;
     restoreFocusRef.current = false;
-    requestAnimationFrame(() => toggleRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
+    const frame = requestAnimationFrame(() => toggleRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [expanded]);
 
   useEffect(() => {
     if (!expanded || !mobile) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    requestAnimationFrame(() => closeRef.current?.focus());
+    const frame = requestAnimationFrame(() => closeRef.current?.focus());
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); collapse(); return; }
       if (event.key !== 'Tab' || !panelRef.current) return;
@@ -63,7 +64,11 @@ export function ResponsiveSessionPanel({ mode, onModeChange, status, sessionEnga
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', onKeyDown); };
+    return () => {
+      cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [collapse, expanded, mobile]);
 
   const toggle = () => expanded ? collapse(false) : setExpanded(true);

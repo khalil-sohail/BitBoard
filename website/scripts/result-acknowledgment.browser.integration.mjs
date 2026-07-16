@@ -17,8 +17,9 @@ if (!existsSync(chromeBinary)) throw new Error(`Chrome was not found at ${chrome
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const responsiveViewports = [
-  [2560, 1600], [1920, 1080], [1440, 900], [1366, 768], [1200, 800],
-  [1024, 768], [834, 1194], [768, 1024], [430, 932], [390, 844], [360, 800],
+  [2560, 1600], [1920, 1080], [1600, 900], [1440, 900], [1366, 768], [1200, 800],
+  [1024, 768], [834, 1194], [768, 1024], [932, 430], [844, 390], [800, 360],
+  [430, 932], [390, 844], [360, 800],
 ];
 
 async function waitUntil(check, timeoutMs, label) {
@@ -186,6 +187,7 @@ async function exerciseResponsivePanel(cdp, modeLabel) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await sleep(100);
   await evaluate(cdp, `window.__responsiveShellSentinel = document.querySelector('[data-product-app-shell]'); true`);
+  await evaluate(cdp, `window.__responsiveBoardSentinel = document.querySelector('[aria-label="Chessboard"]'); window.__responsiveSidebarSentinel = document.querySelector('[aria-label="Session panel"]'); true`);
   const opened = await evaluate(cdp, `(() => { const button = document.querySelector('[data-compact-status]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true; })()`);
   assert.equal(opened, true, `${modeLabel} compact status could not open panel`);
   await waitUntil(async () => (await responsivePanelLayout(cdp))?.expanded === 'true', 2_000, `${modeLabel} mobile panel expansion`);
@@ -195,6 +197,8 @@ async function exerciseResponsivePanel(cdp, modeLabel) {
   assert.equal(panel.bodyOverflow, 'hidden');
   assert.equal(panel.backdrop, true);
   assert.equal(await evaluate(cdp, `window.__responsiveShellSentinel === document.querySelector('[data-product-app-shell]')`), true, `${modeLabel} shell remounted while opening panel`);
+  assert.equal(await evaluate(cdp, `window.__responsiveBoardSentinel === document.querySelector('[aria-label="Chessboard"]')`), true, `${modeLabel} board region remounted while opening panel`);
+  assert.equal(await evaluate(cdp, `window.__responsiveSidebarSentinel === document.querySelector('[aria-label="Session panel"]')`), true, `${modeLabel} sidebar region remounted while opening panel`);
   let screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
   assert.ok(screenshot.data.length > 100, `${modeLabel} mobile expanded screenshot failed`);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
@@ -215,6 +219,8 @@ async function exerciseResponsivePanel(cdp, modeLabel) {
   await sleep(100);
   assert.equal((await responsivePanelLayout(cdp)).expanded, 'true', `${modeLabel} panel state changed across orientation`);
   assert.equal(await evaluate(cdp, `window.__responsiveShellSentinel === document.querySelector('[data-product-app-shell]')`), true, `${modeLabel} shell remounted across orientation`);
+  assert.equal(await evaluate(cdp, `window.__responsiveBoardSentinel === document.querySelector('[aria-label="Chessboard"]')`), true, `${modeLabel} board region remounted across orientation`);
+  assert.equal(await evaluate(cdp, `window.__responsiveSidebarSentinel === document.querySelector('[aria-label="Session panel"]')`), true, `${modeLabel} sidebar region remounted across orientation`);
   await evaluate(cdp, `document.querySelector('[aria-label="Collapse session panel"]')?.click()`);
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   return { panelOpenCount: 2, unexpectedPanelOpenCount: 0, controllerRemountCount: 0 };

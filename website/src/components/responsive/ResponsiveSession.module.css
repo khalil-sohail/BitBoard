@@ -126,7 +126,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 50;
   background: rgb(0 0 0 / .58);
   backdrop-filter: blur(2px);
 }
@@ -200,7 +200,7 @@
   .panel[data-mobile-overlay="true"] {
     position: fixed;
     inset: auto .5rem max(.5rem, env(safe-area-inset-bottom));
-    z-index: 80;
+    z-index: 55;
     height: min(76dvh, 46rem);
     max-height: min(76dvh, 46rem);
     border: 1px solid rgb(255 255 255 / .14);
