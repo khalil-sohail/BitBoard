@@ -1,5 +1,5 @@
 import type { TrainingSidebarState } from './training-presentation';
-import styles from './TrainingSidebar.module.css';
+import { ContextualActions } from '../live-data/ContextualActions';
 
 export function TrainingActions({ state, canUndo, canResign, onSetup, onNewGame, onUndo, onFlip, onResign }: {
   state: TrainingSidebarState;
@@ -12,18 +12,15 @@ export function TrainingActions({ state, canUndo, canResign, onSetup, onNewGame,
   onResign: () => void;
 }) {
   if (state === 'idle') {
-    return <button type="button" className={styles.primaryAction} onClick={onSetup}>Set up Training</button>;
+    return <ContextualActions actions={[{ id: 'setup', label: 'Set up Training', variant: 'primary', onAction: onSetup }]} />;
   }
   if (state === 'completed' || state === 'error') {
-    return <div className={styles.actionGrid}>
-      <button type="button" className={styles.primaryAction} onClick={onNewGame}>New Training Game</button>
-      <button type="button" className={styles.secondaryAction} onClick={onFlip}>Flip board</button>
-    </div>;
+    return <ContextualActions actions={[{ id: 'new', label: 'New Training Game', variant: 'primary', onAction: onNewGame }, { id: 'flip', label: 'Flip board', onAction: onFlip }]} />;
   }
-  return <div className={styles.actionGrid}>
-    <button type="button" className={styles.secondaryAction} onClick={onFlip}>Flip board</button>
-    <button type="button" className={styles.secondaryAction} onClick={onUndo} disabled={!canUndo} title={!canUndo ? 'Undo is available only on your turn when no engine work is pending.' : undefined}>Undo last turn</button>
-    <button type="button" className={styles.secondaryAction} onClick={onNewGame}>New game</button>
-    {canResign ? <button type="button" className={styles.dangerAction} onClick={onResign}>Resign</button> : null}
-  </div>;
+  return <ContextualActions actions={[
+    { id: 'flip', label: 'Flip board', onAction: onFlip },
+    { id: 'undo', label: 'Undo last turn', onAction: onUndo, disabled: !canUndo, disabledReason: 'Undo is available only on your turn when no engine work is pending.' },
+    { id: 'new', label: 'New game', onAction: onNewGame },
+    ...(canResign ? [{ id: 'resign', label: 'Resign', variant: 'destructive' as const, onAction: onResign }] : []),
+  ]} />;
 }

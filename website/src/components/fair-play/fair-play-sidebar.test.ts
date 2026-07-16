@@ -12,6 +12,8 @@ const styles = read('src/components/fair-play/FairPlaySidebar.module.css');
 const view = read('src/session/SessionControllerView.tsx');
 const controller = read('src/session/useSessionControllerValue.tsx');
 const engine = read('src/hooks/useEngine.ts');
+const fairAdapter = read('src/components/fair-play/fair-play-live-data.ts');
+const sharedHistory = read('src/components/live-data/MoveHistoryTable.tsx');
 
 const base = {
   lifecycle: 'active' as const,
@@ -58,11 +60,12 @@ assert.match(sidebar, /<FairPlayCompletedSummary/);
 assert.match(clocks, /active clock/);
 assert.match(clocks, /Clocks paused/);
 assert.match(clocks, /Untimed game/);
-assert.match(history, /aria-current=\{whiteLatest/);
-assert.match(history, /followLatestRef/);
-assert.doesNotMatch(history, /grades|MoveBadge|evaluation/);
-assert.match(status, /aria-live=\{isError \? 'assertive' : 'polite'\}/);
+assert.match(history, /buildFairPlayHistoryEntries/);
+assert.match(sharedHistory, /followLatestRef/);
+assert.doesNotMatch(fairAdapter, /grades|MoveBadge|evaluation|markers/);
+assert.match(status, /<OperationalStatus/);
 assert.match(actions, /onResign/);
+assert.match(actions, /<ContextualActions/);
 assert.match(actions, /Set up game/);
 assert.match(actions, /New game/);
 assert.doesNotMatch(actions, />Undo</);

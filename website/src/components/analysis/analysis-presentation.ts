@@ -1,6 +1,7 @@
 import type { ConnectionStatus } from '../../hooks/useEngine';
 import type { AnalysisSnapshot } from '../../lib/board-arrows';
 import type { NormalizedEvaluation } from '../../lib/engine-evaluation';
+import { formatEvaluation } from '../live-data/evaluation-format';
 
 export type AnalysisSidebarState =
   | 'idle'
@@ -59,27 +60,5 @@ export function sourceLabel(source: 'default' | 'fen' | 'pgn' | 'board'): string
 }
 
 export function evaluationText(evaluation: NormalizedEvaluation | null): { score: string; meaning: string; accessible: string } {
-  if (!evaluation) return { score: '—', meaning: 'Waiting for evaluation', accessible: 'No current evaluation' };
-  if (evaluation.kind === 'mate') {
-    const moves = Math.ceil(evaluation.plies / 2);
-    const side = evaluation.winner === 'white' ? 'White' : 'Black';
-    return { score: `${evaluation.winner === 'white' ? '+' : '-'}M${moves}`, meaning: `Mate in ${moves} for ${side}`, accessible: `White-perspective evaluation: mate in ${moves} for ${side}` };
-  }
-  if (evaluation.kind === 'terminal') {
-    return { score: '—', meaning: `Terminal: ${evaluation.result}`, accessible: `Terminal position: ${evaluation.result}` };
-  }
-  const pawns = evaluation.value / 100;
-  const score = `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
-  const magnitude = Math.abs(evaluation.value);
-  const meaning = magnitude < 20
-    ? 'Approximately equal'
-    : `${evaluation.value > 0 ? 'White' : 'Black'} is ${magnitude < 80 ? 'slightly better' : magnitude < 180 ? 'better' : 'clearly better'}`;
-  return { score, meaning, accessible: `White-perspective evaluation: ${score}. ${meaning}` };
-}
-
-export function compactCount(value: number | undefined): string {
-  if (value === undefined) return '—';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
+  return formatEvaluation(evaluation);
 }

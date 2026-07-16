@@ -146,6 +146,42 @@ async function move(cdp, from, to, finalSettleMs = 100) {
   }
 }
 
+async function verifyFairPlayResponsiveLayout(cdp, expectedState) {
+  for (const [width, height] of responsiveViewports) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
+    await sleep(80);
+    const layout = await evaluate(cdp, `(() => {
+      const sidebar = document.querySelector('[data-fair-play-state]');
+      if (!(sidebar instanceof HTMLElement)) return null;
+      const rect = sidebar.getBoundingClientRect();
+      return {
+        state: sidebar.dataset.fairPlayState,
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        sharedHistory: Boolean(sidebar.querySelector('[data-live-history]')),
+        sharedEvaluation: Boolean(sidebar.querySelector('[data-live-evaluation]')),
+        sharedPv: Boolean(sidebar.querySelector('[data-live-pv]')),
+        sharedMetrics: Boolean(sidebar.querySelector('[data-live-metrics]')),
+        sharedActions: Boolean(sidebar.querySelector('[data-live-actions]')),
+      };
+    })()`);
+    assert.ok(layout, `Fair Play sidebar missing at ${width}x${height}`);
+    assert.equal(layout.state, expectedState, `Unexpected Fair Play state at ${width}x${height}`);
+    assert.equal(layout.horizontalOverflow, false, `Fair Play horizontal overflow at ${width}x${height}`);
+    assert.ok(layout.left >= -1 && layout.right <= layout.viewportWidth + 1, `Fair Play sidebar clipped at ${width}x${height}`);
+    assert.equal(layout.sharedActions, true, `Shared Fair Play actions missing at ${width}x${height}`);
+    if (expectedState !== 'idle') assert.equal(layout.sharedHistory, true, `Shared Fair Play history missing at ${width}x${height}`);
+    assert.equal(layout.sharedEvaluation, false, 'Fair Play must not render shared evaluation');
+    assert.equal(layout.sharedPv, false, 'Fair Play must not render shared PV');
+    assert.equal(layout.sharedMetrics, false, 'Fair Play must not render shared engine metrics');
+    const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+    assert.ok(screenshot.data.length > 100, `Fair Play screenshot capture failed at ${width}x${height}`);
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+}
+
 async function verifyTrainingResponsiveLayout(cdp, expectedState) {
   for (const [width, height] of responsiveViewports) {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
@@ -161,12 +197,26 @@ async function verifyTrainingResponsiveLayout(cdp, expectedState) {
         right: rect.right,
         viewportWidth: window.innerWidth,
         documentHeight: document.documentElement.scrollHeight,
+        sharedHistory: Boolean(sidebar.querySelector('[data-live-history]')),
+        sharedEvaluation: Boolean(sidebar.querySelector('[data-live-evaluation]')),
+        sharedPv: Boolean(sidebar.querySelector('[data-live-pv]')),
+        sharedMetrics: Boolean(sidebar.querySelector('[data-live-metrics]')),
+        sharedStatus: Boolean(sidebar.querySelector('[data-live-status]')),
+        sharedActions: Boolean(sidebar.querySelector('[data-live-actions]')),
       };
     })()`);
     assert.ok(layout, `Training sidebar missing at ${width}x${height}`);
     assert.equal(layout.state, expectedState, `Unexpected Training state at ${width}x${height}`);
     assert.equal(layout.horizontalOverflow, false, `Horizontal overflow at ${width}x${height}`);
     assert.ok(layout.left >= -1 && layout.right <= layout.viewportWidth + 1, `Sidebar clipped at ${width}x${height}`);
+    assert.equal(layout.sharedActions, true, `Shared Training actions missing at ${width}x${height}`);
+    if (expectedState !== 'idle') {
+      assert.equal(layout.sharedHistory, true, `Shared Training history missing at ${width}x${height}`);
+      assert.equal(layout.sharedEvaluation, true, `Shared Training evaluation missing at ${width}x${height}`);
+      assert.equal(layout.sharedPv, true, `Shared Training PV missing at ${width}x${height}`);
+      assert.equal(layout.sharedMetrics, true, `Shared Training metrics missing at ${width}x${height}`);
+      assert.equal(layout.sharedStatus, true, `Shared Training status missing at ${width}x${height}`);
+    }
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
     assert.ok(screenshot.data.length > 100, `Screenshot capture failed at ${width}x${height}`);
   }
@@ -187,12 +237,28 @@ async function verifyAnalysisResponsiveLayout(cdp, expectedState) {
         left: rect.left,
         right: rect.right,
         viewportWidth: window.innerWidth,
+        sharedHistory: Boolean(sidebar.querySelector('[data-live-history]')),
+        sharedEvaluation: Boolean(sidebar.querySelector('[data-live-evaluation]')),
+        sharedPv: Boolean(sidebar.querySelector('[data-live-pv]')),
+        sharedMetrics: Boolean(sidebar.querySelector('[data-live-metrics]')),
+        sharedStatus: Boolean(sidebar.querySelector('[data-live-status]')),
+        sharedActions: Boolean(sidebar.querySelector('[data-live-actions]')),
+        notation: sidebar.querySelector('[data-live-pv] li')?.getAttribute('data-notation') ?? null,
       };
     })()`);
     assert.ok(layout, `Analysis sidebar missing at ${width}x${height}`);
     assert.equal(layout.state, expectedState, `Unexpected Analysis state at ${width}x${height}`);
     assert.equal(layout.horizontalOverflow, false, `Analysis horizontal overflow at ${width}x${height}`);
     assert.ok(layout.left >= -1 && layout.right <= layout.viewportWidth + 1, `Analysis sidebar clipped at ${width}x${height}`);
+    assert.equal(layout.sharedActions, true, `Shared Analysis actions missing at ${width}x${height}`);
+    if (expectedState !== 'idle') {
+      assert.equal(layout.sharedHistory, true, `Shared Analysis history missing at ${width}x${height}`);
+      assert.equal(layout.sharedEvaluation, true, `Shared Analysis evaluation missing at ${width}x${height}`);
+      assert.equal(layout.sharedPv, true, `Shared Analysis PV missing at ${width}x${height}`);
+      assert.equal(layout.sharedMetrics, true, `Shared Analysis metrics missing at ${width}x${height}`);
+      assert.equal(layout.sharedStatus, true, `Shared Analysis status missing at ${width}x${height}`);
+      assert.ok(layout.notation === 'SAN' || layout.notation === 'UCI', `Analysis PV notation missing at ${width}x${height}`);
+    }
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
     assert.ok(screenshot.data.length > 100, `Analysis screenshot capture failed at ${width}x${height}`);
   }
@@ -252,6 +318,20 @@ async function run() {
   await new Promise(resolve => cdp.socket.once('open', resolve));
   await Promise.all([cdp.send('Page.enable'), cdp.send('Runtime.enable'), cdp.send('Network.enable')]);
   await waitUntil(() => evaluate(cdp, `document.body.innerText.includes('Fair Play')`), 10_000, 'application page');
+
+  // Fair Play: the shared history/actions remain policy-restricted, including after completion.
+  await verifyFairPlayResponsiveLayout(cdp, 'idle');
+  await clickButton(cdp, 'Set up game');
+  await clickButton(cdp, 'Start Fair Play');
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state') === 'active'`), 10_000, 'active Fair Play session');
+  await move(cdp, 'e2', 'e4');
+  await waitUntil(() => messages(cdp, 'sent', 'resultAck').length === 1, 20_000, 'Fair Play result acknowledgment');
+  await verifyFairPlayResponsiveLayout(cdp, 'active');
+  await clickButton(cdp, 'Resign');
+  await clickButton(cdp, 'Confirm resign');
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state') === 'completed'`), 5_000, 'completed Fair Play session');
+  await verifyFairPlayResponsiveLayout(cdp, 'completed');
+  cdp.frames.length = 0;
 
   // Training: review is informational; only the opponent move is acknowledged once.
   await clickButton(cdp, 'Training');
@@ -359,7 +439,7 @@ async function run() {
     delayedModeSwitchResultAckCount: acknowledgmentsAtModeSwitch,
     staleApplicationAckCount: 0,
     staleAnalysisDisplayCount: 0,
-    responsiveScreenshotsCaptured: responsiveViewports.length * 5,
+    responsiveScreenshotsCaptured: responsiveViewports.length * 8,
   }));
 }
 

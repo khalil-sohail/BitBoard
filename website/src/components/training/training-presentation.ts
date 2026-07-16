@@ -114,15 +114,3 @@ export function deriveTrainingPresentation(input: {
     operationalLabel: isPlayerTurn ? 'Your turn' : 'Engine turn', tone: 'normal',
   };
 }
-
-export function formatCompactCount(value: number | undefined): string {
-  if (value === undefined) return '—';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
-export function formatNps(nodes: number | undefined, timeMs: number | undefined): string {
-  if (nodes === undefined || !timeMs) return '—';
-  return `${formatCompactCount(Math.round(nodes * 1000 / timeMs))}/s`;
-}

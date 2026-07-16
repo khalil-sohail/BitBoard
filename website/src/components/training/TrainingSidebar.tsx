@@ -7,6 +7,7 @@ import type { TrainingState } from '@/lib/training-machine';
 import type { EngineInfo, PlayerColor } from '@/types/engine';
 import type { GradedMove } from '@/types/grades';
 import { EvalGraph } from '@/components/panels/EvalGraph';
+import { OperationalStatus } from '@/components/live-data/OperationalStatus';
 import { TrainingActions } from './TrainingActions';
 import { TrainingAnalysisPanel } from './TrainingAnalysisPanel';
 import { TrainingCompletedSummary } from './TrainingCompletedSummary';
@@ -77,9 +78,7 @@ export function TrainingSidebar(props: TrainingSidebarProps) {
       <summary>Evaluation history</summary>
       <EvalGraph data={props.evaluationGraph} />
     </details>
-    <div className={styles.operationalStatus} data-tone={presentation.tone === 'error' ? 'error' : 'normal'} role={presentation.tone === 'error' ? 'alert' : 'status'}>
-      <span aria-hidden="true" /><p>{presentation.operationalLabel}</p>
-    </div>
+    <OperationalStatus title={presentation.operationalLabel} tone={presentation.tone === 'error' ? 'error' : presentation.tone === 'working' ? 'working' : presentation.tone === 'success' ? 'healthy' : 'neutral'} />
     <footer className={styles.actionFooter}><TrainingActions state={presentation.state} canUndo={props.canUndo && playerCanAct} canResign={props.canResign} onSetup={props.onSetup} onNewGame={props.onNewGame} onUndo={props.onUndo} onFlip={props.onFlip} onResign={props.onResign} /></footer>
   </div>;
 }

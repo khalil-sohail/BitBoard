@@ -11,6 +11,7 @@ import { AnalysisMetricsPanel } from './AnalysisMetricsPanel';
 import { AnalysisNavigationPanel } from './AnalysisNavigationPanel';
 import { AnalysisSearchControls } from './AnalysisSearchControls';
 import { PrincipalVariationPanel } from './PrincipalVariationPanel';
+import { OperationalStatus } from '../live-data/OperationalStatus';
 import { deriveAnalysisPresentation, sourceLabel } from './analysis-presentation';
 import styles from './AnalysisSidebar.module.css';
 
@@ -45,9 +46,7 @@ export function AnalysisSidebar(props: AnalysisSidebarProps) {
     <AnalysisSearchControls depth={props.depth} multiPv={props.multiPv} disabled={props.controlsDisabled} onDepthChange={props.onDepthChange} onMultiPvChange={props.onMultiPvChange} />
     <AnalysisHistoryPanel moves={props.moves} cursorPly={props.cursorPly} onNavigate={props.onNavigate} />
     <AnalysisMetricsPanel snapshot={props.snapshot} info={props.engineInfo} />
-    <div className={styles.operationalStatus} data-tone={presentation.tone} role={presentation.tone === 'error' ? 'alert' : 'status'} aria-live={presentation.tone === 'error' ? 'assertive' : 'polite'}>
-      <span aria-hidden="true" /><div><strong>{presentation.label}</strong><p>{props.connectionStatus === 'queued' && props.queuePosition ? `Queue position ${props.queuePosition}. ` : ''}{presentation.detail}</p></div>
-    </div>
+    <OperationalStatus title={presentation.label} description={`${props.connectionStatus === 'queued' && props.queuePosition ? `Queue position ${props.queuePosition}. ` : ''}${presentation.detail}`} tone={presentation.tone === 'error' ? 'error' : presentation.tone === 'working' ? 'working' : presentation.tone === 'stopped' ? 'paused' : 'neutral'} />
     <footer><AnalysisActions state={presentation.state} onSetup={props.onSetup} onStop={props.onStop} onResume={props.onResume} onReset={props.onReset} onFlip={props.onFlip} /></footer>
     <span className="sr-only">Current position identity: {props.positionFen}</span>
   </div>;

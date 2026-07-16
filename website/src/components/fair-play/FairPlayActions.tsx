@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { FairPlaySidebarState } from './fair-play-presentation';
+import { ContextualActions } from '../live-data/ContextualActions';
 import styles from './FairPlaySidebar.module.css';
 
 interface FairPlayActionsProps {
@@ -17,20 +18,17 @@ export function FairPlayActions(props: FairPlayActionsProps) {
   const [confirmingResign, setConfirmingResign] = useState(false);
 
   if (props.state === 'idle') {
-    return <button type="button" className={styles.primaryAction} onClick={props.onSetup}>Set up game</button>;
+    return <ContextualActions actions={[{ id: 'setup', label: 'Set up game', variant: 'primary', onAction: props.onSetup }]} />;
   }
 
   if (props.state === 'completed' || props.state === 'error') {
     return (
-      <div className={styles.actions}>
-        <button type="button" className={styles.primaryAction} onClick={props.onNewGame}>New game</button>
-        <button type="button" className={styles.secondaryAction} onClick={props.onFlipBoard}>Flip board</button>
-      </div>
+      <ContextualActions actions={[{ id: 'new', label: 'New game', variant: 'primary', onAction: props.onNewGame }, { id: 'flip', label: 'Flip board', onAction: props.onFlipBoard }]} />
     );
   }
 
   if (props.state === 'starting' || props.state === 'connecting' || props.state === 'queued') {
-    return <button type="button" className={styles.secondaryAction} onClick={props.onFlipBoard}>Flip board</button>;
+    return <ContextualActions actions={[{ id: 'flip', label: 'Flip board', onAction: props.onFlipBoard }]} />;
   }
 
   if (confirmingResign) {
@@ -46,9 +44,6 @@ export function FairPlayActions(props: FairPlayActionsProps) {
   }
 
   return (
-    <div className={styles.actions}>
-      <button type="button" className={styles.secondaryAction} onClick={props.onFlipBoard}>Flip board</button>
-      {props.canResign && <button type="button" className={styles.dangerAction} onClick={() => setConfirmingResign(true)}>Resign</button>}
-    </div>
+    <ContextualActions actions={[{ id: 'flip', label: 'Flip board', onAction: props.onFlipBoard }, ...(props.canResign ? [{ id: 'resign', label: 'Resign', variant: 'destructive' as const, onAction: () => setConfirmingResign(true) }] : [])]} />
   );
 }

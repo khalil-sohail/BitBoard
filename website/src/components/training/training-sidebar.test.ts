@@ -14,6 +14,9 @@ const actions = read('src/components/training/TrainingActions.tsx');
 const styles = read('src/components/training/TrainingSidebar.module.css');
 const view = read('src/session/SessionControllerView.tsx');
 const controller = read('src/session/useSessionControllerValue.tsx');
+const trainingAdapter = read('src/components/training/training-live-data.ts');
+const sharedHistory = read('src/components/live-data/MoveHistoryTable.tsx');
+const sharedStyles = read('src/components/live-data/LiveData.module.css');
 
 const presentation = (state: TrainingState, connectionStatus: 'idle' | 'thinking' | 'result_ready' = 'idle') => deriveTrainingPresentation({
   lifecycle: state.status === 'inactive' ? 'idle' : state.status === 'game-over' ? 'completed' : 'active',
@@ -52,15 +55,18 @@ assert.match(feedback, /estimated loss/);
 assert.match(hint, /disabled=\{!canRequest \|\| searching\}/);
 assert.match(hint, /onClick=\{onRequest\}/);
 assert.match(hint, /role="status"/);
-assert.match(analysis, /White-perspective evaluation/);
-assert.match(analysis, /info\?\.purpose === 'training-result-review'/);
-assert.match(analysis, /<details className=\{styles\.metrics\}/);
-assert.match(history, /<caption className="sr-only">/);
-assert.match(history, /grade\.grade/);
-assert.match(history, /followLatestRef/);
+assert.match(analysis, /<EvaluationDisplay/);
+assert.match(analysis, /selectTrainingReviewInfo/);
+assert.match(analysis, /<PrincipalVariationList/);
+assert.match(analysis, /<EngineMetrics/);
+assert.match(trainingAdapter, /info\.purpose !== 'training-result-review'/);
+assert.match(history, /<MoveHistoryTable/);
+assert.match(trainingAdapter, /grade\.grade/);
+assert.match(sharedHistory, /followLatestRef/);
 assert.match(actions, /Undo is available only on your turn/);
+assert.match(actions, /<ContextualActions/);
 assert.match(styles, /@media \(max-width: 1219px\)/);
-assert.match(styles, /overflow-wrap: anywhere/);
+assert.match(sharedStyles, /overflow-wrap: anywhere/);
 
 // Reliability remains controller-owned and exact-result correlated.
 assert.match(controller, /resultRequestId = startResolvedAnalysis\(fen, 'training-result-review'\)/);

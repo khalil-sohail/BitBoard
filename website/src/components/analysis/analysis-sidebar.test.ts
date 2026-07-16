@@ -37,9 +37,9 @@ function testEvaluationAndPv(): void {
   const evaluation = readFileSync('src/components/analysis/AnalysisEvaluationPanel.tsx', 'utf8');
   const pv = readFileSync('src/components/analysis/PrincipalVariationPanel.tsx', 'utf8');
   assert.match(evaluation, /White perspective/);
-  assert.match(evaluation, /Stopped snapshot/);
-  assert.match(pv, /sort\(\(left, right\) => left\.multipv - right\.multipv\)/);
-  assert.match(pv, /line\.pv\.join\(' '\)/);
+  assert.match(evaluation, /<EvaluationDisplay/);
+  assert.match(pv, /<PrincipalVariationList/);
+  assert.match(pv, /analysisPvLines/);
 }
 
 function testSnapshotOwnership(): void {
