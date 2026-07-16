@@ -7,11 +7,30 @@ import { FairPlaySidebar } from '@/components/fair-play/FairPlaySidebar';
 import { TrainingSidebar } from '@/components/training/TrainingSidebar';
 import { AnalysisSidebar } from '@/components/analysis/AnalysisSidebar';
 import { SessionSetupHost } from '@/components/setup/SessionSetupHost';
+import { buildAnalysisCompactStatus, buildFairPlayCompactStatus, buildTrainingCompactStatus } from '@/components/responsive/responsive-session.adapters';
 import { useSessionController } from './useSessionController';
 
 export function SessionControllerView() {
   const session = useSessionController();
   const { mode, lifecycle, board, engine, clocks, setup, training, history, actions } = session;
+  const compactStatus = mode.value === 'fair'
+    ? buildFairPlayCompactStatus({
+      lifecycle: lifecycle.status, connectionStatus: session.fairPlay.connectionStatus,
+      queuePosition: session.fairPlay.queuePosition, searchRetryCount: session.fairPlay.searchRetryCount,
+      waitingForSessionReady: session.fairPlay.waitingForSessionReady, currentTurn: session.fairPlay.currentTurn,
+      playerColor: board.orientation, whiteMs: clocks.value.whiteMs, blackMs: clocks.value.blackMs,
+      untimed: clocks.timeControl.initialMs === 0,
+    })
+    : mode.isTraining
+      ? buildTrainingCompactStatus({
+        lifecycle: lifecycle.status, state: training.state, connectionStatus: engine.status,
+        currentTurn: training.currentTurn, playerColor: board.orientation,
+        latestGrade: history.grades.at(-1)?.grade, hasLatestFeedback: history.grades.length > 0,
+      })
+      : buildAnalysisCompactStatus({
+        lifecycle: lifecycle.status, connectionStatus: engine.status,
+        paused: session.analysis.paused, snapshot: session.analysis.snapshot,
+      });
 
   return (
     <>
@@ -19,6 +38,8 @@ export function SessionControllerView() {
         mode={mode.value}
         onModeChange={mode.change}
         sessionActive={lifecycle.isActive}
+        sessionStatus={lifecycle.status}
+        compactStatus={compactStatus}
         evaluationBar={engine.showEvaluation ? (
           <EvalBar
             evaluation={(mode.isAnalysis ? session.analysis.snapshot?.lines[0]?.evaluation : engine.displayInfo?.pvs?.[0]?.evaluation) ?? null}

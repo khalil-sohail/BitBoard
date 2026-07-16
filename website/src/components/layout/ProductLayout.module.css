@@ -68,13 +68,6 @@
   aspect-ratio: 1;
 }
 
-.sideRail {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
 .modeNavigation {
   flex: none;
 }
@@ -127,11 +120,6 @@
     height: min(calc(100cqw - var(--eval-reserve)), 100cqh);
   }
 
-  .sideRail {
-    min-height: 0;
-    width: var(--sidebar-width);
-  }
-
   .sidebar {
     flex: 1 1 auto;
     min-height: 0;
@@ -179,7 +167,6 @@
 @media (max-width: 74.999rem) {
   .main,
   .workspace,
-  .sideRail,
   .sidebar {
     overflow: visible;
   }

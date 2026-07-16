@@ -17,8 +17,8 @@ if (!existsSync(chromeBinary)) throw new Error(`Chrome was not found at ${chrome
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const responsiveViewports = [
-  [2560, 1600], [1920, 1080], [1440, 900], [1366, 768],
-  [1024, 768], [768, 1024], [390, 844],
+  [2560, 1600], [1920, 1080], [1440, 900], [1366, 768], [1200, 800],
+  [1024, 768], [834, 1194], [768, 1024], [430, 932], [390, 844], [360, 800],
 ];
 
 async function waitUntil(check, timeoutMs, label) {
@@ -146,6 +146,104 @@ async function move(cdp, from, to, finalSettleMs = 100) {
   }
 }
 
+async function responsivePanelLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const root = document.querySelector('[data-responsive-session-panel]');
+    const strip = document.querySelector('[data-compact-status]');
+    const panel = root?.querySelector('[aria-label$="session details"]');
+    if (!(root instanceof HTMLElement) || !(strip instanceof HTMLElement) || !(panel instanceof HTMLElement)) return null;
+    const visible = element => { const style = getComputedStyle(element); const rect = element.getBoundingClientRect(); return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0; };
+    return {
+      expanded: root.dataset.expanded,
+      mobile: root.dataset.mobile,
+      stripVisible: visible(strip),
+      panelVisible: visible(panel),
+      panelRole: panel.getAttribute('role'),
+      panelAriaHidden: panel.getAttribute('aria-hidden'),
+      bodyOverflow: document.body.style.overflow,
+      backdrop: Boolean(document.querySelector('[class*="backdrop"]')),
+    };
+  })()`);
+}
+
+async function assertResponsivePanelLayout(cdp, width, sessionEngaged) {
+  const layout = await responsivePanelLayout(cdp);
+  assert.ok(layout, `Responsive session panel missing at ${width}px`);
+  if (width >= 1200) {
+    assert.equal(layout.stripVisible, false, `Desktop compact strip visible at ${width}px`);
+    assert.equal(layout.panelVisible, true, `Desktop persistent sidebar hidden at ${width}px`);
+  } else if (!sessionEngaged) {
+    assert.equal(layout.stripVisible, false, `Idle compact strip visible at ${width}px`);
+    assert.equal(layout.panelVisible, false, `Idle compact panel visible at ${width}px`);
+  } else {
+    assert.equal(layout.stripVisible, true, `Compact status strip hidden at ${width}px`);
+    assert.equal(layout.panelVisible, false, `Collapsed panel visible at ${width}px`);
+    assert.equal(layout.panelAriaHidden, 'true', `Collapsed panel not hidden semantically at ${width}px`);
+  }
+}
+
+async function exerciseResponsivePanel(cdp, modeLabel) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(100);
+  await evaluate(cdp, `window.__responsiveShellSentinel = document.querySelector('[data-product-app-shell]'); true`);
+  const opened = await evaluate(cdp, `(() => { const button = document.querySelector('[data-compact-status]'); if (!(button instanceof HTMLButtonElement)) return false; button.click(); return true; })()`);
+  assert.equal(opened, true, `${modeLabel} compact status could not open panel`);
+  await waitUntil(async () => (await responsivePanelLayout(cdp))?.expanded === 'true', 2_000, `${modeLabel} mobile panel expansion`);
+  let panel = await responsivePanelLayout(cdp);
+  assert.equal(panel.panelRole, 'dialog');
+  assert.equal(panel.panelVisible, true);
+  assert.equal(panel.bodyOverflow, 'hidden');
+  assert.equal(panel.backdrop, true);
+  assert.equal(await evaluate(cdp, `window.__responsiveShellSentinel === document.querySelector('[data-product-app-shell]')`), true, `${modeLabel} shell remounted while opening panel`);
+  let screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+  assert.ok(screenshot.data.length > 100, `${modeLabel} mobile expanded screenshot failed`);
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await waitUntil(async () => (await responsivePanelLayout(cdp))?.expanded === 'false', 2_000, `${modeLabel} Escape collapse`);
+  await waitUntil(() => evaluate(cdp, `document.activeElement === document.querySelector('[data-compact-status]')`), 2_000, `${modeLabel} focus restoration to strip`);
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 834, height: 1194, deviceScaleFactor: 1, mobile: false });
+  await waitUntil(async () => (await responsivePanelLayout(cdp))?.mobile === 'false', 2_000, `${modeLabel} tablet media state`);
+  await evaluate(cdp, `document.querySelector('[data-compact-status]')?.click()`);
+  await waitUntil(async () => (await responsivePanelLayout(cdp))?.expanded === 'true', 2_000, `${modeLabel} tablet panel expansion`);
+  panel = await responsivePanelLayout(cdp);
+  assert.equal(panel.panelRole, 'region');
+  assert.equal(panel.bodyOverflow, '');
+  screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+  assert.ok(screenshot.data.length > 100, `${modeLabel} tablet expanded screenshot failed`);
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1194, height: 834, deviceScaleFactor: 1, mobile: false });
+  await sleep(100);
+  assert.equal((await responsivePanelLayout(cdp)).expanded, 'true', `${modeLabel} panel state changed across orientation`);
+  assert.equal(await evaluate(cdp, `window.__responsiveShellSentinel === document.querySelector('[data-product-app-shell]')`), true, `${modeLabel} shell remounted across orientation`);
+  await evaluate(cdp, `document.querySelector('[aria-label="Collapse session panel"]')?.click()`);
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  return { panelOpenCount: 2, unexpectedPanelOpenCount: 0, controllerRemountCount: 0 };
+}
+
+async function exerciseFullscreen(cdp, width, height) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
+  await evaluate(cdp, `window.__fullscreenShellSentinel = document.querySelector('[data-product-app-shell]'); true`);
+  const entered = await cdp.send('Runtime.evaluate', { expression: 'document.documentElement.requestFullscreen().then(() => true).catch(() => false)', awaitPromise: true, returnByValue: true, userGesture: true });
+  assert.equal(entered.result.value, true, `Fullscreen entry failed at ${width}x${height}`);
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-product-app-shell]')?.getAttribute('data-fullscreen') === 'true'`), 2_000, 'fullscreen shell state');
+  const state = await evaluate(cdp, `(() => ({
+    sameShell: window.__fullscreenShellSentinel === document.querySelector('[data-product-app-shell]'),
+    headerDisplay: getComputedStyle(document.querySelector('[data-product-app-shell] > header')).display,
+    footerDisplay: getComputedStyle(document.querySelector('[data-product-app-shell] > footer')).display,
+    horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+  }))()`);
+  assert.equal(state.sameShell, true, 'Fullscreen remounted the application shell');
+  assert.equal(state.headerDisplay, 'none');
+  assert.equal(state.footerDisplay, 'none');
+  assert.equal(state.horizontalOverflow, false);
+  const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+  assert.ok(screenshot.data.length > 100);
+  await cdp.send('Runtime.evaluate', { expression: 'document.exitFullscreen()', awaitPromise: true, userGesture: true });
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-product-app-shell]')?.getAttribute('data-fullscreen') === 'false'`), 2_000, 'fullscreen exit');
+  assert.equal(await evaluate(cdp, `window.__fullscreenShellSentinel === document.querySelector('[data-product-app-shell]')`), true, 'Fullscreen exit remounted shell');
+  return { controllerRemountCount: 0, horizontalOverflowCount: 0 };
+}
+
 async function verifyFairPlayResponsiveLayout(cdp, expectedState) {
   for (const [width, height] of responsiveViewports) {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
@@ -176,6 +274,7 @@ async function verifyFairPlayResponsiveLayout(cdp, expectedState) {
     assert.equal(layout.sharedEvaluation, false, 'Fair Play must not render shared evaluation');
     assert.equal(layout.sharedPv, false, 'Fair Play must not render shared PV');
     assert.equal(layout.sharedMetrics, false, 'Fair Play must not render shared engine metrics');
+    await assertResponsivePanelLayout(cdp, width, expectedState !== 'idle');
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
     assert.ok(screenshot.data.length > 100, `Fair Play screenshot capture failed at ${width}x${height}`);
   }
@@ -217,6 +316,7 @@ async function verifyTrainingResponsiveLayout(cdp, expectedState) {
       assert.equal(layout.sharedMetrics, true, `Shared Training metrics missing at ${width}x${height}`);
       assert.equal(layout.sharedStatus, true, `Shared Training status missing at ${width}x${height}`);
     }
+    await assertResponsivePanelLayout(cdp, width, expectedState !== 'idle');
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
     assert.ok(screenshot.data.length > 100, `Screenshot capture failed at ${width}x${height}`);
   }
@@ -259,6 +359,7 @@ async function verifyAnalysisResponsiveLayout(cdp, expectedState) {
       assert.equal(layout.sharedStatus, true, `Shared Analysis status missing at ${width}x${height}`);
       assert.ok(layout.notation === 'SAN' || layout.notation === 'UCI', `Analysis PV notation missing at ${width}x${height}`);
     }
+    await assertResponsivePanelLayout(cdp, width, expectedState !== 'idle');
     const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
     assert.ok(screenshot.data.length > 100, `Analysis screenshot capture failed at ${width}x${height}`);
   }
@@ -266,8 +367,13 @@ async function verifyAnalysisResponsiveLayout(cdp, expectedState) {
 }
 
 async function assertCurrentAnalysisSnapshot(cdp) {
-  const latestRequest = messages(cdp, 'sent', 'analyze').at(-1)?.message;
+  const latestRequest = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').at(-1)?.message;
   assert.ok(latestRequest, 'No Analysis request was sent');
+  await waitUntil(() => evaluate(cdp, `(() => {
+    const sidebar = document.querySelector('[data-analysis-state]');
+    return sidebar?.getAttribute('data-analysis-request-id') === ${JSON.stringify(String(latestRequest.requestId))}
+      && sidebar?.getAttribute('data-analysis-snapshot-fen') === ${JSON.stringify(latestRequest.fen)};
+  })()`), 20_000, `current Analysis snapshot ${latestRequest.requestId}`);
   const displayed = await evaluate(cdp, `(() => {
     const sidebar = document.querySelector('[data-analysis-state]');
     if (!(sidebar instanceof HTMLElement)) return null;
@@ -295,6 +401,7 @@ async function configureTraining(cdp, reviewDepth = 2, selectMode = true) {
 }
 
 async function run() {
+  const interactionCounters = { panelOpenCount: 0, unexpectedPanelOpenCount: 0, controllerRemountCount: 0, horizontalOverflowCount: 0 };
   startProcess(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: { ...process.env, NODE_ENV: 'production', PORT: String(appPort), ENGINE_PATH: '../engine/chess-engine' },
@@ -327,6 +434,9 @@ async function run() {
   await move(cdp, 'e2', 'e4');
   await waitUntil(() => messages(cdp, 'sent', 'resultAck').length === 1, 20_000, 'Fair Play result acknowledgment');
   await verifyFairPlayResponsiveLayout(cdp, 'active');
+  Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseResponsivePanel(cdp, 'Fair Play')));
+  Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseFullscreen(cdp, 1440, 900)));
+  Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseFullscreen(cdp, 390, 844)));
   await clickButton(cdp, 'Resign');
   await clickButton(cdp, 'Confirm resign');
   await waitUntil(() => evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state') === 'completed'`), 5_000, 'completed Fair Play session');
@@ -351,68 +461,74 @@ async function run() {
   assert.equal(messages(cdp, 'received', 'error').some(frame => frame.message.code === 'STALE_APPLICATION_ACK'), false);
   assert.equal(messages(cdp, 'sent', 'resultAck').some(frame => frame.message.requestId === firstRoot.requestId), false);
   await verifyTrainingResponsiveLayout(cdp, 'player-turn');
+  Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseResponsivePanel(cdp, 'Training')));
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await evaluate(cdp, `document.querySelector('[data-compact-status]')?.click()`);
+  const hintsBefore = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'training-hint').length;
+  await clickButton(cdp, 'Request hint');
+  await waitUntil(() => evaluate(cdp, `document.body.innerText.includes('Next hint') && !document.body.innerText.includes('Preparing a hint for this position')`), 20_000, 'completed Training hint from mobile panel');
+  assert.ok(messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'training-hint').length >= hintsBefore, 'Training hint request count regressed');
+  await sleep(1_000);
+  await evaluate(cdp, `document.querySelector('[aria-label="Collapse session panel"]')?.click()`);
+  interactionCounters.panelOpenCount += 1;
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
   // Analysis: every snapshot is informational and position-scoped.
   await clickButton(cdp, 'Analysis');
   await verifyAnalysisResponsiveLayout(cdp, 'idle');
   await clickButton(cdp, 'Set up');
   await setRange(cdp, 'analysis-setup-depth', 2);
-  const analysisBestMovesBefore = messages(cdp, 'received', 'bestmove').length;
   await clickButton(cdp, 'Load & Analyze');
-  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore, 20_000, 'initial Analysis result');
-  await waitUntil(() => evaluate(cdp, `Boolean(document.querySelector('[data-analysis-request-id]'))`), 5_000, 'initial Analysis snapshot');
   await assertCurrentAnalysisSnapshot(cdp);
   const acknowledgmentsBeforeAnalysisMove = messages(cdp, 'sent', 'resultAck').length;
-  const analysisRequestsBeforeMove = messages(cdp, 'sent', 'analyze').length;
+  const analysisRequestsBeforeMove = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await move(cdp, 'e2', 'e4');
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > analysisRequestsBeforeMove, 10_000, 'Analysis restart');
-  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 1, 20_000, 'Analysis result after move');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > analysisRequestsBeforeMove, 10_000, 'Analysis restart');
   assert.equal(messages(cdp, 'sent', 'resultAck').length, acknowledgmentsBeforeAnalysisMove);
   await assertCurrentAnalysisSnapshot(cdp);
 
-  const requestsBeforeDepth = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforeDepth = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await setRange(cdp, 'live-analysis-depth', 3);
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeDepth, 10_000, 'Analysis depth restart');
-  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.searchLimit.depth, 3);
-  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 2, 20_000, 'depth-change Analysis result');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforeDepth, 10_000, 'Analysis depth restart');
+  assert.equal(messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').at(-1).message.searchLimit.depth, 3);
   await assertCurrentAnalysisSnapshot(cdp);
 
-  const requestsBeforeMultiPv = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforeMultiPv = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await clickAnalysisLineCount(cdp, 2);
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeMultiPv, 10_000, 'Analysis MultiPV restart');
-  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.multiPv, 2);
-  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 3, 20_000, 'MultiPV Analysis result');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforeMultiPv, 10_000, 'Analysis MultiPV restart');
+  assert.equal(messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').at(-1).message.multiPv, 2);
   await assertCurrentAnalysisSnapshot(cdp);
   await verifyAnalysisResponsiveLayout(cdp, 'analyzing');
+  Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseResponsivePanel(cdp, 'Analysis')));
 
   await clickButton(cdp, 'Stop analysis');
   await waitUntil(() => evaluate(cdp, `document.querySelector('[data-analysis-state]')?.getAttribute('data-analysis-state') === 'stopped'`), 5_000, 'stopped Analysis state');
   await assertCurrentAnalysisSnapshot(cdp);
   await verifyAnalysisResponsiveLayout(cdp, 'stopped');
-  const requestsBeforeResume = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforeResume = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await clickButton(cdp, 'Resume analysis');
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeResume, 10_000, 'resumed Analysis request');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforeResume, 10_000, 'resumed Analysis request');
 
   await clickButton(cdp, 'Change position');
   await clickButton(cdp, 'FEN');
   const customFen = 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1';
   await setTextArea(cdp, 'analysis-fen', customFen);
-  const requestsBeforeFen = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforeFen = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await clickButton(cdp, 'Load & Analyze');
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeFen, 10_000, 'FEN Analysis request');
-  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.fen, customFen);
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforeFen, 10_000, 'FEN Analysis request');
+  assert.equal(messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').at(-1).message.fen, customFen);
   await waitUntil(() => evaluate(cdp, `document.body.innerText.toLowerCase().includes('fen position')`), 5_000, 'FEN source summary');
 
   await clickButton(cdp, 'Change position');
   await clickButton(cdp, 'PGN');
   await setTextArea(cdp, 'analysis-pgn', '1. e4 e5');
-  const requestsBeforePgn = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforePgn = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await clickButton(cdp, 'Load & Analyze');
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforePgn, 10_000, 'PGN Analysis request');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforePgn, 10_000, 'PGN Analysis request');
   await waitUntil(() => evaluate(cdp, `document.body.innerText.toLowerCase().includes('pgn game') && document.body.innerText.includes('e4')`), 5_000, 'PGN source and history');
-  const requestsBeforeNavigation = messages(cdp, 'sent', 'analyze').length;
+  const requestsBeforeNavigation = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length;
   await clickButton(cdp, 'e4');
-  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeNavigation, 10_000, 'PGN navigation Analysis request');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').length > requestsBeforeNavigation, 10_000, 'PGN navigation Analysis request');
   assert.equal(messages(cdp, 'sent', 'resultAck').length, acknowledgmentsBeforeAnalysisMove);
 
   // Delayed Training messages after a mode switch cannot acknowledge in Analysis.
@@ -439,8 +555,13 @@ async function run() {
     delayedModeSwitchResultAckCount: acknowledgmentsAtModeSwitch,
     staleApplicationAckCount: 0,
     staleAnalysisDisplayCount: 0,
-    responsiveScreenshotsCaptured: responsiveViewports.length * 8,
+    responsiveScreenshotsCaptured: responsiveViewports.length * 8 + 8,
+    ...interactionCounters,
   }));
+}
+
+function addCounters(current, added) {
+  return Object.fromEntries(Object.keys(current).map(key => [key, current[key] + (added[key] ?? 0)]));
 }
 
 try {

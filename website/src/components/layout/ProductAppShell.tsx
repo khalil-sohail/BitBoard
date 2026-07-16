@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import type { GameMode } from '@/types/engine';
+import type { SessionLifecycleStatus } from '@/session/session-lifecycle';
+import type { CompactSessionStatus } from '@/components/responsive/responsive-session.types';
 import { ProductFooter } from './ProductFooter';
 import { ProductHeader } from './ProductHeader';
 import { SessionWorkspace } from './SessionWorkspace';
@@ -14,6 +16,8 @@ interface ProductAppShellProps {
   board: ReactNode;
   evaluationBar?: ReactNode;
   sidebar: ReactNode;
+  sessionStatus: SessionLifecycleStatus;
+  compactStatus: CompactSessionStatus;
 }
 
 export function ProductAppShell(props: ProductAppShellProps) {
@@ -40,6 +44,8 @@ export function ProductAppShell(props: ProductAppShellProps) {
         board={props.board}
         evaluationBar={props.evaluationBar}
         sidebar={props.sidebar}
+        sessionStatus={props.sessionStatus}
+        compactStatus={props.compactStatus}
       />
       <ProductFooter />
     </div>

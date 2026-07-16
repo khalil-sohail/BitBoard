@@ -10,6 +10,8 @@ const shell = read('src/components/layout/ProductAppShell.tsx');
 const workspace = read('src/components/layout/SessionWorkspace.tsx');
 const board = read('src/components/layout/BoardRegion.tsx');
 const sidebar = read('src/components/layout/SidebarRegion.tsx');
+const responsive = read('src/components/responsive/ResponsiveSessionPanel.tsx');
+const responsiveStyles = read('src/components/responsive/ResponsiveSession.module.css');
 const navigation = read('src/components/layout/ModeNavigation.tsx');
 const styles = read('src/components/layout/ProductLayout.module.css');
 const globals = read('src/app/globals.css');
@@ -23,7 +25,8 @@ for (const component of ['ProductHeader', 'SessionWorkspace', 'ProductFooter']) 
 }
 assert.match(workspace, /<main/);
 assert.match(workspace, /<BoardRegion/);
-assert.match(workspace, /<SidebarRegion/);
+assert.match(workspace, /<ResponsiveSessionPanel/);
+assert.match(responsive, /<SidebarRegion/);
 assert.match(sidebar, /<aside/);
 assert.match(navigation, /<nav/);
 assert.match(board, /aria-label="Chessboard"/);
@@ -36,10 +39,10 @@ assert.match(controller, /const isTraining/);
 assert.match(controller, /const showClock/);
 assert.equal((controller.match(/useEngine\(\)/g) ?? []).length, 1);
 assert.match(page, /SessionControllerProvider/);
-assert.doesNotMatch(shell + workspace + board + sidebar + navigation, /useEngine\(|useChessGame\(|useChessClock\(/);
+assert.doesNotMatch(shell + workspace + board + sidebar + navigation + responsive, /useEngine\(|useChessGame\(|useChessClock\(/);
 
 // Responsive/fullscreen presentation changes do not key or remount session content.
-assert.doesNotMatch(shell + workspace, /key=/);
+assert.doesNotMatch(shell + workspace + responsive, /key=/);
 assert.match(shell, /fullscreenchange/);
 assert.match(shell, /data-fullscreen=\{isFullscreen\}/);
 assert.match(shell, /data-session-active=\{props\.sessionActive\}/);
@@ -52,6 +55,8 @@ assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) var\(--sidebar-wid
 assert.match(styles, /--sidebar-width: clamp\(22\.5rem, 28vw, 28\.75rem\)/);
 assert.match(styles, /--workspace-max-width: 112\.5rem/);
 assert.match(styles, /@media \(max-width: 74\.999rem\)[\s\S]*\.sidebar \{[\s\S]*width: auto/);
+assert.match(responsiveStyles, /@media \(max-width: 47\.999rem\)/);
+assert.match(responsiveStyles, /data-mobile-overlay/);
 assert.doesNotMatch(page + styles, /540px|h-screen|max-w-\[1500px\]/);
 
 // Dynamic viewport sizing and reachable document scrolling replace the old trap.
