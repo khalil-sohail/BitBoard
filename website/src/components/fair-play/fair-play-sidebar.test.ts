@@ -46,7 +46,7 @@ assert.equal(formatClockMs(3_601_000), '1:00:01');
 
 assert.match(view, /mode\.value === 'fair' \? \(/);
 assert.match(view, /<FairPlaySidebar/);
-assert.match(view, /lifecycle\.isComplete && mode\.isTraining/);
+assert.doesNotMatch(view, /lifecycle\.isComplete && mode\.isTraining/);
 assert.doesNotMatch(sidebar, /EnginePanel|EvalBar|EvalGraph|MoveBadge|displayInfo|engineInfo|principal variation|\bdepth\b|\bnodes\b|\bNPS\b/);
 assert.doesNotMatch(sidebar, /useEngine\(|useSessionController\(/);
 assert.match(sidebar, /data-fair-play-state/);

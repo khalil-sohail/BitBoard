@@ -86,7 +86,7 @@ function testProtocolCriticalLifetimeIsPreserved(): void {
 function testPresentationEquivalence(): void {
   for (const component of [
     'ChessBoardComponent', 'EvalBar', 'FairPlaySidebar', 'AnalysisSearchControls',
-    'TrainingHintPanel', 'EnginePanel', 'MoveHistory', 'EvalGraph', 'GameControls', 'SessionSetupHost',
+    'TrainingSidebar', 'EnginePanel', 'MoveHistory', 'EvalGraph', 'GameControls', 'SessionSetupHost',
   ]) assert.match(view, new RegExp(`<${component}`));
   assert.match(view, /arrows=\{engine\.showPanel \? board\.arrows : \[\]\}/);
   assert.match(view, /showGrades=\{engine\.showPanel\}/);

@@ -16,6 +16,10 @@ if (!existsSync('../engine/chess-engine')) throw new Error('Build engine/chess-e
 if (!existsSync(chromeBinary)) throw new Error(`Chrome was not found at ${chromeBinary}. Set CHROME_BIN to override.`);
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const responsiveViewports = [
+  [2560, 1600], [1920, 1080], [1440, 900], [1366, 768],
+  [1024, 768], [768, 1024], [390, 844],
+];
 
 async function waitUntil(check, timeoutMs, label) {
   const started = Date.now();
@@ -118,6 +122,33 @@ async function move(cdp, from, to, finalSettleMs = 100) {
   }
 }
 
+async function verifyTrainingResponsiveLayout(cdp, expectedState) {
+  for (const [width, height] of responsiveViewports) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
+    await sleep(80);
+    const layout = await evaluate(cdp, `(() => {
+      const sidebar = document.querySelector('[data-training-state]');
+      if (!(sidebar instanceof HTMLElement)) return null;
+      const rect = sidebar.getBoundingClientRect();
+      return {
+        state: sidebar.dataset.trainingState,
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        documentHeight: document.documentElement.scrollHeight,
+      };
+    })()`);
+    assert.ok(layout, `Training sidebar missing at ${width}x${height}`);
+    assert.equal(layout.state, expectedState, `Unexpected Training state at ${width}x${height}`);
+    assert.equal(layout.horizontalOverflow, false, `Horizontal overflow at ${width}x${height}`);
+    assert.ok(layout.left >= -1 && layout.right <= layout.viewportWidth + 1, `Sidebar clipped at ${width}x${height}`);
+    const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+    assert.ok(screenshot.data.length > 100, `Screenshot capture failed at ${width}x${height}`);
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+}
+
 const parsedFrames = (cdp, direction) => cdp.frames
   .filter(frame => frame.direction === direction)
   .map(frame => {
@@ -128,8 +159,8 @@ const parsedFrames = (cdp, direction) => cdp.frames
 const messages = (cdp, direction, type) => parsedFrames(cdp, direction)
   .filter(frame => frame.message.type === type);
 
-async function configureTraining(cdp, reviewDepth = 2) {
-  await clickButton(cdp, 'Training');
+async function configureTraining(cdp, reviewDepth = 2, selectMode = true) {
+  if (selectMode) await clickButton(cdp, 'Training');
   await clickButton(cdp, 'Set up');
   await setRange(cdp, 'training-review-depth', reviewDepth);
   await clickButton(cdp, 'Start Training');
@@ -162,7 +193,9 @@ async function run() {
   await waitUntil(() => evaluate(cdp, `document.body.innerText.includes('Fair Play')`), 10_000, 'application page');
 
   // Training: review is informational; only the opponent move is acknowledged once.
-  await configureTraining(cdp);
+  await clickButton(cdp, 'Training');
+  await verifyTrainingResponsiveLayout(cdp, 'idle');
+  await configureTraining(cdp, 2, false);
   const firstRoot = messages(cdp, 'received', 'bestmove').at(-1).message;
   await move(cdp, 'e2', 'e4');
   await waitUntil(() => messages(cdp, 'sent', 'analyze').some(frame => frame.message.purpose === 'training-result-review'), 10_000, 'Training result review request');
@@ -176,6 +209,7 @@ async function run() {
   assert.equal(acknowledgment.applied, true);
   assert.equal(messages(cdp, 'received', 'error').some(frame => frame.message.code === 'STALE_APPLICATION_ACK'), false);
   assert.equal(messages(cdp, 'sent', 'resultAck').some(frame => frame.message.requestId === firstRoot.requestId), false);
+  await verifyTrainingResponsiveLayout(cdp, 'player-turn');
 
   // Analysis: position changes restart informational analysis without resultAck.
   await clickButton(cdp, 'Analysis');
@@ -214,6 +248,7 @@ async function run() {
     analysisResultAckCount: 0,
     delayedModeSwitchResultAckCount: acknowledgmentsAtModeSwitch,
     staleApplicationAckCount: 0,
+    responsiveScreenshotsCaptured: responsiveViewports.length * 2,
   }));
 }
 

@@ -8,7 +8,7 @@ import { useChessGame } from "@/hooks/useChessGame";
 import { useChessClock } from "@/hooks/useChessClock";
 import { useMoveReview } from "@/hooks/useMoveReview";
 import { useTrainingHint } from "@/hooks/useTrainingHint";
-import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS } from "@/types/engine";
+import { PlayerColor, DifficultyLevel, GameMode, TimeControl, TIME_CONTROLS, type EngineInfo } from "@/types/engine";
 import { NormalizedEvaluation, gradeMove, normalizeEngineInfo } from "@/lib/engine-evaluation";
 import {
   clockTransitionAfterLegalMove,
@@ -76,6 +76,7 @@ export function useSessionControllerValue() {
   const [fairPlaySessionFailure, setFairPlaySessionFailure] = useState<string | null>(null);
   const [analysisDisplay, dispatchAnalysisDisplay] = useReducer(analysisDisplayReducer, { live: null, finalized: null });
   const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
+  const [latestTrainingReviewInfo, setLatestTrainingReviewInfo] = useState<EngineInfo | null>(null);
   const setupTriggerRef = useRef<HTMLElement | null>(null);
   const ignoreStaleBestMoveRef = useRef(false);
   const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -468,6 +469,7 @@ export function useSessionControllerValue() {
       setMoveGrade(pendingReview.moveIndex, review.grade, review.loss, { hintLevelUsed: pendingReview.hintLevelUsed });
     }
     recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
+    setLatestTrainingReviewInfo(reviewInfo);
     dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: resultEvaluation !== null });
     pendingMoveReviewRef.current = null;
   }, [bestMoveResult, normalizedInfo, recordPositionEval, setMoveGrade, status]);
@@ -815,6 +817,7 @@ export function useSessionControllerValue() {
     setResignedBy(null);
     setTimeoutColor(null);
     setFairPlaySessionFailure(null);
+    setLatestTrainingReviewInfo(null);
     setGameStatus('active');
     if (gameMode === 'training') {
       dispatchTraining({ type: 'RESET_REQUESTED', reason: 'new-game', playerColor: resolvedColor });
@@ -858,6 +861,7 @@ export function useSessionControllerValue() {
     setPromotionResetKey(value => value + 1);
     pendingMoveReviewRef.current = null;
     resetGrades();
+    setLatestTrainingReviewInfo(null);
     setGameMode(newMode);
     setGameStatus('idle');
     setFairPlaySessionFailure(null);
@@ -962,6 +966,10 @@ export function useSessionControllerValue() {
     return true;
   };
 
+  const trainingPresentationInfo = normalizedInfo?.purpose === 'training-root-review' || normalizedInfo?.purpose === 'training-result-review'
+    ? normalizedInfo
+    : latestTrainingReviewInfo;
+
   return {
     mode: {
       value: gameMode,
@@ -1033,6 +1041,8 @@ export function useSessionControllerValue() {
       state: trainingState,
       hint: trainingHint,
       canRequestHint: hintRequestAvailable,
+      currentTurn: turn,
+      analysisInfo: trainingPresentationInfo,
     },
     analysis: {
       loadFen: handleLoadFen,

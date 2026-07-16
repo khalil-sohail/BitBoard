@@ -7,9 +7,9 @@ import { EnginePanel } from '@/components/panels/EnginePanel';
 import { MoveHistory } from '@/components/panels/MoveHistory';
 import { AnalysisSearchControls } from '@/components/panels/AnalysisSearchControls';
 import { EvalGraph } from '@/components/panels/EvalGraph';
-import { TrainingHintPanel } from '@/components/panels/TrainingHintPanel';
 import { GameControls } from '@/components/controls/GameControls';
 import { FairPlaySidebar } from '@/components/fair-play/FairPlaySidebar';
+import { TrainingSidebar } from '@/components/training/TrainingSidebar';
 import { SessionSetupHost } from '@/components/setup/SessionSetupHost';
 import { useSessionController } from './useSessionController';
 
@@ -71,18 +71,6 @@ export function SessionControllerView() {
               </div>
             )}
 
-            {lifecycle.isComplete && mode.isTraining && (
-              <div className="absolute inset-0 bg-background/70 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-md">
-                <h2 className="text-3xl font-bold text-foreground mb-2">Game Over</h2>
-                <p className="text-lg text-muted-foreground mb-6 font-medium">{lifecycle.gameOverMessage}</p>
-                <button
-                  onClick={actions.newGame}
-                  className="px-6 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-semibold transition-colors"
-                >
-                  Play Again
-                </button>
-              </div>
-            )}
           </>
         )}
         sidebar={mode.value === 'fair' ? (
@@ -107,6 +95,30 @@ export function SessionControllerView() {
             onFlipBoard={actions.flipBoard}
             onResign={actions.resign}
           />
+        ) : mode.isTraining ? (
+          <TrainingSidebar
+            lifecycle={lifecycle.status}
+            gameOverMessage={lifecycle.gameOverMessage}
+            state={training.state}
+            connectionStatus={engine.status}
+            currentTurn={training.currentTurn}
+            playerColor={board.orientation}
+            difficulty={setup.difficulty}
+            analysisInfo={training.analysisInfo}
+            hintView={training.hint.hintView}
+            canRequestHint={training.canRequestHint}
+            moves={history.moves}
+            grades={history.grades}
+            evaluationGraph={history.evaluationGraph}
+            canUndo={actions.canUndo}
+            canResign={actions.canResign}
+            onRequestHint={training.hint.requestHint}
+            onSetup={setup.open}
+            onNewGame={actions.newGame}
+            onUndo={actions.undo}
+            onFlip={actions.flipBoard}
+            onResign={actions.resign}
+          />
         ) : lifecycle.status === 'idle' ? null : (
           <>
             {mode.isAnalysis && (
@@ -116,15 +128,6 @@ export function SessionControllerView() {
                 disabled={engine.optionsUnavailable}
                 onDepthChange={setup.changeMaxDepth}
                 onMultiPvChange={setup.changeMultiPv}
-              />
-            )}
-
-            {mode.isTraining && (
-              <TrainingHintPanel
-                hint={training.state.status === 'waiting-player' ? training.state.hint : undefined}
-                hintView={training.hint.hintView}
-                canRequest={training.canRequestHint}
-                onRequest={training.hint.requestHint}
               />
             )}
 
