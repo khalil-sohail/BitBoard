@@ -24,10 +24,10 @@ export function EvalBar({ evaluation, orientation = 'w' }: { evaluation: Normali
     : Math.abs(evalScore / 100).toFixed(1);
 
   return (
-    <div className={`w-5 h-full bg-[hsl(222,30%,14%)] rounded-lg overflow-hidden flex ${orientation === 'w' ? 'flex-col justify-end' : 'flex-col-reverse justify-end'} border border-white/10 relative select-none shadow-lg`}>
+    <div aria-label={`Position evaluation, ${evaluation ? displayScore(evaluation) : 'unavailable'}, from White's perspective`} className={`w-5 h-full bg-[hsl(222,30%,14%)] rounded-lg overflow-hidden flex ${orientation === 'w' ? 'flex-col justify-end' : 'flex-col-reverse justify-end'} border border-white/10 relative select-none shadow-lg`}>
       {/* Dynamic Fill (White portion) */}
       <div 
-        className={`w-full bg-gradient-to-b from-[#e8e8e8] to-[#d0d0d0] transition-all duration-500 ease-in-out relative flex justify-center`}
+        className="relative flex w-full justify-center bg-gradient-to-b from-[#e8e8e8] to-[#d0d0d0] transition-[height] duration-300 ease-in-out motion-reduce:transition-none"
         style={{ height: `${displayHeight}%` }}
       >
         {/* Label for white winning: bar is >= 50% so White has the advantage */}

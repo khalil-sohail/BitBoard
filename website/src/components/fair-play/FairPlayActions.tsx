@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FairPlaySidebarState } from './fair-play-presentation';
 import { ContextualActions } from '../live-data/ContextualActions';
 import styles from './FairPlaySidebar.module.css';
@@ -16,6 +16,32 @@ interface FairPlayActionsProps {
 
 export function FairPlayActions(props: FairPlayActionsProps) {
   const [confirmingResign, setConfirmingResign] = useState(false);
+  const confirmationRef = useRef<HTMLDivElement>(null);
+  const resignTriggerRef = useRef<HTMLElement | null>(null);
+  const restoreFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!confirmingResign) return;
+    const frame = requestAnimationFrame(() => confirmationRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [confirmingResign]);
+  useEffect(() => () => {
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+  }, []);
+
+  const beginResignation = () => {
+    resignTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirmingResign(true);
+  };
+  const cancelResignation = () => {
+    const trigger = resignTriggerRef.current;
+    setConfirmingResign(false);
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+    restoreFrameRef.current = requestAnimationFrame(() => {
+      restoreFrameRef.current = null;
+      if (trigger?.isConnected) trigger.focus();
+    });
+  };
 
   if (props.state === 'idle') {
     return <ContextualActions actions={[{ id: 'setup', label: 'Set up game', variant: 'primary', onAction: props.onSetup }]} />;
@@ -33,10 +59,15 @@ export function FairPlayActions(props: FairPlayActionsProps) {
 
   if (confirmingResign) {
     return (
-      <div className={styles.resignConfirmation} role="group" aria-label="Confirm resignation">
+      <div ref={confirmationRef} className={styles.resignConfirmation} role="group" aria-label="Confirm resignation" onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cancelResignation();
+        }
+      }}>
         <p>Resign this game?</p>
         <div>
-          <button type="button" className={styles.secondaryAction} onClick={() => setConfirmingResign(false)}>Keep playing</button>
+          <button type="button" className={styles.secondaryAction} onClick={cancelResignation}>Keep playing</button>
           <button type="button" className={styles.dangerAction} onClick={props.onResign}>Confirm resign</button>
         </div>
       </div>
@@ -44,6 +75,6 @@ export function FairPlayActions(props: FairPlayActionsProps) {
   }
 
   return (
-    <ContextualActions actions={[{ id: 'flip', label: 'Flip board', onAction: props.onFlipBoard }, ...(props.canResign ? [{ id: 'resign', label: 'Resign', variant: 'destructive' as const, onAction: () => setConfirmingResign(true) }] : [])]} />
+    <ContextualActions actions={[{ id: 'flip', label: 'Flip board', onAction: props.onFlipBoard }, ...(props.canResign ? [{ id: 'resign', label: 'Resign', variant: 'destructive' as const, onAction: beginResignation }] : [])]} />
   );
 }

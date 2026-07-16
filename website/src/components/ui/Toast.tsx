@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type ToastType = 'info' | 'warning' | 'error';
 
@@ -18,23 +18,34 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const timersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
 
-  const addToast = (message: string, type: ToastType = 'info') => {
+  const addToast = useCallback((message: string, type: ToastType = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
+      timersRef.current.delete(timer);
     }, 3000);
-  };
+    timersRef.current.add(timer);
+  }, []);
+  const value = useMemo(() => ({ addToast }), [addToast]);
+
+  useEffect(() => () => {
+    for (const timer of timersRef.current) clearTimeout(timer);
+    timersRef.current.clear();
+  }, []);
 
   return (
-    <ToastContext.Provider value={{ addToast }}>
+    <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[90] flex max-w-[calc(100vw-2rem)] flex-col gap-2" aria-label="Notifications">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-md shadow-lg font-medium text-sm border animate-in slide-in-from-right-8 fade-in duration-300 ${
+            role={toast.type === 'error' ? 'alert' : 'status'}
+            aria-atomic="true"
+            className={`px-4 py-3 rounded-md shadow-lg font-medium text-sm border animate-in slide-in-from-right-8 fade-in duration-300 motion-reduce:animate-none ${
               toast.type === 'error'
                 ? 'bg-red-950 border-red-800 text-red-200'
                 : toast.type === 'warning'

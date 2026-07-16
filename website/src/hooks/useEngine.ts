@@ -153,8 +153,7 @@ export function useEngine() {
           case 'info':
             if (!stateRef.current.isWaitingForNewGameReady &&
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
-              setEngineInfo(prev => ({
-                requestId: data.requestId,
+              const infoIdentity = {
                 rootFen: activeRootFenRef.current ?? undefined,
                 positionFen: activePositionFenRef.current ?? undefined,
                 positionKey: activePositionKeyRef.current ?? undefined,
@@ -163,6 +162,10 @@ export function useEngine() {
                 mode: activeModeRef.current ?? undefined,
                 purpose: activePurposeRef.current ?? undefined,
                 requestedLimit: activeLimitRef.current ?? undefined,
+              };
+              setEngineInfo(prev => ({
+                requestId: data.requestId,
+                ...infoIdentity,
                 depth: data.depth,
                 reportedDepth: data.depth,
                 selectiveDepth: data.selectiveDepth ?? null,

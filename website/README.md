@@ -3,6 +3,47 @@
 Next.js frontend plus a Node WebSocket backend that bridges browser clients to
 the C++ UCI engine.
 
+## Frontend Architecture
+
+`SessionControllerProvider` is mounted once at the page boundary and owns the
+complete browser session: mode and lifecycle, board history, engine connection,
+clocks, Training review and hints, Analysis snapshots, Fair Play state, setup,
+and result acknowledgments. `SessionControllerView` projects that state into
+the application shell. Layout, responsive, setup, and sidebar components are
+presentation boundaries; they receive state and callbacks and do not create
+engine sessions or own request, result, or lifecycle state.
+
+The shell keeps `BoardRegion` and `SidebarRegion` mounted while CSS changes the
+layout. At 75rem and above the sidebar is persistent beside a size-contained
+board. Below 75rem, active sessions expose a compact status control and an
+expandable details panel. Below 48rem the expanded panel is a modal bottom
+overlay with body-scroll locking, focus containment, Escape handling, focus
+restoration, safe-area padding, and dynamic viewport sizing. Fullscreen changes
+only shell presentation; it does not replace or key session content.
+
+Fair Play, Training, and Analysis use mode-specific sidebars over a shared
+live-data presentation layer. The shared layer owns section framing, operational
+status, evaluation formatting, engine metrics, principal-variation lists,
+action groups, and semantic move-history tables. Fair Play intentionally never
+receives evaluation, PV, or engine metrics. Training displays only position-
+appropriate review data, and Analysis snapshots remain request- and
+position-scoped.
+
+Setup is a single controller-hosted modal system with mode-specific forms.
+Dialogs use labelled modal semantics, inert background content, focus trapping,
+Escape and outside-click dismissal, and trigger focus restoration. Promotion
+choice and the product Architecture overlay follow the same keyboard and focus
+rules. Native buttons, links, fieldsets, labels, tables, lists, details, and
+status regions are preferred over ARIA. Global focus-visible, reduced-motion,
+forced-colors, contrast, and minimum touch-target rules provide the shared
+accessibility baseline.
+
+Intentional limitations: the application has no in-product fullscreen toggle;
+it responds when the browser or embedding environment enters fullscreen. The
+board delegates piece keyboard drag-and-drop behavior to `react-chessboard`.
+WebKit is validated only when a WebKit/Safari runtime is available in the test
+environment.
+
 ## Development
 
 ```bash

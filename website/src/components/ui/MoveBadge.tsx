@@ -60,12 +60,13 @@ export function MoveBadge({ grade, compact = false }: MoveBadgeProps) {
         transition-all duration-150
       `}
       title={compact ? config.label : undefined}
+      aria-label={compact ? config.label : undefined}
     >
       {compact ? (
-        config.icon
+        <span aria-hidden="true">{config.icon}</span>
       ) : (
         <>
-          <span>{config.icon}</span>
+          <span aria-hidden="true">{config.icon}</span>
           <span>{config.label}</span>
         </>
       )}

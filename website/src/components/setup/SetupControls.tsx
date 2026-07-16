@@ -67,7 +67,7 @@ export function DifficultyControl({ value, onChange }: { value: DifficultyLevel;
             className={`min-h-14 rounded-lg border px-2 transition-colors ${value === option.id ? 'border-primary/50 bg-primary/15 text-primary' : 'border-white/10 bg-background text-muted hover:text-foreground'}`}
           >
             <span className="block text-xs font-bold">{option.label}</span>
-            <span className="mt-0.5 block text-[9px] opacity-60">{option.sublabel}</span>
+            <span className="mt-0.5 block text-[10px] text-muted">{option.sublabel}</span>
           </button>
         ))}
       </div>

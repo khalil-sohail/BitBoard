@@ -98,6 +98,41 @@ async function clickButton(cdp, text) {
   await sleep(200);
 }
 
+async function exerciseArchitectureDialog(cdp) {
+  const focused = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('button')].find(item => item.textContent?.trim() === 'Architecture');
+    if (!(button instanceof HTMLButtonElement)) return false;
+    button.focus();
+    window.__architectureTrigger = button;
+    return true;
+  })()`);
+  assert.equal(focused, true, 'Architecture trigger was not keyboard focusable');
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'char', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  await waitUntil(() => evaluate(cdp, `Boolean(document.querySelector('[role="dialog"][aria-labelledby]'))`), 2_000, 'Architecture dialog');
+  const opened = await evaluate(cdp, `(() => {
+    const dialog = document.querySelector('[role="dialog"][aria-labelledby]');
+    const close = dialog?.querySelector('[aria-label="Close architecture"]');
+    return {
+      modal: dialog?.getAttribute('aria-modal'),
+      focusInside: dialog?.contains(document.activeElement),
+      closeFocused: document.activeElement === close,
+      shellInert: document.querySelector('[data-product-app-shell]')?.inert,
+      bodyOverflow: document.body.style.overflow,
+    };
+  })()`);
+  assert.deepEqual(opened, { modal: 'true', focusInside: true, closeFocused: true, shellInert: true, bodyOverflow: 'hidden' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab' });
+  assert.equal(await evaluate(cdp, `document.querySelector('[role="dialog"]')?.contains(document.activeElement)`), true, 'Architecture dialog lost its focus trap');
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await waitUntil(() => evaluate(cdp, `!document.querySelector('[role="dialog"]')`), 2_000, 'Architecture dialog Escape close');
+  assert.equal(await evaluate(cdp, `document.activeElement === window.__architectureTrigger`), true, 'Architecture dialog did not restore focus');
+  assert.equal(await evaluate(cdp, `document.querySelector('[data-product-app-shell]')?.inert`), false, 'Architecture dialog left the shell inert');
+}
+
 async function setRange(cdp, id, value) {
   const changed = await evaluate(cdp, `(() => {
     const input = document.getElementById(${JSON.stringify(id)});
@@ -375,11 +410,21 @@ async function verifyAnalysisResponsiveLayout(cdp, expectedState) {
 async function assertCurrentAnalysisSnapshot(cdp) {
   const latestRequest = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').at(-1)?.message;
   assert.ok(latestRequest, 'No Analysis request was sent');
-  await waitUntil(() => evaluate(cdp, `(() => {
-    const sidebar = document.querySelector('[data-analysis-state]');
-    return sidebar?.getAttribute('data-analysis-request-id') === ${JSON.stringify(String(latestRequest.requestId))}
-      && sidebar?.getAttribute('data-analysis-snapshot-fen') === ${JSON.stringify(latestRequest.fen)};
-  })()`), 20_000, `current Analysis snapshot ${latestRequest.requestId}`);
+  try {
+    await waitUntil(() => evaluate(cdp, `(() => {
+      const sidebar = document.querySelector('[data-analysis-state]');
+      return sidebar?.getAttribute('data-analysis-request-id') === ${JSON.stringify(String(latestRequest.requestId))}
+        && sidebar?.getAttribute('data-analysis-snapshot-fen') === ${JSON.stringify(latestRequest.fen)};
+    })()`), 20_000, `current Analysis snapshot ${latestRequest.requestId}`);
+  } catch (error) {
+    const displayed = await evaluate(cdp, `(() => {
+      const sidebar = document.querySelector('[data-analysis-state]');
+      return { state: sidebar?.getAttribute('data-analysis-state'), requestId: sidebar?.getAttribute('data-analysis-request-id'), fen: sidebar?.getAttribute('data-analysis-snapshot-fen') };
+    })()`);
+    const received = parsedFrames(cdp, 'received').filter(frame => frame.message.requestId === latestRequest.requestId).map(frame => frame.message.type);
+    const analysisRequests = messages(cdp, 'sent', 'analyze').filter(frame => frame.message.purpose === 'analysis').map(frame => frame.message.requestId);
+    throw new Error(`${error.message}; request=${JSON.stringify(latestRequest)}; analysisRequests=${JSON.stringify(analysisRequests)}; received=${JSON.stringify(received)}; displayed=${JSON.stringify(displayed)}`);
+  }
   const displayed = await evaluate(cdp, `(() => {
     const sidebar = document.querySelector('[data-analysis-state]');
     if (!(sidebar instanceof HTMLElement)) return null;
@@ -430,7 +475,15 @@ async function run() {
   const cdp = connectCdp(target.webSocketDebuggerUrl);
   await new Promise(resolve => cdp.socket.once('open', resolve));
   await Promise.all([cdp.send('Page.enable'), cdp.send('Runtime.enable'), cdp.send('Network.enable')]);
-  await waitUntil(() => evaluate(cdp, `document.body.innerText.includes('Fair Play')`), 10_000, 'application page');
+  await waitUntil(() => evaluate(cdp, `document.body?.innerText.includes('Fair Play') ?? false`), 10_000, 'application page');
+  const accessiblePiece = await evaluate(cdp, `(() => {
+    const piece = document.querySelector('[data-piece]');
+    const control = piece?.closest('[role="button"]');
+    return { name: control?.textContent?.replace(/\\s+/g, ' ').trim(), tabIndex: control?.getAttribute('tabindex') };
+  })()`);
+  assert.match(accessiblePiece.name ?? '', /^(White|Black) (pawn|knight|bishop|rook|queen|king) on [a-h][1-8]$/);
+  assert.equal(accessiblePiece.tabIndex, '0');
+  await exerciseArchitectureDialog(cdp);
 
   // Fair Play: the shared history/actions remain policy-restricted, including after completion.
   await verifyFairPlayResponsiveLayout(cdp, 'idle');

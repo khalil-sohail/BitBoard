@@ -4,8 +4,8 @@ import { ToastProvider } from "@/components/ui/Toast";
 import { ScrollProgress } from "@/components/ui/ScrollProgress";
 
 export const metadata: Metadata = {
-  title: "Engine Room",
-  description: "High-performance custom C++ UCI chess engine interface.",
+  title: "Bitboard Chess Engine",
+  description: "Play, train, and analyze with the Bitboard C++23 chess engine.",
 };
 
 export default function RootLayout({

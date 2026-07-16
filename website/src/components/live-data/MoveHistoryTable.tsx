@@ -12,7 +12,7 @@ export const MoveHistoryTable = memo(function MoveHistoryTable({ entries, captio
   const followLatestRef = useRef(true);
   const selectedPly = entries.find(entry => entry.selected)?.ply;
   const rows = useMemo(() => groupMoveHistoryEntries(entries), [entries]);
-  useEffect(() => { if (followLatestRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [entries.length]);
+  useEffect(() => { if (followLatestRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [entries.length]);
   useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }); }, [selectedPly]);
   return <div ref={scrollRef} className={styles.historyScroll} data-live-history onScroll={event => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32; }}>
     {!rows.length ? <EmptyState>{emptyText}</EmptyState> : <table className={styles.historyTable}>
