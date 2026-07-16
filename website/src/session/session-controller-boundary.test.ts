@@ -78,6 +78,7 @@ function testProtocolCriticalLifetimeIsPreserved(): void {
     'duplicate-request',
     'acknowledgeAppliedEngineMove',
     'clockTransitionAfterLegalMove',
+    'shouldStartPlayerClock',
     "dispatchTraining({ type: 'REVIEW_COMPLETED'",
     "dispatchTraining({ type: 'RESET_REQUESTED', reason: 'mode-switch'",
   ]) assert.ok(controller.includes(invariant), `missing invariant: ${invariant}`);

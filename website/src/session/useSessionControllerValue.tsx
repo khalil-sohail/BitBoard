@@ -14,6 +14,7 @@ import {
   clockTransitionAfterLegalMove,
   shouldAcceptEngineBestMove,
   shouldStartEngineClockForSearch,
+  shouldStartPlayerClock,
 } from "@/lib/time-management-policy";
 import {
   canChangeTrainingSettings,
@@ -243,6 +244,28 @@ export function useSessionControllerValue() {
 
   // ── Effective game-over (board or resign) ────────────────────────────────
   const effectiveGameOver = (gameStatus === 'active' && isGameOver) || gameStatus === 'completed';
+  const playerClockActiveSide = clock.activeSide;
+  const playerClockIsRunning = clock.isRunning;
+  const startPlayerClock = clock.startClock;
+  const stopClockForEngineSignal = clock.stopClock;
+
+  // The player owns the initial/reconnected turn only after the engine session
+  // is ready. Engine turns remain search-owned and start on search-started.
+  useEffect(() => {
+    if (!shouldStartPlayerClock({
+      hasTimeControl: hasTC,
+      gameStatus,
+      isTerminal: effectiveGameOver,
+      timeoutColor,
+      engineReady: status === 'idle',
+      waitingForSessionReady,
+      turn,
+      playerColor: orientation,
+      activeSide: playerClockActiveSide,
+      isRunning: playerClockIsRunning,
+    })) return;
+    startPlayerClock(orientation);
+  }, [effectiveGameOver, gameStatus, hasTC, orientation, playerClockActiveSide, playerClockIsRunning, startPlayerClock, status, timeoutColor, turn, waitingForSessionReady]);
 
   const trainingBoardInteractive =
     isTraining &&
@@ -330,8 +353,8 @@ export function useSessionControllerValue() {
 
   useEffect(() => {
     if (clockStopSignal === 0) return;
-    clock.stopClock();
-  }, [clock, clockStopSignal]);
+    stopClockForEngineSignal();
+  }, [clockStopSignal, stopClockForEngineSignal]);
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -876,10 +899,6 @@ export function useSessionControllerValue() {
       setMaxDepth(config.maxDepth);
     }
 
-    // If the player chose Black, the engine moves first — start the engine's clock.
-    if (resolvedColor === 'b' && config.timeControl.initialMs > 0 && hasTC) {
-      // The engine-auto-trigger will fire once status=idle; delay is fine.
-    }
   };
 
   // ── Mode change ──────────────────────────────────────────────────────────

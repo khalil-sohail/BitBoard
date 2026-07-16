@@ -182,6 +182,38 @@ async function move(cdp, from, to, finalSettleMs = 100) {
   }
 }
 
+async function fairClockState(cdp) {
+  return evaluate(cdp, `(() => {
+    const panel = document.querySelector('[aria-labelledby="fair-play-clocks-title"]');
+    if (!(panel instanceof HTMLElement)) return null;
+    const clocks = [...panel.querySelectorAll('time')].map(time => ({
+      label: time.parentElement?.getAttribute('aria-label') ?? '',
+      value: time.textContent?.trim() ?? '',
+    }));
+    const status = panel.querySelector('[id="fair-play-clocks-title"]')?.parentElement?.querySelector('span')?.textContent?.trim() ?? '';
+    return { status, clocks };
+  })()`);
+}
+
+function clockSeconds(value) {
+  const parts = value.split(':').map(Number);
+  return parts.length === 2 && parts.every(Number.isFinite) ? parts[0] * 60 + parts[1] : null;
+}
+
+async function startClockTransitionObserver(cdp) {
+  return evaluate(cdp, `(() => {
+    window.__fairClockTransitions = [];
+    window.__fairClockObserver?.disconnect();
+    const panel = document.querySelector('[aria-labelledby="fair-play-clocks-title"]');
+    if (!panel) return false;
+    const record = () => window.__fairClockTransitions.push([...panel.querySelectorAll('[aria-label*="clock"]')].map(item => item.getAttribute('aria-label')));
+    window.__fairClockObserver = new MutationObserver(record);
+    window.__fairClockObserver.observe(panel, { attributes: true, attributeFilter: ['aria-label'], subtree: true });
+    record();
+    return true;
+  })()`);
+}
+
 async function responsivePanelLayout(cdp) {
   return evaluate(cdp, `(() => {
     const root = document.querySelector('[data-responsive-session-panel]');
@@ -488,10 +520,44 @@ async function run() {
   // Fair Play: the shared history/actions remain policy-restricted, including after completion.
   await verifyFairPlayResponsiveLayout(cdp, 'idle');
   await clickButton(cdp, 'Set up game');
+  await clickButton(cdp, '1+1');
+  await clickButton(cdp, 'Advanced settings');
+  const openingBookDisabled = await evaluate(cdp, `(() => {
+    const label = [...document.querySelectorAll('label')].find(item => item.textContent?.includes('Opening book'));
+    const checkbox = label?.querySelector('input[type="checkbox"]');
+    if (checkbox instanceof HTMLInputElement && checkbox.checked) checkbox.click();
+    return checkbox instanceof HTMLInputElement && !checkbox.checked;
+  })()`);
+  assert.equal(openingBookDisabled, true, 'Opening book could not be disabled for clock transfer coverage');
   await clickButton(cdp, 'Start Fair Play');
   await waitUntil(() => evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state') === 'active'`), 10_000, 'active Fair Play session');
-  await move(cdp, 'e2', 'e4');
+  await waitUntil(async () => {
+    const clocks = await fairClockState(cdp);
+    return clocks?.status === 'Clock running' && clocks.clocks.some(clock => clock.label.startsWith('You,') && clock.label.includes('active clock'));
+  }, 10_000, 'initial player clock start');
+  const initialPlayerClock = clockSeconds((await fairClockState(cdp)).clocks.find(clock => clock.label.startsWith('You,'))?.value ?? '');
+  await sleep(1_200);
+  const tickingPlayerClock = clockSeconds((await fairClockState(cdp)).clocks.find(clock => clock.label.startsWith('You,'))?.value ?? '');
+  assert.ok(initialPlayerClock !== null && tickingPlayerClock !== null && tickingPlayerClock < initialPlayerClock, 'Player clock did not count down');
+  assert.equal(await startClockTransitionObserver(cdp), true, 'Fair Play clock observer could not start');
+  await move(cdp, 'e2', 'e4', 0);
+  const opponentRequestsAfterMove = messages(cdp, 'sent', 'move').length;
+  await move(cdp, 'd2', 'd4', 0);
+  assert.equal(messages(cdp, 'sent', 'move').length, opponentRequestsAfterMove, 'Rapid second player move started another engine request');
   await waitUntil(() => messages(cdp, 'sent', 'resultAck').length === 1, 20_000, 'Fair Play result acknowledgment');
+  try {
+    await waitUntil(async () => (await fairClockState(cdp))?.clocks.some(clock => clock.label.startsWith('You,') && clock.label.includes('active clock')), 5_000, 'player clock after engine reply');
+  } catch (error) {
+    const clocks = await fairClockState(cdp);
+    const fairState = await evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state')`);
+    const transitions = await evaluate(cdp, `window.__fairClockTransitions`);
+    const lifecycleFrames = parsedFrames(cdp, 'received').filter(frame => ['search-started', 'bestmove', 'move-applied', 'error'].includes(frame.message.type)).map(frame => ({ type: frame.message.type, requestId: frame.message.requestId }));
+    throw new Error(`${error.message}; fairState=${fairState}; clocks=${JSON.stringify(clocks)}; transitions=${JSON.stringify(transitions)}; frames=${JSON.stringify(lifecycleFrames)}`);
+  }
+  const incrementedPlayerClock = clockSeconds((await fairClockState(cdp)).clocks.find(clock => clock.label.startsWith('You,'))?.value ?? '');
+  assert.ok(incrementedPlayerClock !== null && incrementedPlayerClock >= tickingPlayerClock, 'Player increment was not applied');
+  const clockTransitions = await evaluate(cdp, `window.__fairClockObserver?.disconnect(); window.__fairClockTransitions`);
+  assert.equal(clockTransitions.flat().some(label => label?.startsWith('Engine,') && label.includes('active clock')), true, 'Engine clock ownership was never rendered');
   await verifyFairPlayResponsiveLayout(cdp, 'active');
   Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseResponsivePanel(cdp, 'Fair Play')));
   Object.assign(interactionCounters, addCounters(interactionCounters, await exerciseFullscreen(cdp, 1440, 900)));
@@ -605,6 +671,20 @@ async function run() {
   assert.equal(messages(cdp, 'received', 'error').some(frame => frame.message.code === 'STALE_APPLICATION_ACK'), false);
   const body = await evaluate(cdp, 'document.body.innerText');
   assert.equal(body.includes('Move application acknowledgement did not match the active result.'), false);
+
+  // Real-timer regression: a player who does not move loses on time, the clock
+  // stops, and the completed session remains usable.
+  await cdp.send('Page.reload', { ignoreCache: true });
+  await waitUntil(() => evaluate(cdp, `document.readyState === 'complete' && document.body?.innerText.includes('Fair Play')`), 10_000, 'timeout test application');
+  await clickButton(cdp, 'Set up game');
+  await clickButton(cdp, '1+0');
+  await clickButton(cdp, 'Start Fair Play');
+  await waitUntil(async () => (await fairClockState(cdp))?.clocks.some(clock => clock.label.startsWith('You,') && clock.label.includes('active clock')), 10_000, 'timeout test clock start');
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-fair-play-state]')?.getAttribute('data-fair-play-state') === 'completed'`), 70_000, 'Fair Play timeout completion');
+  const finalClocks = await fairClockState(cdp);
+  assert.equal(finalClocks.status, 'Final clocks');
+  assert.equal(finalClocks.clocks.some(clock => clock.label.includes('active clock')), false);
+  assert.equal(await evaluate(cdp, `document.body.innerText.includes('wins on Time')`), true, 'Timeout result was not presented');
 
   await cdp.send('Page.close');
   console.log(JSON.stringify({

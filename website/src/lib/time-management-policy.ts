@@ -54,3 +54,25 @@ export function shouldStartEngineClockForSearch(params: {
     params.searchStartedRequestId !== null &&
     params.searchStartedRequestId !== params.lastStartedRequestId;
 }
+
+export function shouldStartPlayerClock(params: {
+  hasTimeControl: boolean;
+  gameStatus: GameClockStatus;
+  isTerminal: boolean;
+  timeoutColor: PlayerColor | null;
+  engineReady: boolean;
+  waitingForSessionReady: boolean;
+  turn: PlayerColor;
+  playerColor: PlayerColor;
+  activeSide: PlayerColor | null;
+  isRunning: boolean;
+}): boolean {
+  return params.hasTimeControl &&
+    params.gameStatus === 'active' &&
+    !params.isTerminal &&
+    params.timeoutColor === null &&
+    params.engineReady &&
+    !params.waitingForSessionReady &&
+    params.turn === params.playerColor &&
+    (!params.isRunning || params.activeSide !== params.playerColor);
+}

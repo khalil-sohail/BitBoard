@@ -3,6 +3,7 @@ import {
   clockTransitionAfterLegalMove,
   shouldAcceptEngineBestMove,
   shouldStartEngineClockForSearch,
+  shouldStartPlayerClock,
 } from './time-management-policy';
 
 function testTerminalMoveClockTransition(): void {
@@ -86,10 +87,35 @@ function testQueuedSearchClockStartPolicy(): void {
   }), false);
 }
 
+function testPlayerClockStartAndReconnectPolicy(): void {
+  const readyTurn = {
+    hasTimeControl: true,
+    gameStatus: 'active' as const,
+    isTerminal: false,
+    timeoutColor: null,
+    engineReady: true,
+    waitingForSessionReady: false,
+    turn: 'w' as const,
+    playerColor: 'w' as const,
+    activeSide: null,
+    isRunning: false,
+  };
+  assert.equal(shouldStartPlayerClock(readyTurn), true);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, waitingForSessionReady: true }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, engineReady: false }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, turn: 'b' }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, hasTimeControl: false }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, isRunning: true, activeSide: 'w' }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, isRunning: true, activeSide: 'b' }), true);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, timeoutColor: 'w' }), false);
+  assert.equal(shouldStartPlayerClock({ ...readyTurn, gameStatus: 'completed' }), false);
+}
+
 testTerminalMoveClockTransition();
 testNonTerminalMoveClockTransition();
 testUntimedTerminalMoveCompletesWithoutClockMutation();
 testFlagFallRejectsLateBestmove();
 testQueuedSearchClockStartPolicy();
+testPlayerClockStartAndReconnectPolicy();
 
 console.log('time-management policy tests passed');
