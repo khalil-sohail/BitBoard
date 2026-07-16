@@ -1,0 +1,121 @@
+.sidebar,
+.idleSidebar {
+  min-width: 0;
+  color: var(--foreground);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.idleSidebar,
+.evaluationPanel,
+.pvPanel,
+.navigationPanel,
+.searchControls,
+.historyPanel,
+.metricsPanel,
+.operationalStatus {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.idleSidebar { padding: 1.25rem; }
+.idleSidebar h2 { margin: 0.2rem 0 0.35rem; font-size: 1.25rem; }
+.idleSidebar > p:not(.eyebrow) { margin: 0 0 1rem; color: var(--muted); font-size: 0.875rem; }
+
+.sessionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0.15rem;
+}
+.sessionHeader h2 { margin: 0.15rem 0 0; font-size: 1rem; }
+.sessionHeader > span { flex: none; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 999px; padding: 0.35rem 0.6rem; color: var(--muted); font-size: 0.6875rem; font-weight: 700; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 0.625rem; font-weight: 800; letter-spacing: 0.11em; text-transform: uppercase; }
+
+.evaluationPanel { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 1rem; }
+.evaluationPanel h3,
+.sectionHeading h3 { margin: 0.15rem 0 0; font-size: 0.8125rem; }
+.evaluationValue { display: flex; flex-direction: column; align-items: flex-end; min-width: 8rem; }
+.evaluationValue strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(1.75rem, 4vw, 2.45rem); line-height: 1; }
+.evaluationValue span { margin-top: 0.35rem; color: var(--muted); font-size: 0.6875rem; }
+.snapshotNote { grid-column: 1 / -1; margin: 0; border-top: 1px solid rgb(255 255 255 / 0.08); padding-top: 0.6rem; color: var(--muted); font-size: 0.6875rem; }
+
+.pvPanel,
+.navigationPanel,
+.historyPanel { padding: 0.9rem; }
+.sectionHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.65rem; }
+.sectionHeading h3 { margin: 0; }
+.sectionHeading span { color: var(--muted); font-size: 0.65rem; }
+.pvList { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.pvList li { min-width: 0; border-left: 2px solid rgb(255 255 255 / 0.12); padding: 0.45rem 0.55rem; background: rgb(0 0 0 / 0.16); }
+.pvList li[data-primary="true"] { border-left-color: var(--primary); background: rgb(34 197 94 / 0.07); }
+.pvList li > div { display: flex; align-items: center; gap: 0.5rem; font-size: 0.6875rem; }
+.pvList li > div span { color: var(--primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; }
+.pvList small { margin-left: auto; color: var(--muted); }
+.pvList code { display: block; margin-top: 0.35rem; overflow-wrap: anywhere; color: var(--foreground); font-size: 0.72rem; line-height: 1.45; white-space: normal; }
+.emptyText { margin: 0; color: var(--muted); font-size: 0.75rem; font-style: italic; }
+
+.navigationButtons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; }
+.navigationButtons button,
+.actionGrid button,
+.searchControls button { min-height: 2.5rem; border: 1px solid rgb(255 255 255 / 0.1); border-radius: 0.5rem; background: var(--background); color: var(--foreground); font-weight: 750; }
+.navigationButtons button:disabled,
+.searchControls button:disabled { cursor: not-allowed; opacity: 0.35; }
+.cursorNotice { margin: 0.55rem 0 0; color: #fbbf24; font-size: 0.6875rem; }
+
+.searchControls { display: grid; grid-template-columns: auto minmax(5rem, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.75rem 0.9rem; }
+.searchControls label { display: flex; gap: 0.35rem; color: var(--muted); font-size: 0.7rem; }
+.searchControls label strong { color: var(--primary); }
+.searchControls input { min-width: 0; accent-color: var(--primary); }
+.searchControls fieldset { margin: 0; padding: 0; border: 0; }
+.searchControls legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.searchControls fieldset div { display: flex; gap: 0.25rem; }
+.searchControls button { min-width: 2.25rem; min-height: 2.25rem; }
+.searchControls button[aria-pressed="true"] { border-color: rgb(34 197 94 / 0.5); background: rgb(34 197 94 / 0.16); color: var(--primary); }
+
+.historyPanel { min-height: 8.5rem; }
+.historyScroll { max-height: 13rem; overflow-y: auto; overscroll-behavior: contain; }
+.historyScroll table { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+.historyScroll th { width: 2.25rem; padding: 0.3rem 0.55rem 0.3rem 0; color: var(--muted); text-align: right; }
+.historyScroll td { width: 45%; padding: 0.22rem; }
+.historyScroll button { width: 100%; min-height: 2rem; border: 1px solid transparent; border-radius: 0.4rem; background: transparent; color: var(--foreground); text-align: left; }
+.historyScroll button:hover { background: rgb(255 255 255 / 0.05); }
+.historyScroll button[aria-current="step"] { border-color: rgb(34 197 94 / 0.45); background: rgb(34 197 94 / 0.12); color: var(--primary); }
+
+.metricsPanel { padding: 0.75rem 0.9rem; }
+.metricsPanel summary { cursor: pointer; color: var(--muted); font-size: 0.72rem; font-weight: 750; }
+.metricsPanel dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin: 0.75rem 0 0; }
+.metricsPanel dl div { min-width: 0; border-radius: 0.4rem; background: var(--background); padding: 0.45rem; text-align: center; }
+.metricsPanel dt { color: var(--muted); font-size: 0.58rem; text-transform: uppercase; }
+.metricsPanel dd { margin: 0.2rem 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; }
+
+.operationalStatus { display: flex; gap: 0.65rem; padding: 0.7rem 0.8rem; }
+.operationalStatus > span { flex: none; width: 0.5rem; height: 0.5rem; margin-top: 0.2rem; border-radius: 50%; background: var(--primary); }
+.operationalStatus[data-tone="working"] > span { animation: pulse 1.4s ease-in-out infinite; }
+.operationalStatus[data-tone="stopped"] > span { background: #fbbf24; }
+.operationalStatus[data-tone="error"] > span { background: #f87171; }
+.operationalStatus strong { display: block; font-size: 0.75rem; }
+.operationalStatus p { margin: 0.18rem 0 0; color: var(--muted); font-size: 0.67rem; line-height: 1.35; }
+
+.actionGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.45rem; }
+.actionGrid button { padding: 0.65rem; font-size: 0.72rem; }
+.primaryAction { width: 100%; min-height: 2.75rem; border: 0; border-radius: 0.55rem; background: var(--primary); color: var(--primary-foreground); font-weight: 800; }
+.actionGrid .primaryAction { grid-column: 1 / -1; }
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+@media (max-width: 32rem) {
+  .evaluationPanel { grid-template-columns: 1fr; }
+  .evaluationValue { align-items: flex-start; min-width: 0; }
+  .snapshotNote { grid-column: 1; }
+  .searchControls { grid-template-columns: auto minmax(0, 1fr); }
+  .searchControls fieldset { grid-column: 1 / -1; }
+  .searchControls fieldset div { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .metricsPanel dl { grid-template-columns: repeat(2, 1fr); }
+}

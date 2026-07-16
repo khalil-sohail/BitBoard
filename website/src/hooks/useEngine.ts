@@ -156,6 +156,11 @@ export function useEngine() {
               setEngineInfo(prev => ({
                 requestId: data.requestId,
                 rootFen: activeRootFenRef.current ?? undefined,
+                positionFen: activePositionFenRef.current ?? undefined,
+                positionKey: activePositionKeyRef.current ?? undefined,
+                sessionId: activeSessionIdRef.current ?? undefined,
+                sessionGeneration: activeSessionGenerationRef.current ?? undefined,
+                mode: activeModeRef.current ?? undefined,
                 purpose: activePurposeRef.current ?? undefined,
                 requestedLimit: activeLimitRef.current ?? undefined,
                 depth: data.depth,

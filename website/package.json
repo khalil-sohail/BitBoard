@@ -41,10 +41,11 @@
     "test:setup": "ts-node --project tsconfig.server.json src/components/setup/session-setup.test.ts",
     "test:fair-play-ui": "ts-node --project tsconfig.server.json src/components/fair-play/fair-play-sidebar.test.ts",
     "test:training-ui": "ts-node --project tsconfig.server.json src/components/training/training-sidebar.test.ts",
+    "test:analysis-ui": "ts-node --project tsconfig.server.json src/components/analysis/analysis-sidebar.test.ts",
     "test:result-acknowledgment": "ts-node --project tsconfig.server.json src/lib/engine-result-ownership.test.ts",
     "test:result-acknowledgment-integration": "node scripts/result-acknowledgment.browser.integration.mjs",
     "test:config": "ts-node --project tsconfig.server.json src/lib/server-config.test.ts",
-    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:fair-play && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership && npm run test:layout && npm run test:controller && npm run test:setup && npm run test:fair-play-ui && npm run test:training-ui && npm run test:result-acknowledgment"
+    "test:server": "npm run test:config && npm run test:queue && npm run test:protocol && npm run test:fair-play && npm run test:engine-filter && npm run test:evaluation && npm run test:difficulty && npm run test:terminal && npm run test:time-policy && npm run test:search-policy && npm run test:promotion && npm run test:training-hint && npm run test:training-machine && npm run test:board-arrows && npm run test:ownership && npm run test:layout && npm run test:controller && npm run test:setup && npm run test:fair-play-ui && npm run test:training-ui && npm run test:analysis-ui && npm run test:result-acknowledgment"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

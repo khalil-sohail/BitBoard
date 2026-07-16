@@ -13,6 +13,12 @@ export interface PVLine {
 export interface EngineInfo {
   requestId?: number;
   rootFen?: string;
+  /** Correlation identity copied from the accepted search-started message. */
+  positionFen?: string;
+  positionKey?: string;
+  sessionId?: string;
+  sessionGeneration?: number;
+  mode?: GameMode;
   purpose?: SearchPurpose;
   source?: 'search' | 'book';
   depth: number;

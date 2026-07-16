@@ -20,8 +20,13 @@ export interface BoardArrow {
 
 export interface AnalysisSnapshot {
   requestId: number;
+  mode?: GameMode;
   purpose: EngineInfo['purpose'];
   fen: string;
+  positionFen?: string;
+  positionKey?: string;
+  sessionId?: string;
+  sessionGeneration?: number;
   requestedLimit?: SearchLimit;
   reportedDepth: number | null;
   selectiveDepth: number | null;

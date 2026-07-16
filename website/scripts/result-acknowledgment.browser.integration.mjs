@@ -109,6 +109,30 @@ async function setRange(cdp, id, value) {
   assert.equal(changed, true, `Range not found: ${id}`);
 }
 
+async function setTextArea(cdp, id, value) {
+  const changed = await evaluate(cdp, `(() => {
+    const input = document.getElementById(${JSON.stringify(id)});
+    if (!(input instanceof HTMLTextAreaElement)) return false;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return input.value === ${JSON.stringify(value)};
+  })()`);
+  assert.equal(changed, true, `Textarea not found: ${id}`);
+}
+
+async function clickAnalysisLineCount(cdp, value) {
+  const clicked = await evaluate(cdp, `(() => {
+    const fieldset = [...document.querySelectorAll('fieldset')].find(item => item.textContent?.includes('Lines'));
+    const button = fieldset && [...fieldset.querySelectorAll('button')].find(item => item.textContent?.trim() === ${JSON.stringify(String(value))});
+    if (!(button instanceof HTMLButtonElement)) return false;
+    button.click();
+    return true;
+  })()`);
+  assert.equal(clicked, true, `Analysis line count not found: ${value}`);
+  await sleep(200);
+}
+
 async function move(cdp, from, to, finalSettleMs = 100) {
   for (const [index, square] of [from, to].entries()) {
     const clicked = await evaluate(cdp, `(() => {
@@ -147,6 +171,43 @@ async function verifyTrainingResponsiveLayout(cdp, expectedState) {
     assert.ok(screenshot.data.length > 100, `Screenshot capture failed at ${width}x${height}`);
   }
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+}
+
+async function verifyAnalysisResponsiveLayout(cdp, expectedState) {
+  for (const [width, height] of responsiveViewports) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
+    await sleep(80);
+    const layout = await evaluate(cdp, `(() => {
+      const sidebar = document.querySelector('[data-analysis-state]');
+      if (!(sidebar instanceof HTMLElement)) return null;
+      const rect = sidebar.getBoundingClientRect();
+      return {
+        state: sidebar.dataset.analysisState,
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+      };
+    })()`);
+    assert.ok(layout, `Analysis sidebar missing at ${width}x${height}`);
+    assert.equal(layout.state, expectedState, `Unexpected Analysis state at ${width}x${height}`);
+    assert.equal(layout.horizontalOverflow, false, `Analysis horizontal overflow at ${width}x${height}`);
+    assert.ok(layout.left >= -1 && layout.right <= layout.viewportWidth + 1, `Analysis sidebar clipped at ${width}x${height}`);
+    const screenshot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false });
+    assert.ok(screenshot.data.length > 100, `Analysis screenshot capture failed at ${width}x${height}`);
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+}
+
+async function assertCurrentAnalysisSnapshot(cdp) {
+  const latestRequest = messages(cdp, 'sent', 'analyze').at(-1)?.message;
+  assert.ok(latestRequest, 'No Analysis request was sent');
+  const displayed = await evaluate(cdp, `(() => {
+    const sidebar = document.querySelector('[data-analysis-state]');
+    if (!(sidebar instanceof HTMLElement)) return null;
+    return { requestId: Number(sidebar.dataset.analysisRequestId), fen: sidebar.dataset.analysisSnapshotFen };
+  })()`);
+  assert.deepEqual(displayed, { requestId: latestRequest.requestId, fen: latestRequest.fen });
 }
 
 const parsedFrames = (cdp, direction) => cdp.frames
@@ -211,18 +272,67 @@ async function run() {
   assert.equal(messages(cdp, 'sent', 'resultAck').some(frame => frame.message.requestId === firstRoot.requestId), false);
   await verifyTrainingResponsiveLayout(cdp, 'player-turn');
 
-  // Analysis: position changes restart informational analysis without resultAck.
+  // Analysis: every snapshot is informational and position-scoped.
   await clickButton(cdp, 'Analysis');
+  await verifyAnalysisResponsiveLayout(cdp, 'idle');
   await clickButton(cdp, 'Set up');
   await setRange(cdp, 'analysis-setup-depth', 2);
   const analysisBestMovesBefore = messages(cdp, 'received', 'bestmove').length;
   await clickButton(cdp, 'Load & Analyze');
   await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore, 20_000, 'initial Analysis result');
+  await waitUntil(() => evaluate(cdp, `Boolean(document.querySelector('[data-analysis-request-id]'))`), 5_000, 'initial Analysis snapshot');
+  await assertCurrentAnalysisSnapshot(cdp);
   const acknowledgmentsBeforeAnalysisMove = messages(cdp, 'sent', 'resultAck').length;
   const analysisRequestsBeforeMove = messages(cdp, 'sent', 'analyze').length;
   await move(cdp, 'e2', 'e4');
   await waitUntil(() => messages(cdp, 'sent', 'analyze').length > analysisRequestsBeforeMove, 10_000, 'Analysis restart');
   await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 1, 20_000, 'Analysis result after move');
+  assert.equal(messages(cdp, 'sent', 'resultAck').length, acknowledgmentsBeforeAnalysisMove);
+  await assertCurrentAnalysisSnapshot(cdp);
+
+  const requestsBeforeDepth = messages(cdp, 'sent', 'analyze').length;
+  await setRange(cdp, 'live-analysis-depth', 3);
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeDepth, 10_000, 'Analysis depth restart');
+  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.searchLimit.depth, 3);
+  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 2, 20_000, 'depth-change Analysis result');
+  await assertCurrentAnalysisSnapshot(cdp);
+
+  const requestsBeforeMultiPv = messages(cdp, 'sent', 'analyze').length;
+  await clickAnalysisLineCount(cdp, 2);
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeMultiPv, 10_000, 'Analysis MultiPV restart');
+  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.multiPv, 2);
+  await waitUntil(() => messages(cdp, 'received', 'bestmove').length > analysisBestMovesBefore + 3, 20_000, 'MultiPV Analysis result');
+  await assertCurrentAnalysisSnapshot(cdp);
+  await verifyAnalysisResponsiveLayout(cdp, 'analyzing');
+
+  await clickButton(cdp, 'Stop analysis');
+  await waitUntil(() => evaluate(cdp, `document.querySelector('[data-analysis-state]')?.getAttribute('data-analysis-state') === 'stopped'`), 5_000, 'stopped Analysis state');
+  await assertCurrentAnalysisSnapshot(cdp);
+  await verifyAnalysisResponsiveLayout(cdp, 'stopped');
+  const requestsBeforeResume = messages(cdp, 'sent', 'analyze').length;
+  await clickButton(cdp, 'Resume analysis');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeResume, 10_000, 'resumed Analysis request');
+
+  await clickButton(cdp, 'Change position');
+  await clickButton(cdp, 'FEN');
+  const customFen = 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1';
+  await setTextArea(cdp, 'analysis-fen', customFen);
+  const requestsBeforeFen = messages(cdp, 'sent', 'analyze').length;
+  await clickButton(cdp, 'Load & Analyze');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeFen, 10_000, 'FEN Analysis request');
+  assert.equal(messages(cdp, 'sent', 'analyze').at(-1).message.fen, customFen);
+  await waitUntil(() => evaluate(cdp, `document.body.innerText.toLowerCase().includes('fen position')`), 5_000, 'FEN source summary');
+
+  await clickButton(cdp, 'Change position');
+  await clickButton(cdp, 'PGN');
+  await setTextArea(cdp, 'analysis-pgn', '1. e4 e5');
+  const requestsBeforePgn = messages(cdp, 'sent', 'analyze').length;
+  await clickButton(cdp, 'Load & Analyze');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforePgn, 10_000, 'PGN Analysis request');
+  await waitUntil(() => evaluate(cdp, `document.body.innerText.toLowerCase().includes('pgn game') && document.body.innerText.includes('e4')`), 5_000, 'PGN source and history');
+  const requestsBeforeNavigation = messages(cdp, 'sent', 'analyze').length;
+  await clickButton(cdp, 'e4');
+  await waitUntil(() => messages(cdp, 'sent', 'analyze').length > requestsBeforeNavigation, 10_000, 'PGN navigation Analysis request');
   assert.equal(messages(cdp, 'sent', 'resultAck').length, acknowledgmentsBeforeAnalysisMove);
 
   // Delayed Training messages after a mode switch cannot acknowledge in Analysis.
@@ -248,7 +358,8 @@ async function run() {
     analysisResultAckCount: 0,
     delayedModeSwitchResultAckCount: acknowledgmentsAtModeSwitch,
     staleApplicationAckCount: 0,
-    responsiveScreenshotsCaptured: responsiveViewports.length * 2,
+    staleAnalysisDisplayCount: 0,
+    responsiveScreenshotsCaptured: responsiveViewports.length * 5,
   }));
 }
 

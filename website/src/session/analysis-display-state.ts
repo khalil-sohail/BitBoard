@@ -1,9 +1,10 @@
-import type { AnalysisDisplayState, AnalysisSnapshot } from '@/lib/board-arrows';
+import type { AnalysisDisplayState, AnalysisSnapshot } from '../lib/board-arrows';
 
 export type AnalysisDisplayAction =
   | { type: 'INFO'; snapshot: AnalysisSnapshot }
   | { type: 'COMPLETE'; requestId: number }
   | { type: 'FEN_CHANGED'; fen: string }
+  | { type: 'STOPPED' }
   | { type: 'CLEAR' };
 
 export function analysisDisplayReducer(
@@ -38,8 +39,27 @@ export function analysisDisplayReducer(
       }
       if (!state.live && !state.finalized) return state;
       return { live: null, finalized: null };
+    case 'STOPPED':
+      if (!state.live) return state;
+      return {
+        live: null,
+        finalized: {
+          ...state.live,
+          lines: state.live.lines.map(line => ({ ...line, pv: [...line.pv] })),
+          status: 'finalized',
+          createdAt: Date.now(),
+        },
+      };
     case 'CLEAR':
       if (!state.live && !state.finalized) return state;
       return { live: null, finalized: null };
   }
+}
+
+export function selectCurrentAnalysisSnapshot(state: AnalysisDisplayState, positionFen: string): AnalysisSnapshot | null {
+  const snapshot = state.live ?? state.finalized;
+  if (!snapshot || snapshot.mode !== 'analysis' || snapshot.purpose !== 'analysis') return null;
+  if (snapshot.fen !== positionFen || snapshot.positionFen !== positionFen) return null;
+  if (!snapshot.positionKey || !snapshot.sessionId || snapshot.sessionGeneration === undefined) return null;
+  return snapshot;
 }

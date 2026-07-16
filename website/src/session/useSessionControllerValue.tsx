@@ -31,7 +31,7 @@ import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
 import type { AnalysisSnapshot } from "@/lib/board-arrows";
 import type { SearchPurpose } from "@/lib/engine-difficulty";
 import { createOpponentMoveApplicationReceipt } from "@/lib/engine-result-ownership";
-import { analysisDisplayReducer } from './analysis-display-state';
+import { analysisDisplayReducer, selectCurrentAnalysisSnapshot } from './analysis-display-state';
 import { currentGameResult, type SessionLifecycleStatus } from './session-lifecycle';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +47,8 @@ interface PendingMoveReview {
   hintLevelUsed: 0 | 1 | 2 | 3;
   resultRequestId: number | null;
 }
+
+type AnalysisSourceKind = 'default' | 'fen' | 'pgn' | 'board';
 
 // Default time control: 3+0
 const DEFAULT_TC = TIME_CONTROLS[2];
@@ -75,6 +77,9 @@ export function useSessionControllerValue() {
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
   const [fairPlaySessionFailure, setFairPlaySessionFailure] = useState<string | null>(null);
   const [analysisDisplay, dispatchAnalysisDisplay] = useReducer(analysisDisplayReducer, { live: null, finalized: null });
+  const [analysisPaused, setAnalysisPaused] = useState(false);
+  const [analysisSource, setAnalysisSource] = useState<AnalysisSourceKind>('default');
+  const [analysisCursorPly, setAnalysisCursorPly] = useState<number | null>(null);
   const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
   const [latestTrainingReviewInfo, setLatestTrainingReviewInfo] = useState<EngineInfo | null>(null);
   const setupTriggerRef = useRef<HTMLElement | null>(null);
@@ -139,6 +144,12 @@ export function useSessionControllerValue() {
   const pendingMoveReviewRef = useRef<PendingMoveReview | null>(null);
 
   const engineColor: PlayerColor = orientation === 'w' ? 'b' : 'w';
+
+  const analysisPositionFen = useMemo(() => {
+    if (!isAnalysis || analysisCursorPly === null || moveHistory.length === 0) return fen;
+    if (analysisCursorPly <= 0) return moveHistory[0].before;
+    return moveHistory[Math.min(analysisCursorPly, moveHistory.length) - 1].after;
+  }, [analysisCursorPly, fen, isAnalysis, moveHistory]);
 
   const engineAutoEnabled = !isAnalysis;
 
@@ -324,15 +335,18 @@ export function useSessionControllerValue() {
 
   // ── Analysis Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
-    if (gameStatus !== 'active' || gameMode !== 'analysis') return;
+    if (gameStatus !== 'active' || gameMode !== 'analysis' || analysisPaused) return;
     if (effectiveGameOver) return;
 
     // Immediately send the current position to the engine
     const timer = setTimeout(() => {
-      startResolvedAnalysis(fen, 'analysis');
+      // A new request (position, depth, MultiPV, or resume) owns a new
+      // informational snapshot. Do not present the preceding request as live.
+      dispatchAnalysisDisplay({ type: 'CLEAR' });
+      startResolvedAnalysis(analysisPositionFen, 'analysis');
     }, 100);
     return () => clearTimeout(timer);
-  }, [fen, gameMode, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
+  }, [analysisPaused, analysisPositionFen, gameMode, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Training Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -363,8 +377,13 @@ export function useSessionControllerValue() {
 
     const snapshot: AnalysisSnapshot = {
       requestId: normalizedInfo.requestId,
+      mode: normalizedInfo.mode,
       purpose: normalizedInfo.purpose,
       fen: normalizedInfo.rootFen,
+      positionFen: normalizedInfo.positionFen,
+      positionKey: normalizedInfo.positionKey,
+      sessionId: normalizedInfo.sessionId,
+      sessionGeneration: normalizedInfo.sessionGeneration,
       lines: normalizedInfo.pvs.map(line => ({ ...line, pv: [...line.pv] })),
       requestedLimit: normalizedInfo.requestedLimit,
       reportedDepth: normalizedInfo.reportedDepth ?? normalizedInfo.depth ?? null,
@@ -383,8 +402,8 @@ export function useSessionControllerValue() {
   }, [bestMoveResult]);
 
   useEffect(() => {
-    dispatchAnalysisDisplay({ type: 'FEN_CHANGED', fen });
-  }, [fen]);
+    dispatchAnalysisDisplay({ type: 'FEN_CHANGED', fen: isAnalysis ? analysisPositionFen : fen });
+  }, [analysisPositionFen, fen, isAnalysis]);
 
   useEffect(() => {
     dispatchAnalysisDisplay({ type: 'CLEAR' });
@@ -403,11 +422,11 @@ export function useSessionControllerValue() {
   const boardArrows = useMemo(() => toChessboardArrows(composeBoardArrows({
     mode: gameMode,
     trainingState,
-    currentFen: fen,
+    currentFen: isAnalysis ? analysisPositionFen : fen,
     engineInfo: displayEngineInfo,
     analysis: analysisDisplay,
     hintView: isTraining ? trainingHint.hintView : null,
-  })), [analysisDisplay, displayEngineInfo, fen, gameMode, isTraining, trainingHint.hintView, trainingState]);
+  })), [analysisDisplay, analysisPositionFen, displayEngineInfo, fen, gameMode, isAnalysis, isTraining, trainingHint.hintView, trainingState]);
 
   const hintRequestAvailable = canRequestHint(trainingState, status, {
     isTraining,
@@ -419,10 +438,10 @@ export function useSessionControllerValue() {
 
   useEffect(() => {
     const evaluation = normalizedInfo?.pvs?.[0]?.evaluation ?? null;
-    if (evaluation && normalizedInfo?.rootFen === fen && normalizedInfo.purpose !== 'training-hint') {
+    if (evaluation && normalizedInfo?.rootFen === (isAnalysis ? analysisPositionFen : fen) && normalizedInfo.purpose !== 'training-hint') {
       recordPositionEval(evaluation, moveHistory.length);
     }
-  }, [fen, moveHistory.length, normalizedInfo, recordPositionEval]);
+  }, [analysisPositionFen, fen, isAnalysis, moveHistory.length, normalizedInfo, recordPositionEval]);
 
   useEffect(() => {
     const pendingReview = pendingMoveReviewRef.current;
@@ -670,6 +689,9 @@ export function useSessionControllerValue() {
   // ── User move handler ────────────────────────────────────────────────────
   const handleUserMove = (move: { from: string; to: string; promotion?: string }) => {
     if (isTraining && !canPlayerMove(trainingState)) return false;
+    // Historical Analysis positions are a read-only cursor over the canonical
+    // game. Return to the latest position before creating a new branch.
+    if (isAnalysis && analysisCursorPly !== null && analysisCursorPly < moveHistory.length) return false;
     if (!isAnalysis && turn === engineColor) return false;
     // Block moves if game not started or already over
     if (!isAnalysis && (!isGameActive || effectiveGameOver)) return false;
@@ -703,6 +725,10 @@ export function useSessionControllerValue() {
     const result = makeMove(move);
 
     if (result) {
+      if (gameMode === 'analysis') {
+        setAnalysisSource('board');
+        setAnalysisCursorPly(null);
+      }
       if (gameMode === 'training' && resultFen) {
         const reviewId = nextReviewIdRef.current++;
         const uciMove = `${move.from}${move.to}${move.promotion ?? ''}`;
@@ -783,6 +809,9 @@ export function useSessionControllerValue() {
       resetGrades();
       pendingMoveReviewRef.current = null;
       if (gameMode === 'analysis') {
+        setAnalysisSource('fen');
+        setAnalysisCursorPly(null);
+        setAnalysisPaused(false);
         startResolvedAnalysis(fenStr, 'analysis');
       }
     }
@@ -794,6 +823,9 @@ export function useSessionControllerValue() {
     resetGame();
     resetGrades();
     pendingMoveReviewRef.current = null;
+    setAnalysisSource('default');
+    setAnalysisCursorPly(null);
+    setAnalysisPaused(false);
     newGame();
   };
 
@@ -818,6 +850,8 @@ export function useSessionControllerValue() {
     setTimeoutColor(null);
     setFairPlaySessionFailure(null);
     setLatestTrainingReviewInfo(null);
+    setAnalysisPaused(false);
+    setAnalysisCursorPly(null);
     setGameStatus('active');
     if (gameMode === 'training') {
       dispatchTraining({ type: 'RESET_REQUESTED', reason: 'new-game', playerColor: resolvedColor });
@@ -868,17 +902,20 @@ export function useSessionControllerValue() {
     clock.stopClock();
     if (gameMode === 'analysis' && newMode !== 'analysis') {
       analysisFenRef.current = null;
+      setAnalysisSource('default');
       resetGame();
     }
   };
 
   // ── Check square ─────────────────────────────────────────────────────────
   let checkSquare: string | null = null;
-  if (game.isCheck()) {
-    const board = game.board();
+  const displayedGame = isAnalysis ? new Chess(analysisPositionFen) : game;
+  const displayedTurn = displayedGame.turn() as PlayerColor;
+  if (displayedGame.isCheck()) {
+    const board = displayedGame.board();
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
-        if (board[r][c]?.type === 'k' && board[r][c]?.color === turn) {
+        if (board[r][c]?.type === 'k' && board[r][c]?.color === displayedTurn) {
           checkSquare = String.fromCharCode(97 + c) + (8 - r);
           break;
         }
@@ -886,9 +923,10 @@ export function useSessionControllerValue() {
     }
   }
 
-  const lastMove = moveHistory.length > 0 ? {
-    from: moveHistory[moveHistory.length - 1].from,
-    to:   moveHistory[moveHistory.length - 1].to,
+  const displayedPly = isAnalysis ? analysisCursorPly ?? moveHistory.length : moveHistory.length;
+  const lastMove = displayedPly > 0 ? {
+    from: moveHistory[displayedPly - 1].from,
+    to:   moveHistory[displayedPly - 1].to,
   } : null;
 
   // ── Game over result string ───────────────────────────────────────────────
@@ -920,10 +958,21 @@ export function useSessionControllerValue() {
       if (trigger?.isConnected) trigger.focus();
     });
   }, []);
-  const startAnalysisSession = useCallback(() => setGameStatus('active'), []);
+  const startAnalysisSession = useCallback(() => {
+    setAnalysisPaused(false);
+    setGameStatus('active');
+  }, []);
+  const stopAnalysisSession = useCallback(() => {
+    setAnalysisPaused(true);
+    dispatchAnalysisDisplay({ type: 'STOPPED' });
+    stopEngine();
+  }, [stopEngine]);
   const flipBoard = useCallback(() => setOrientation(value => value === 'w' ? 'b' : 'w'), []);
   const handleAnalysisImportSuccess = useCallback((finalFen: string) => {
     analysisFenRef.current = finalFen;
+    setAnalysisSource('pgn');
+    setAnalysisCursorPly(null);
+    setAnalysisPaused(false);
     resetGrades();
     pendingMoveReviewRef.current = null;
     if (gameMode === 'analysis') {
@@ -933,6 +982,9 @@ export function useSessionControllerValue() {
 
   const startAnalysisFromDefault = () => {
     analysisFenRef.current = null;
+    setAnalysisSource('default');
+    setAnalysisCursorPly(null);
+    setAnalysisPaused(false);
     setPromotionResetKey(value => value + 1);
     resetGame();
     resetGrades();
@@ -946,6 +998,9 @@ export function useSessionControllerValue() {
   const startAnalysisFromFen = (sourceFen: string) => {
     if (!loadFen(sourceFen)) return false;
     analysisFenRef.current = sourceFen;
+    setAnalysisSource('fen');
+    setAnalysisCursorPly(null);
+    setAnalysisPaused(false);
     setPromotionResetKey(value => value + 1);
     resetGrades();
     pendingMoveReviewRef.current = null;
@@ -958,6 +1013,9 @@ export function useSessionControllerValue() {
     const finalFen = loadPgn(sourcePgn);
     if (finalFen === false) return false;
     analysisFenRef.current = finalFen;
+    setAnalysisSource('pgn');
+    setAnalysisCursorPly(null);
+    setAnalysisPaused(false);
     setPromotionResetKey(value => value + 1);
     resetGrades();
     pendingMoveReviewRef.current = null;
@@ -969,6 +1027,21 @@ export function useSessionControllerValue() {
   const trainingPresentationInfo = normalizedInfo?.purpose === 'training-root-review' || normalizedInfo?.purpose === 'training-result-review'
     ? normalizedInfo
     : latestTrainingReviewInfo;
+
+  const currentAnalysisSnapshot = useMemo(() => {
+    return selectCurrentAnalysisSnapshot(analysisDisplay, analysisPositionFen);
+  }, [analysisDisplay, analysisPositionFen]);
+
+  const navigateAnalysis = useCallback((requestedPly: number) => {
+    const ply = Math.max(0, Math.min(moveHistory.length, Math.trunc(requestedPly)));
+    const targetFen = moveHistory.length === 0
+      ? fen
+      : ply === 0
+        ? moveHistory[0].before
+        : moveHistory[ply - 1].after;
+    dispatchAnalysisDisplay({ type: 'FEN_CHANGED', fen: targetFen });
+    setAnalysisCursorPly(ply === moveHistory.length ? null : ply);
+  }, [fen, moveHistory]);
 
   return {
     mode: {
@@ -986,14 +1059,14 @@ export function useSessionControllerValue() {
       resignedBy,
     },
     board: {
-      fen,
+      fen: isAnalysis ? analysisPositionFen : fen,
       orientation,
       arrows: boardArrows,
       checkSquare,
       lastMove,
       promotionResetKey,
       trainingHintView: isTraining ? trainingHint.hintView : null,
-      disabled: isTraining ? !trainingBoardInteractive : false,
+      disabled: isTraining ? !trainingBoardInteractive : isAnalysis && analysisCursorPly !== null && analysisCursorPly < moveHistory.length,
       onMove: handleUserMove,
       onPromotionPending: handlePromotionPending,
       onPromotionSelected: handlePromotionSelected,
@@ -1051,9 +1124,21 @@ export function useSessionControllerValue() {
       loadPgn,
       importSucceeded: handleAnalysisImportSuccess,
       start: startAnalysisSession,
+      stop: stopAnalysisSession,
+      resume: startAnalysisSession,
       startFromDefault: startAnalysisFromDefault,
       startFromFen: startAnalysisFromFen,
       startFromPgn: startAnalysisFromPgn,
+      paused: analysisPaused,
+      source: analysisSource,
+      positionFen: analysisPositionFen,
+      positionTurn: analysisPositionFen.split(/\s+/)[1] === 'b' ? 'b' as const : 'w' as const,
+      snapshot: currentAnalysisSnapshot,
+      displayInfo: currentAnalysisSnapshot && normalizedInfo?.requestId === currentAnalysisSnapshot.requestId && normalizedInfo.rootFen === analysisPositionFen ? normalizedInfo : null,
+      controlsUnavailable: status === 'connecting' || status === 'queued' || status === 'disconnected' || status === 'session_expired' || status === 'error',
+      cursorPly: analysisCursorPly ?? moveHistory.length,
+      historyLength: moveHistory.length,
+      navigate: navigateAnalysis,
     },
     history: {
       moves: moveHistory,

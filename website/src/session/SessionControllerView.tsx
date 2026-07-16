@@ -3,13 +3,9 @@
 import { ProductAppShell } from '@/components/layout/ProductAppShell';
 import { ChessBoardComponent } from '@/components/board/ChessBoard';
 import { EvalBar } from '@/components/board/EvalBar';
-import { EnginePanel } from '@/components/panels/EnginePanel';
-import { MoveHistory } from '@/components/panels/MoveHistory';
-import { AnalysisSearchControls } from '@/components/panels/AnalysisSearchControls';
-import { EvalGraph } from '@/components/panels/EvalGraph';
-import { GameControls } from '@/components/controls/GameControls';
 import { FairPlaySidebar } from '@/components/fair-play/FairPlaySidebar';
 import { TrainingSidebar } from '@/components/training/TrainingSidebar';
+import { AnalysisSidebar } from '@/components/analysis/AnalysisSidebar';
 import { SessionSetupHost } from '@/components/setup/SessionSetupHost';
 import { useSessionController } from './useSessionController';
 
@@ -25,7 +21,7 @@ export function SessionControllerView() {
         sessionActive={lifecycle.isActive}
         evaluationBar={engine.showEvaluation ? (
           <EvalBar
-            evaluation={engine.displayInfo?.pvs?.[0]?.evaluation ?? null}
+            evaluation={(mode.isAnalysis ? session.analysis.snapshot?.lines[0]?.evaluation : engine.displayInfo?.pvs?.[0]?.evaluation) ?? null}
             orientation={board.orientation}
           />
         ) : undefined}
@@ -119,38 +115,32 @@ export function SessionControllerView() {
             onFlip={actions.flipBoard}
             onResign={actions.resign}
           />
-        ) : lifecycle.status === 'idle' ? null : (
-          <>
-            {mode.isAnalysis && (
-              <AnalysisSearchControls
-                depth={setup.maxDepth}
-                multiPv={setup.multiPv}
-                disabled={engine.optionsUnavailable}
-                onDepthChange={setup.changeMaxDepth}
-                onMultiPvChange={setup.changeMultiPv}
-              />
-            )}
-
-            {engine.showPanel && (
-              <EnginePanel info={engine.displayInfo} status={engine.status} queuePosition={engine.queuePosition} />
-            )}
-
-            <MoveHistory moves={history.moves} grades={history.grades} showGrades={engine.showPanel} />
-
-            {engine.showPanel && <EvalGraph data={history.evaluationGraph} />}
-
-            <div className="shrink-0">
-              <GameControls
-                onNewGameClick={actions.newGame}
-                onUndo={actions.undo}
-                onFlipBoard={actions.flipBoard}
-                onResign={actions.resign}
-                orientation={board.orientation}
-                canUndo={actions.canUndo}
-                canResign={actions.canResign}
-              />
-            </div>
-          </>
+        ) : (
+          <AnalysisSidebar
+            lifecycle={lifecycle.status}
+            connectionStatus={engine.status}
+            queuePosition={engine.queuePosition}
+            paused={session.analysis.paused}
+            source={session.analysis.source}
+            positionTurn={session.analysis.positionTurn}
+            positionFen={session.analysis.positionFen}
+            snapshot={session.analysis.snapshot}
+            engineInfo={session.analysis.displayInfo}
+            moves={history.moves}
+            cursorPly={session.analysis.cursorPly}
+            historyLength={session.analysis.historyLength}
+            depth={setup.maxDepth}
+            multiPv={setup.multiPv}
+            controlsDisabled={session.analysis.controlsUnavailable}
+            onNavigate={session.analysis.navigate}
+            onDepthChange={setup.changeMaxDepth}
+            onMultiPvChange={setup.changeMultiPv}
+            onSetup={setup.open}
+            onStop={session.analysis.stop}
+            onResume={session.analysis.resume}
+            onReset={session.analysis.resetFen}
+            onFlip={actions.flipBoard}
+          />
         )}
       />
 
