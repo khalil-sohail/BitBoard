@@ -1,11 +1,16 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { EngineBestMoveResult, EngineInfo, EngineTerminalCompletion } from '../types/engine';
+import type { EngineBestMoveResult, EngineInfo, EngineTerminalCompletion, GameMode } from '../types/engine';
 import { useToast } from '../components/ui/Toast';
 import { EngineRequestId, shouldAcceptSearchResponse } from '../lib/engine-response-filter';
 import type { EngineDifficulty, SearchPurpose } from '../lib/engine-difficulty';
 import type { SearchLimit } from '../lib/engine-protocol';
+import {
+  matchesActiveOpponentResult,
+  statusAfterBestMove,
+  type OpponentMoveApplicationReceipt,
+} from '../lib/engine-result-ownership';
 
-type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'result_ready' | 'disconnected' | 'session_expired' | 'error';
+export type ConnectionStatus = 'connecting' | 'queued' | 'idle' | 'thinking' | 'analyzing' | 'result_ready' | 'disconnected' | 'session_expired' | 'error';
 
 export interface SendMoveOptions {
   /** Remaining white clock time in ms (0 = no time control). */
@@ -27,7 +32,7 @@ export interface SendMoveOptions {
   /** Explicitly allow backend-managed pondering for fair engine games only. */
   ponder?: boolean;
   policySource?: string;
-  mode?: string;
+  mode?: GameMode;
   trainingPonderEnabled?: boolean;
 }
 
@@ -37,6 +42,8 @@ export function useEngine() {
   const [terminalCompletion, setTerminalCompletion] = useState<EngineTerminalCompletion | null>(null);
   const [bestMoveResult, setBestMoveResult] = useState<EngineBestMoveResult | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const [searchRetryCount, setSearchRetryCount] = useState<number | null>(null);
+  const [waitingForSessionReady, setWaitingForSessionReady] = useState(false);
   const nextRequestIdRef = useRef<EngineRequestId>(1);
   const activeRequestIdRef = useRef<EngineRequestId | null>(null);
   const activeRootFenRef = useRef<string | null>(null);
@@ -46,6 +53,7 @@ export function useEngine() {
   const activeSessionGenerationRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const activePositionFenRef = useRef<string | null>(null);
+  const activeModeRef = useRef<GameMode | null>(null);
   const [searchStartedRequestId, setSearchStartedRequestId] = useState<EngineRequestId | null>(null);
   const [searchStartedPositionKey, setSearchStartedPositionKey] = useState<string | null>(null);
   const [clockStopSignal, setClockStopSignal] = useState(0);
@@ -70,30 +78,38 @@ export function useEngine() {
     return requestId;
   }, []);
 
-  const invalidateActiveRequest = useCallback(() => {
+  const clearActiveRequestIdentity = useCallback(() => {
     activeRequestIdRef.current = null;
     activeRootFenRef.current = null;
     activePurposeRef.current = null;
     activeLimitRef.current = null;
-    setBestMoveResult(null);
-    setTerminalCompletion(null);
     setSearchStartedRequestId(null);
     activePositionKeyRef.current = null;
     activeSessionGenerationRef.current = null;
     activeSessionIdRef.current = null;
     activePositionFenRef.current = null;
+    activeModeRef.current = null;
     setSearchStartedPositionKey(null);
+    setSearchRetryCount(null);
   }, []);
 
-  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose, limit?: SearchLimit) => {
+  const invalidateActiveRequest = useCallback(() => {
+    clearActiveRequestIdentity();
+    setBestMoveResult(null);
+    setTerminalCompletion(null);
+  }, [clearActiveRequestIdentity]);
+
+  const activateRequest = useCallback((requestId: EngineRequestId, rootFen: string, purpose: SearchPurpose, limit?: SearchLimit, mode?: GameMode) => {
     activeRequestIdRef.current = requestId;
     activeRootFenRef.current = rootFen;
     activePurposeRef.current = purpose;
     activeLimitRef.current = limit ?? null;
+    activeModeRef.current = mode ?? null;
     setBestMoveResult(null);
     setEngineInfo(null);
     setTerminalCompletion(null);
     setSearchStartedRequestId(null);
+    setSearchRetryCount(null);
   }, []);
 
   const connect = useCallback(() => {
@@ -114,6 +130,7 @@ export function useEngine() {
         switch (data.type) {
           case 'ready':
             stateRef.current.isWaitingForNewGameReady = false;
+            setWaitingForSessionReady(false);
             if (stateRef.current.status !== 'thinking' && stateRef.current.status !== 'analyzing' && stateRef.current.status !== 'result_ready') {
               setStatus('idle');
             }
@@ -182,14 +199,16 @@ export function useEngine() {
                   purpose,
                   terminal: data.terminal,
                 });
-                activeRequestIdRef.current = null;
-                activeRootFenRef.current = null;
-                activePurposeRef.current = null;
-                activeLimitRef.current = null;
-                setSearchStartedRequestId(null);
+                clearActiveRequestIdentity();
                 setStatus('idle');
               } else {
-                setStatus('result_ready');
+                const nextStatus = statusAfterBestMove(result);
+                if (nextStatus === 'idle') {
+                  // Review, hint, and Analysis searches are informational. Their
+                  // bestmove finalizes the snapshot but never awaits board application.
+                  clearActiveRequestIdentity();
+                }
+                setStatus(nextStatus);
               }
             }
             break;
@@ -203,6 +222,7 @@ export function useEngine() {
               setSearchStartedRequestId(null);
               setSearchStartedPositionKey(null);
               setClockStopSignal(value => value + 1);
+              setSearchRetryCount(typeof data.retryCount === 'number' ? data.retryCount : 1);
               setStatus('thinking');
             }
             break;
@@ -214,17 +234,20 @@ export function useEngine() {
             break;
           case 'session_expired':
             invalidateActiveRequest();
+            setWaitingForSessionReady(false);
             setStatus('session_expired');
             addToast('Session expired due to inactivity', 'warning');
             break;
           case 'released':
             invalidateActiveRequest();
+            setWaitingForSessionReady(false);
             setStatus('disconnected');
             break;
           case 'error':
             if (data.requestId === undefined ||
                 shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, data.requestId)) {
               invalidateActiveRequest();
+              setWaitingForSessionReady(false);
               setClockStopSignal(value => value + 1);
               setStatus('error');
               addToast(data.message || 'Engine error occurred', 'error');
@@ -238,12 +261,13 @@ export function useEngine() {
 
     socket.onclose = () => {
       invalidateActiveRequest();
+      setWaitingForSessionReady(false);
       setStatus((stateRef.current.status === 'session_expired' ? 'session_expired' : 'disconnected'));
       ws.current = null;
     };
 
     ws.current = socket;
-  }, [addToast, invalidateActiveRequest, setStatus]);
+  }, [addToast, clearActiveRequestIdentity, invalidateActiveRequest, setStatus]);
 
   useEffect(() => {
     connect();
@@ -268,7 +292,7 @@ export function useEngine() {
       setStatus('thinking');
       const requestId = allocateRequestId();
       const resolvedLimit = options.searchLimit ?? (options.depth !== undefined ? { mode: 'depth' as const, depth: options.depth } : undefined);
-      activateRequest(requestId, fen, 'opponent', resolvedLimit);
+      activateRequest(requestId, fen, 'opponent', resolvedLimit, options.mode);
 
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[engine-search-request]', {
@@ -310,6 +334,7 @@ export function useEngine() {
     invalidateActiveRequest();
     if (ws.current?.readyState === WebSocket.OPEN) {
       stateRef.current.isWaitingForNewGameReady = true;
+      setWaitingForSessionReady(true);
       setStatus('idle');
       setEngineInfo(null);
       ws.current.send(JSON.stringify({ type: 'newgame' }));
@@ -367,13 +392,13 @@ export function useEngine() {
     purpose: Exclude<SearchPurpose, 'opponent'> = 'analysis',
     searchLimit?: SearchLimit,
     policySource?: string,
-    mode?: string,
+    mode?: GameMode,
   ): EngineRequestId | null => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       const requestId = allocateRequestId();
       setStatus('analyzing');
       const resolvedLimit = searchLimit ?? (depth !== undefined ? { mode: 'depth' as const, depth } : undefined);
-      activateRequest(requestId, fen, purpose, resolvedLimit);
+      activateRequest(requestId, fen, purpose, resolvedLimit, mode);
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[engine-search-request]', {
           requestId,
@@ -393,18 +418,32 @@ export function useEngine() {
     return null;
   }, [activateRequest, allocateRequestId, setStatus]);
 
-  const acknowledgeBestMove = useCallback((params: {
-    requestId: number;
-    positionKey: string;
+  const acknowledgeAppliedEngineMove = useCallback((params: {
+    receipt: OpponentMoveApplicationReceipt;
     applied: boolean;
     oldFen: string;
     newFen?: string;
     failureReason?: string;
   }) => {
-    if (!shouldAcceptSearchResponse({ activeRequestId: activeRequestIdRef.current }, params.requestId)) return false;
-    if (activePositionKeyRef.current !== params.positionKey) return false;
-    if (ws.current?.readyState !== WebSocket.OPEN) return false;
-    ws.current.send(JSON.stringify({ type: 'resultAck', ...params }));
+    const { receipt, ...acknowledgment } = params;
+    const activeIdentity = {
+      ownerMode: activeModeRef.current,
+      purpose: activePurposeRef.current,
+      requestId: activeRequestIdRef.current,
+      positionKey: activePositionKeyRef.current,
+      sessionId: activeSessionIdRef.current,
+      sessionGeneration: activeSessionGenerationRef.current,
+      positionFen: activePositionFenRef.current,
+    };
+    const identityMatches = matchesActiveOpponentResult(activeIdentity, receipt);
+    const socket = ws.current;
+    if (!identityMatches || socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({
+      type: 'resultAck',
+      requestId: receipt.requestId,
+      positionKey: receipt.positionKey,
+      ...acknowledgment,
+    }));
     return true;
   }, []);
 
@@ -414,6 +453,8 @@ export function useEngine() {
     bestMoveResult,
     terminalCompletion,
     queuePosition,
+    searchRetryCount,
+    waitingForSessionReady,
     searchStartedRequestId,
     searchStartedPositionKey,
     clockStopSignal,
@@ -425,7 +466,7 @@ export function useEngine() {
     stopEngine,
     startAnalysis,
     releaseSession,
-    acknowledgeBestMove,
+    acknowledgeAppliedEngineMove,
     invalidateActiveRequest,
   };
 }

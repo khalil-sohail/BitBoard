@@ -72,11 +72,11 @@ function testProtocolCriticalLifetimeIsPreserved(): void {
     'searchStartedRequestId',
     'searchStartedPositionKey',
     'shouldAcceptEngineBestMove',
-    'positionKey',
+    'createOpponentMoveApplicationReceipt',
     'fen-mismatch',
     'side-to-move-mismatch',
     'duplicate-request',
-    'acknowledgeBestMove',
+    'acknowledgeAppliedEngineMove',
     'clockTransitionAfterLegalMove',
     "dispatchTraining({ type: 'REVIEW_COMPLETED'",
     "dispatchTraining({ type: 'RESET_REQUESTED', reason: 'mode-switch'",
@@ -85,7 +85,7 @@ function testProtocolCriticalLifetimeIsPreserved(): void {
 
 function testPresentationEquivalence(): void {
   for (const component of [
-    'ChessBoardComponent', 'EvalBar', 'ClockDisplay', 'AnalysisSearchControls',
+    'ChessBoardComponent', 'EvalBar', 'FairPlaySidebar', 'AnalysisSearchControls',
     'TrainingHintPanel', 'EnginePanel', 'MoveHistory', 'EvalGraph', 'GameControls', 'SessionSetupHost',
   ]) assert.match(view, new RegExp(`<${component}`));
   assert.match(view, /arrows=\{engine\.showPanel \? board\.arrows : \[\]\}/);

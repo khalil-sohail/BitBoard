@@ -30,6 +30,7 @@ import { resolveSearchPolicy } from "@/lib/search-policy";
 import type { PendingPromotion, PromotionPiece } from "@/lib/promotion";
 import type { AnalysisSnapshot } from "@/lib/board-arrows";
 import type { SearchPurpose } from "@/lib/engine-difficulty";
+import { createOpponentMoveApplicationReceipt } from "@/lib/engine-result-ownership";
 import { analysisDisplayReducer } from './analysis-display-state';
 import { currentGameResult, type SessionLifecycleStatus } from './session-lifecycle';
 
@@ -44,7 +45,7 @@ interface PendingMoveReview {
   bestEvaluation: NormalizedEvaluation | null;
   isBook: boolean;
   hintLevelUsed: 0 | 1 | 2 | 3;
-  resultRequestStarted: boolean;
+  resultRequestId: number | null;
 }
 
 // Default time control: 3+0
@@ -53,7 +54,7 @@ const DEFAULT_TC = TIME_CONTROLS[2];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function useSessionControllerValue() {
-  const { status, engineInfo, bestMoveResult, terminalCompletion, queuePosition, searchStartedRequestId, searchStartedPositionKey, clockStopSignal, sendMove, newGame, startAnalysis, stopEngine, releaseSession, acknowledgeBestMove, setEngineOption } = useEngine();
+  const { status, engineInfo, bestMoveResult, terminalCompletion, queuePosition, searchRetryCount, waitingForSessionReady, searchStartedRequestId, searchStartedPositionKey, clockStopSignal, sendMove, newGame, startAnalysis, stopEngine, releaseSession, acknowledgeAppliedEngineMove, setEngineOption } = useEngine();
   const { game, fen, moveHistory, uciHistory, makeMove, resetGame, undoMove, loadFen, exportPgn, loadPgn, turn, isGameOver } = useChessGame();
   const { grades, evalGraphData, recordPositionEval, setMoveGrade, resetGrades } = useMoveReview();
 
@@ -72,6 +73,7 @@ export function useSessionControllerValue() {
   const [isWaitingForStop, setIsWaitingForStop] = useState(false);
   const [promotionResetKey, setPromotionResetKey] = useState(0);
   const [timeoutColor, setTimeoutColor] = useState<PlayerColor | null>(null);
+  const [fairPlaySessionFailure, setFairPlaySessionFailure] = useState<string | null>(null);
   const [analysisDisplay, dispatchAnalysisDisplay] = useReducer(analysisDisplayReducer, { live: null, finalized: null });
   const [trainingState, dispatchTraining] = useReducer(trainingReducer, initialTrainingState);
   const setupTriggerRef = useRef<HTMLElement | null>(null);
@@ -176,12 +178,13 @@ export function useSessionControllerValue() {
 
   const startResolvedAnalysis = useCallback((
     rootFen: string,
-    moves: string[],
     purpose: Exclude<SearchPurpose, 'opponent'>,
     requestedMultiPv = multiPv,
   ) => {
     const policy = resolvePolicy(purpose, { multiPv: requestedMultiPv });
-    return startAnalysis(rootFen, moves, undefined, policy.multiPv, purpose, policy.limit, policy.source, gameMode);
+    // `rootFen` is always the authoritative current position. Replaying the
+    // session history on top of it describes a different position.
+    return startAnalysis(rootFen, [], undefined, policy.multiPv, purpose, policy.limit, policy.source, gameMode);
   }, [gameMode, multiPv, resolvePolicy, startAnalysis]);
 
   useEffect(() => {
@@ -325,10 +328,10 @@ export function useSessionControllerValue() {
 
     // Immediately send the current position to the engine
     const timer = setTimeout(() => {
-      startResolvedAnalysis(fen, uciHistory, 'analysis');
+      startResolvedAnalysis(fen, 'analysis');
     }, 100);
     return () => clearTimeout(timer);
-  }, [fen, uciHistory, gameMode, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
+  }, [fen, gameMode, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv]);
 
   // ── Training Mode Continuous Eval ─────────────────────────────────────────
   useEffect(() => {
@@ -337,11 +340,11 @@ export function useSessionControllerValue() {
     if (trainingState.status !== 'waiting-player') return;
     if (turn !== engineColor) {
       const timer = setTimeout(() => {
-        startResolvedAnalysis(fen, uciHistory, 'training-root-review');
+        startResolvedAnalysis(fen, 'training-root-review');
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [fen, uciHistory, gameMode, turn, engineColor, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv, trainingState.status]);
+  }, [fen, gameMode, turn, engineColor, startResolvedAnalysis, effectiveGameOver, gameStatus, maxDepth, multiPv, trainingState.status]);
 
   // ── Apply engine best move + clock management ────────────────────────────
   const normalizedInfo = useMemo(() => normalizeEngineInfo(engineInfo), [engineInfo]);
@@ -393,7 +396,7 @@ export function useSessionControllerValue() {
     trainingState,
     engineInfo: normalizedInfo,
     dispatchTraining,
-    startHintAnalysis: (rootFen, moves = []) => startResolvedAnalysis(rootFen, moves, 'training-hint', 1),
+    startHintAnalysis: (rootFen) => startResolvedAnalysis(rootFen, 'training-hint', 1),
   });
 
   const boardArrows = useMemo(() => toChessboardArrows(composeBoardArrows({
@@ -426,22 +429,31 @@ export function useSessionControllerValue() {
     if (gameMode !== 'training' || gameStatus !== 'active') return;
     if (trainingState.status !== 'reviewing-player-move') return;
     if (status !== 'idle' || fen !== pendingReview.resultFen) return;
-    if (pendingReview.resultRequestStarted) return;
+    if (pendingReview.resultRequestId !== null) return;
 
-    pendingReview.resultRequestStarted = true;
-    startResolvedAnalysis(fen, uciHistory, 'training-result-review');
-  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startResolvedAnalysis, status, trainingState.status, uciHistory]);
+    pendingReview.resultRequestId = startResolvedAnalysis(fen, 'training-result-review');
+  }, [fen, gameMode, gameStatus, maxDepth, multiPv, startResolvedAnalysis, status, trainingState.status]);
 
   useEffect(() => {
     const pendingReview = pendingMoveReviewRef.current;
-    if (!pendingReview?.resultRequestStarted) return;
+    if (pendingReview?.resultRequestId === null || pendingReview?.resultRequestId === undefined) return;
     if (status !== 'idle') return;
-    if (normalizedInfo?.rootFen !== pendingReview.resultFen) return;
+    if (bestMoveResult?.purpose !== 'training-result-review') return;
+    if (bestMoveResult.requestId !== pendingReview.resultRequestId) return;
+    if (bestMoveResult.rootFen !== pendingReview.resultFen) return;
 
-    const rawResultEvaluation = normalizedInfo.pvs?.[0]?.evaluation ?? null;
+    const reviewInfo = normalizedInfo?.requestId === bestMoveResult.requestId &&
+      normalizedInfo.rootFen === pendingReview.resultFen
+      ? normalizedInfo
+      : latestEngineInfoRef.current?.requestId === bestMoveResult.requestId &&
+          latestEngineInfoRef.current.rootFen === pendingReview.resultFen
+        ? latestEngineInfoRef.current
+        : null;
+
+    const rawResultEvaluation = reviewInfo?.pvs?.[0]?.evaluation ?? null;
     const resultLooksSyntheticBook =
       pendingReview.moveIndex < 10 &&
-      normalizedInfo.depth === 1 &&
+      reviewInfo?.depth === 1 &&
       rawResultEvaluation?.kind === 'centipawn' &&
       rawResultEvaluation.value === 0;
     const resultEvaluation = resultLooksSyntheticBook ? null : rawResultEvaluation;
@@ -458,13 +470,14 @@ export function useSessionControllerValue() {
     recordPositionEval(resultEvaluation, pendingReview.moveIndex + 1);
     dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: resultEvaluation !== null });
     pendingMoveReviewRef.current = null;
-  }, [normalizedInfo, recordPositionEval, setMoveGrade, status]);
+  }, [bestMoveResult, normalizedInfo, recordPositionEval, setMoveGrade, status]);
 
   useEffect(() => {
     const pendingReview = pendingMoveReviewRef.current;
-    if (!pendingReview?.resultRequestStarted) return;
+    if (pendingReview?.resultRequestId === null || pendingReview?.resultRequestId === undefined) return;
     if (terminalCompletion?.rootFen !== pendingReview.resultFen) return;
     if (terminalCompletion.purpose !== 'training-result-review') return;
+    if (terminalCompletion.requestId !== pendingReview.resultRequestId) return;
 
     recordPositionEval(null, pendingReview.moveIndex + 1);
     dispatchTraining({ type: 'REVIEW_COMPLETED', reviewId: pendingReview.reviewId, available: false });
@@ -488,6 +501,8 @@ export function useSessionControllerValue() {
   useEffect(() => {
     if (!engineAutoEnabled) return;
     const moveResult = bestMoveResult;
+    if (moveResult?.purpose !== 'opponent') return;
+    const applicationReceipt = createOpponentMoveApplicationReceipt(moveResult, gameMode);
     const backendTimed = moveResult?.receivedAt !== undefined && moveResult.engineDeadlineAt !== undefined;
     const backendTimely = !backendTimed || moveResult.receivedAt! <= moveResult.engineDeadlineAt!;
     const timeoutOnlyCompletion = gameStatus === 'completed' && timeoutColor !== null;
@@ -500,7 +515,7 @@ export function useSessionControllerValue() {
       const rejectionReason =
         appliedBestMoveRequestRef.current === moveResult.requestId ? 'duplicate-request' :
         !backendTimely ? 'flag-fell-before-backend-result' :
-        !moveResult.positionKey ? 'missing-position-identity' :
+        !applicationReceipt ? 'missing-application-identity' :
         moveResult.positionFen !== normalizedCurrentFen ? 'fen-mismatch' :
         moveResult.expectedSide !== turn ? 'side-to-move-mismatch' :
         null;
@@ -522,12 +537,18 @@ export function useSessionControllerValue() {
 
       if (rejectionReason !== null) {
         clock.stopClock();
-        if (moveResult.positionKey) {
-          acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey, applied: false, oldFen: fen, failureReason: rejectionReason });
+        if (applicationReceipt) {
+          acknowledgeAppliedEngineMove({
+            receipt: applicationReceipt,
+            applied: false,
+            oldFen: fen,
+            failureReason: rejectionReason,
+          });
         }
         setGameStatus('completed');
         return;
       }
+      if (!applicationReceipt) return;
       appliedBestMoveRequestRef.current = moveResult.requestId;
       const acceptedMove = moveResult.move;
 
@@ -537,7 +558,9 @@ export function useSessionControllerValue() {
 
       if (ignoreStaleBestMoveRef.current) {
         ignoreStaleBestMoveRef.current = false;
-        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'cancelled_request' });
+        acknowledgeAppliedEngineMove({
+          receipt: applicationReceipt, applied: false, oldFen: fen, failureReason: 'cancelled_request',
+        });
         return;
       }
       if (isWaitingForStop) {
@@ -548,7 +571,9 @@ export function useSessionControllerValue() {
         queueMicrotask(() => {
           setIsWaitingForStop(false);
         });
-        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'search_stopped' });
+        acknowledgeAppliedEngineMove({
+          receipt: applicationReceipt, applied: false, oldFen: fen, failureReason: 'search_stopped',
+        });
         return;
       }
 
@@ -564,14 +589,18 @@ export function useSessionControllerValue() {
         terminalAfterMove = preview.isGameOver();
         expectedNewFen = preview.fen();
       } catch {
-        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'illegal_move_for_position' });
+        acknowledgeAppliedEngineMove({
+          receipt: applicationReceipt, applied: false, oldFen: fen, failureReason: 'illegal_move_for_position',
+        });
         queueMicrotask(() => setGameStatus('completed'));
         return;
       }
       const success = makeMove({ from, to, promotion });
 
       if (success && expectedNewFen) {
-          acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: true, oldFen: fen, newFen: expectedNewFen });
+          acknowledgeAppliedEngineMove({
+            receipt: applicationReceipt, applied: true, oldFen: fen, newFen: expectedNewFen,
+          });
           queueMicrotask(() => {
             setTimeoutColor(null);
             if (timeoutOnlyCompletion) {
@@ -604,7 +633,9 @@ export function useSessionControllerValue() {
             }
           });
       } else {
-        acknowledgeBestMove({ requestId: moveResult.requestId, positionKey: moveResult.positionKey!, applied: false, oldFen: fen, failureReason: 'move_application_failed' });
+        acknowledgeAppliedEngineMove({
+          receipt: applicationReceipt, applied: false, oldFen: fen, failureReason: 'move_application_failed',
+        });
         queueMicrotask(() => setGameStatus('completed'));
       }
     }
@@ -615,8 +646,13 @@ export function useSessionControllerValue() {
   useEffect(() => {
     if (!engineAutoEnabled || turn !== engineColor || status !== 'error') return;
     clock.stopClock();
-    queueMicrotask(() => setGameStatus('completed'));
-  }, [clock, engineAutoEnabled, engineColor, status, turn]);
+    queueMicrotask(() => {
+      if (gameMode === 'fair') {
+        setFairPlaySessionFailure('Game ended because the engine session became unavailable');
+      }
+      setGameStatus('completed');
+    });
+  }, [clock, engineAutoEnabled, engineColor, gameMode, status, turn]);
 
   // ── Global Game Over Watcher (Teardown) ──────────────────────────────────
   useEffect(() => {
@@ -683,7 +719,7 @@ export function useSessionControllerValue() {
           bestEvaluation: rootEvaluation,
           isBook: isLikelyBook,
           hintLevelUsed,
-          resultRequestStarted: false,
+          resultRequestId: null,
         };
         dispatchTraining({ type: 'REVIEW_STARTED', reviewId });
         if (terminalAfterMove) {
@@ -745,7 +781,7 @@ export function useSessionControllerValue() {
       resetGrades();
       pendingMoveReviewRef.current = null;
       if (gameMode === 'analysis') {
-        startResolvedAnalysis(fenStr, [], 'analysis');
+        startResolvedAnalysis(fenStr, 'analysis');
       }
     }
   };
@@ -778,6 +814,7 @@ export function useSessionControllerValue() {
     setTimeControl(config.timeControl);
     setResignedBy(null);
     setTimeoutColor(null);
+    setFairPlaySessionFailure(null);
     setGameStatus('active');
     if (gameMode === 'training') {
       dispatchTraining({ type: 'RESET_REQUESTED', reason: 'new-game', playerColor: resolvedColor });
@@ -823,6 +860,7 @@ export function useSessionControllerValue() {
     resetGrades();
     setGameMode(newMode);
     setGameStatus('idle');
+    setFairPlaySessionFailure(null);
     clock.stopClock();
     if (gameMode === 'analysis' && newMode !== 'analysis') {
       analysisFenRef.current = null;
@@ -857,6 +895,7 @@ export function useSessionControllerValue() {
     if (resignedBy !== null) {
       return `${resignedBy === 'w' ? 'Black' : 'White'} wins by Resignation`;
     }
+    if (fairPlaySessionFailure !== null) return fairPlaySessionFailure;
     if (game.isCheckmate())             return turn === 'w' ? 'Black Wins by Checkmate' : 'White Wins by Checkmate';
     if (game.isStalemate())             return 'Draw by Stalemate';
     if (game.isThreefoldRepetition())   return 'Draw by Repetition';
@@ -884,7 +923,7 @@ export function useSessionControllerValue() {
     resetGrades();
     pendingMoveReviewRef.current = null;
     if (gameMode === 'analysis') {
-      startResolvedAnalysis(finalFen, [], 'analysis');
+      startResolvedAnalysis(finalFen, 'analysis');
     }
   }, [gameMode, resetGrades, startResolvedAnalysis]);
 
@@ -987,6 +1026,8 @@ export function useSessionControllerValue() {
       connectionStatus: status,
       queuePosition,
       currentTurn: turn,
+      searchRetryCount,
+      waitingForSessionReady,
     },
     training: {
       state: trainingState,

@@ -46,7 +46,7 @@ assert.doesNotMatch(advanced, /expanded &&/);
 
 assert.match(view, /<SessionSetupHost/);
 assert.match(view, /onClick=\{setup\.open\}/);
-assert.match(view, /sidebar=\{lifecycle\.status === 'idle' \? null/);
+assert.match(view, /mode\.value === 'fair' \? \([\s\S]*\) : lifecycle\.status === 'idle' \? null/);
 assert.doesNotMatch(view, /NewGameModal|PositionSetup|EngineToggle/);
 assert.match(view, /<AnalysisSearchControls/);
 assert.match(controller, /setIsSetupOpen\(false\);\n    stopEngine\(\)/);

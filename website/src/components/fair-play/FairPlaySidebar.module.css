@@ -1,0 +1,368 @@
+.sidebar,
+.idleSidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.idleSidebar {
+  padding: 1.5rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 0.875rem;
+  background: hsl(var(--surface));
+}
+
+.idleSidebar h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.idleSidebar > p:not(.eyebrow) {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: hsl(var(--muted));
+}
+
+.sessionHeader,
+.completedSummary,
+.clockPanel,
+.historyPanel,
+.operationalStatus,
+.actionFooter {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 0.75rem;
+  background: hsl(var(--surface));
+}
+
+.sessionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.125rem;
+}
+
+.sessionHeader h2,
+.completedSummary h2 {
+  margin-top: 0.2rem;
+  font-size: 1.25rem;
+  font-weight: 750;
+  color: hsl(var(--foreground));
+}
+
+.eyebrow {
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+}
+
+.turnBadge {
+  flex: none;
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: hsl(var(--muted));
+}
+
+.clockPanel,
+.historyPanel {
+  padding: 1rem;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.sectionHeading h3 {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: hsl(var(--foreground));
+}
+
+.sectionHeading span {
+  font-size: 0.6875rem;
+  color: hsl(var(--muted));
+}
+
+.clockGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.clock {
+  min-width: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 0.65rem;
+  background: hsl(var(--background));
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.clockActive {
+  border-color: hsl(var(--primary) / 0.65);
+  background: hsl(var(--primary) / 0.12);
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.12);
+}
+
+.clockLow.clockActive {
+  border-color: rgb(251 146 60 / 0.75);
+  background: rgb(249 115 22 / 0.12);
+}
+
+.clockLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: hsl(var(--muted));
+}
+
+.clockTime {
+  display: block;
+  margin-block: 0.45rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: hsl(var(--foreground));
+}
+
+.clockState {
+  font-size: 0.625rem;
+  color: hsl(var(--muted));
+}
+
+.historyPanel {
+  display: flex;
+  min-height: 13rem;
+  flex-direction: column;
+}
+
+.historyScroll {
+  min-height: 8rem;
+  max-height: clamp(10rem, 34dvh, 24rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.emptyHistory {
+  display: grid;
+  min-height: 8rem;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: hsl(var(--muted));
+}
+
+.moveTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
+.moveTable tr {
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.moveTable th,
+.moveTable td {
+  padding: 0.55rem 0.45rem;
+  text-align: left;
+}
+
+.moveTable th {
+  width: 2.5rem;
+  text-align: right;
+  font-weight: 500;
+  color: hsl(var(--muted));
+}
+
+.moveTable td {
+  overflow: hidden;
+  color: hsl(var(--foreground));
+}
+
+.moveTable td span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.latestMove {
+  padding: 0.18rem 0.38rem;
+  border-left: 2px solid hsl(var(--primary));
+  border-radius: 0.25rem;
+  background: hsl(var(--primary) / 0.12);
+  font-weight: 800;
+}
+
+.operationalStatus {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.8rem 0.9rem;
+  background: hsl(var(--surface) / 0.72);
+}
+
+.statusDot {
+  width: 0.55rem;
+  height: 0.55rem;
+  flex: none;
+  margin-top: 0.28rem;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+}
+
+.operationalStatus[data-tone="waiting"] .statusDot {
+  background: rgb(251 191 36);
+}
+
+.operationalStatus h3 {
+  font-size: 0.75rem;
+  font-weight: 750;
+  color: hsl(var(--foreground));
+}
+
+.operationalStatus p {
+  margin-top: 0.2rem;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: hsl(var(--muted));
+}
+
+.operationalError {
+  border-color: rgb(248 113 113 / 0.38);
+  background: rgb(127 29 29 / 0.14);
+}
+
+.operationalError .statusDot {
+  background: rgb(248 113 113);
+}
+
+.completedSummary {
+  padding: 1.15rem;
+  background: linear-gradient(145deg, hsl(var(--primary) / 0.11), hsl(var(--surface)) 62%);
+}
+
+.termination {
+  margin-top: 0.3rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--muted));
+}
+
+.completedSummary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.completedSummary dl div {
+  padding: 0.65rem;
+  border-radius: 0.5rem;
+  background: rgb(0 0 0 / 0.18);
+}
+
+.completedSummary dt {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: hsl(var(--muted));
+}
+
+.completedSummary dd {
+  margin-top: 0.2rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.actionFooter {
+  padding: 0.75rem;
+}
+
+.actions,
+.resignConfirmation > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.primaryAction,
+.secondaryAction,
+.dangerAction {
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  border-radius: 0.55rem;
+  font-size: 0.8125rem;
+  font-weight: 750;
+}
+
+.primaryAction {
+  width: 100%;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.secondaryAction {
+  border: 1px solid rgb(255 255 255 / 0.11);
+  background: rgb(255 255 255 / 0.035);
+  color: hsl(var(--foreground));
+}
+
+.dangerAction {
+  border: 1px solid rgb(248 113 113 / 0.35);
+  background: rgb(127 29 29 / 0.12);
+  color: rgb(248 113 113);
+}
+
+.resignConfirmation p {
+  margin-bottom: 0.65rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+@media (max-width: 74.999rem) {
+  .historyScroll {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .historyPanel {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 28rem) {
+  .sessionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .clockTime {
+    font-size: 1.65rem;
+  }
+}

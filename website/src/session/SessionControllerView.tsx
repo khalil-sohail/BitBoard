@@ -7,9 +7,9 @@ import { EnginePanel } from '@/components/panels/EnginePanel';
 import { MoveHistory } from '@/components/panels/MoveHistory';
 import { AnalysisSearchControls } from '@/components/panels/AnalysisSearchControls';
 import { EvalGraph } from '@/components/panels/EvalGraph';
-import { ClockDisplay } from '@/components/panels/ClockDisplay';
 import { TrainingHintPanel } from '@/components/panels/TrainingHintPanel';
 import { GameControls } from '@/components/controls/GameControls';
+import { FairPlaySidebar } from '@/components/fair-play/FairPlaySidebar';
 import { SessionSetupHost } from '@/components/setup/SessionSetupHost';
 import { useSessionController } from './useSessionController';
 
@@ -71,7 +71,7 @@ export function SessionControllerView() {
               </div>
             )}
 
-            {lifecycle.isComplete && !mode.isAnalysis && (
+            {lifecycle.isComplete && mode.isTraining && (
               <div className="absolute inset-0 bg-background/70 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-md">
                 <h2 className="text-3xl font-bold text-foreground mb-2">Game Over</h2>
                 <p className="text-lg text-muted-foreground mb-6 font-medium">{lifecycle.gameOverMessage}</p>
@@ -85,21 +85,30 @@ export function SessionControllerView() {
             )}
           </>
         )}
-        sidebar={lifecycle.status === 'idle' ? null : (
+        sidebar={mode.value === 'fair' ? (
+          <FairPlaySidebar
+            lifecycle={lifecycle.status}
+            gameOverMessage={lifecycle.gameOverMessage}
+            connectionStatus={session.fairPlay.connectionStatus}
+            queuePosition={session.fairPlay.queuePosition}
+            searchRetryCount={session.fairPlay.searchRetryCount}
+            waitingForSessionReady={session.fairPlay.waitingForSessionReady}
+            currentTurn={session.fairPlay.currentTurn}
+            playerColor={board.orientation}
+            whiteMs={clocks.value.whiteMs}
+            blackMs={clocks.value.blackMs}
+            activeClock={clocks.value.activeSide}
+            clockRunning={clocks.value.isRunning}
+            timeControlDisabled={clocks.timeControl.initialMs === 0}
+            moves={history.moves}
+            canResign={actions.canResign}
+            onSetup={setup.open}
+            onNewGame={actions.newGame}
+            onFlipBoard={actions.flipBoard}
+            onResign={actions.resign}
+          />
+        ) : lifecycle.status === 'idle' ? null : (
           <>
-            {clocks.show && (
-              <ClockDisplay
-                whiteMs={clocks.value.whiteMs}
-                blackMs={clocks.value.blackMs}
-                activeSide={clocks.value.activeSide}
-                playerColor={board.orientation}
-                isRunning={clocks.value.isRunning}
-                isGameActive={lifecycle.isActive}
-                fen={board.fen}
-                disabled={false}
-              />
-            )}
-
             {mode.isAnalysis && (
               <AnalysisSearchControls
                 depth={setup.maxDepth}

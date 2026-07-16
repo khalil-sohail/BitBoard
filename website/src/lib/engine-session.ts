@@ -589,7 +589,9 @@ export class EnginePoolManager {
       session.activeSearch = null;
       session.pendingBookResult = null;
 
-      if (activeSearch.purpose === 'opponent') {
+      // A terminal `bestmove 0000` has no board move to apply and therefore
+      // must never enter the application-acknowledgment state.
+      if (activeSearch.purpose === 'opponent' && move !== null) {
         const timer = setTimeout(() => {
           const current = this.active.get(id);
           if (current !== session || current.awaitingMoveApplication?.requestId !== activeSearch.requestId) return;
